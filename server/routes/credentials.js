@@ -21,7 +21,7 @@ router.get('/project/:projectId', auth, async (req, res) => {
 router.post('/clusters', auth, managerOnly, async (req, res) => {
   const { project_id, name, visibility } = req.body;
   const { rows } = await db.query(
-    'INSERT INTO credential_clusters(project_id,name,visibility) VALUES($1,$2,$3) RETURNING *',
+   'INSERT INTO credential_entries(cluster_id,label,value) VALUES($1,$2,$3) RETURNING *',
     [project_id, name, visibility||'private']);
   res.status(201).json(rows[0]);
 });
@@ -42,7 +42,7 @@ router.delete('/clusters/:id', auth, managerOnly, async (req, res) => {
 router.post('/entries', auth, managerOnly, async (req, res) => {
   const { cluster_id, label, value } = req.body;
   const { rows } = await db.query(
-    'INSERT INTO credentials(cluster_id,label,value) VALUES($1,$2,$3) RETURNING *',
+    'INSERT INTO credential_entries(cluster_id,label,value) VALUES($1,$2,$3) RETURNING *',
     [cluster_id, label, value]);
   res.status(201).json(rows[0]);
 });
