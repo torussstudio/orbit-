@@ -7,7 +7,7 @@ router.get('/', auth, async (req, res) => {
   if (req.user.role === 'manager') {
     q = `SELECT p.*, m.name as created_by_name FROM projects p
          LEFT JOIN members m ON p.created_by=m.id
-         WHERE p.status != 'archived' ORDER BY p.created_at DESC`;
+         ORDER BY p.created_at DESC`;
     params = [];
   } else {
     q = `SELECT p.*, m.name as created_by_name FROM projects p
