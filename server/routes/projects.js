@@ -86,4 +86,9 @@ router.patch('/:id/archive', auth, managerOnly, async (req, res) => {
   res.json({ success: true });
 });
 
+router.patch('/:id/unarchive', auth, managerOnly, async (req, res) => {
+  await db.query("UPDATE projects SET status='active' WHERE id=$1", [req.params.id]);
+  res.json({ success: true });
+});
+
 module.exports = router;
