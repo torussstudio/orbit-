@@ -10,6 +10,7 @@ const clusterRoutes = require('./routes/clusters');
 const credentialRoutes = require('./routes/credentials');
 const knowledgeRoutes = require('./routes/knowledge');
 const dashboardRoutes = require('./routes/dashboard');
+const calendarRoutes = require('./routes/calendar');
 
 const app = express();
 
@@ -25,6 +26,7 @@ app.use('/api/clusters', clusterRoutes);
 app.use('/api/credentials', credentialRoutes);
 app.use('/api/knowledge', knowledgeRoutes);
 app.use('/api/dashboard', dashboardRoutes);
+app.use('/api/calendar', calendarRoutes);
 
 app.get('/health', (req, res) => res.json({ status: 'ok', app: 'Orbit' }));
 
