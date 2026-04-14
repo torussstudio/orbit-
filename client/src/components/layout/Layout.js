@@ -29,15 +29,15 @@ export default function Layout() {
               <Icon d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
               Projects
             </NavLink>
+            <NavLink to="/calendar">
+                <Icon d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                Calendar
+             </NavLink>
             {isManager && (
               <NavLink to="/members">
                 <Icon d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75" />
                 Members
               </NavLink>
-             <NavLink to="/calendar">
-                <Icon d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                Calendar
-             </NavLink>
             )}
           </nav>
         </div>
