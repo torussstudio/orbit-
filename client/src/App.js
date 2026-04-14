@@ -12,6 +12,7 @@ import ClusterDetail from './pages/ClusterDetail';
 import Credentials from './pages/Credentials';
 import Knowledge from './pages/Knowledge';
 import Members from './pages/Members';
+import Calendar from './pages/Calendar';
 
 function PrivateRoute({ children }) {
   const { user, loading } = useAuth();
@@ -36,6 +37,7 @@ export default function App() {
             <Route path="projects/:id/credentials" element={<Credentials />} />
             <Route path="projects/:id/knowledge" element={<Knowledge />} />
             <Route path="members" element={<Members />} />
+            <Route path="/calendar" element={<Calendar />} />
           </Route>
         </Routes>
       </BrowserRouter>
