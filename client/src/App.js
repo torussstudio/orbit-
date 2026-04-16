@@ -37,7 +37,7 @@ export default function App() {
             <Route path="projects/:id/credentials" element={<Credentials />} />
             <Route path="projects/:id/knowledge" element={<Knowledge />} />
             <Route path="members" element={<Members />} />
-            <Route path="/calendar" element={<Calendar />} />
+            <Route path="calendar" element={<Calendar />} />
           </Route>
         </Routes>
       </BrowserRouter>
