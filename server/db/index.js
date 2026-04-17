@@ -10,6 +10,7 @@ const initDB = async () => {
       email VARCHAR(255) UNIQUE NOT NULL,
       password_hash VARCHAR(255) NOT NULL,
       role VARCHAR(20) NOT NULL CHECK (role IN ('manager', 'developer')),
+      birthday DATE,
       skills TEXT[],
       active BOOLEAN DEFAULT true,
       created_at TIMESTAMPTZ DEFAULT NOW()
@@ -37,7 +38,7 @@ const initDB = async () => {
     CREATE TABLE IF NOT EXISTS tasks (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       project_id UUID REFERENCES projects(id) ON DELETE CASCADE,
-      cluster_id UUID,
+      cluster_id UUID REFERENCES clusters(id) ON DELETE CASCADE,
       title VARCHAR(500) NOT NULL,
       description TEXT,
       assignee_id UUID REFERENCES members(id),
@@ -133,6 +134,26 @@ const initDB = async () => {
       created_by UUID REFERENCES members(id),
       created_at TIMESTAMPTZ DEFAULT NOW(),
       updated_at TIMESTAMPTZ DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS calendar_events (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      title VARCHAR(500) NOT NULL,
+      description TEXT,
+      start_date TIMESTAMPTZ NOT NULL,
+      end_date TIMESTAMPTZ NOT NULL,
+      type VARCHAR(50) DEFAULT 'event' CHECK (type IN ('event', 'task', 'deadline', 'birthday')),
+      created_by UUID REFERENCES members(id),
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS calendar_attendees (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      event_id UUID REFERENCES calendar_events(id) ON DELETE CASCADE,
+      member_id UUID REFERENCES members(id) ON DELETE CASCADE,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(event_id, member_id)
     );
   `);
   console.log('Database schema ready');

@@ -5,9 +5,13 @@ const DEFAULT_STAGES = ["Todo","In Progress","In Review","Done","Deployed"];
 
 export default function ProjectForm({ initial, onSave, onCancel }) {
   const [form, setForm] = useState({
-    name: '', client_name: '', description: '', status: 'active',
-    start_date: '', end_date: '', member_ids: [],
-    custom_stages: [...DEFAULT_STAGES], ...initial,
+    name: initial?.name || '',
+    client_name: initial?.client_name || '',
+    description: initial?.description || '',
+    status: initial?.status || 'active',
+    start_date: initial?.start_date || '',
+    end_date: initial?.end_date || '',
+    custom_stages: initial?.custom_stages || [...DEFAULT_STAGES],
     member_ids: initial?.members?.map(m => m.id) || []
   });
   const [members, setMembers] = useState([]);

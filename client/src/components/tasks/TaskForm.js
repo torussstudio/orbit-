@@ -2,9 +2,12 @@ import { useState } from 'react';
 
 export default function TaskForm({ initial, members, clusters, stages, onSave, onCancel }) {
   const [form, setForm] = useState({
-    title: '', description: '', assignee_id: '', priority: 'medium',
-    stage: stages[0] || 'Todo', due_date: '', cluster_id: '', ...initial,
+    title: initial?.title || '',
+    description: initial?.description || '',
     assignee_id: initial?.assignee_id || '',
+    priority: initial?.priority || 'medium',
+    stage: initial?.stage || stages[0] || 'Todo',
+    due_date: initial?.due_date || '',
     cluster_id: initial?.cluster_id || '',
   });
 
