@@ -8,7 +8,7 @@ router.get('/', auth, async (req, res) => {
     const [events, tasks, projects, birthdays] = await Promise.all([
       db.query(`
         SELECT ce.*, m.name as created_by_name,
-          COALESCE(json_agg(json_build_object('id', m2.id, 'name', m2.name, 'email', m2.email))
+          COALESCE(json_agg(json_build_object('id', m2.id, 'name', m2.name))
             FILTER (WHERE m2.id IS NOT NULL), '[]') as attendees
         FROM calendar_events ce
         LEFT JOIN members m ON ce.created_by = m.id
@@ -30,7 +30,7 @@ router.get('/', auth, async (req, res) => {
         WHERE end_date IS NOT NULL AND status != 'archived'
         ORDER BY end_date`),
       db.query(`
-        SELECT id, name, email, birthday
+        SELECT id, name, birthday
         FROM members
         WHERE birthday IS NOT NULL AND active = true`)
     ]);
@@ -104,12 +104,8 @@ router.put('/:id', auth, managerOnly, async (req, res) => {
 
 // DELETE event
 router.delete('/:id', auth, managerOnly, async (req, res) => {
-  try {
-    await db.query('DELETE FROM calendar_events WHERE id=$1', [req.params.id]);
-    res.json({ success: true });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
+  await db.query('DELETE FROM calendar_events WHERE id=$1', [req.params.id]);
+  res.json({ success: true });
 });
 
 module.exports = router;
