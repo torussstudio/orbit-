@@ -77,7 +77,7 @@ router.post("/:id/review", auth, managerOnly, async (req, res) => {
       );
       if (rework_task_ids?.length) {
         await client.query(
-          "UPDATE tasks SET stage='Todo',updated_at=NOW() WHERE id=ANY($1::uuid[])",
+          "UPDATE tasks SET stage='Todo',updated_at=NOW() WHERE id = ANY($1)",
           [rework_task_ids],
         );
       }
