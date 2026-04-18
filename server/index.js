@@ -13,6 +13,7 @@ const credentialRoutes = require('./routes/credentials');
 const knowledgeRoutes = require('./routes/knowledge');
 const dashboardRoutes = require('./routes/dashboard');
 const calendarRoutes = require('./routes/calendar');
+const notificationRoutes = require('./routes/notifications');
 
 const app = express();
 
@@ -55,6 +56,7 @@ app.use('/api/credentials', credentialRoutes);
 app.use('/api/knowledge', knowledgeRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/calendar', calendarRoutes);
+app.use('/api/notifications', notificationRoutes);
 
 
 // =========================

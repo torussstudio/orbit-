@@ -281,6 +281,16 @@ const initDB = async () => {
     "ALTER TABLE calendar_attendees ADD CONSTRAINT calendar_attendees_pkey PRIMARY KEY (event_id, member_id)",
   );
 
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS notifications (
+      id ${idDefinition(defaultIdType)},
+      member_id ${refType(memberIdType)} REFERENCES members(id) ON DELETE CASCADE,
+      message TEXT NOT NULL,
+      read BOOLEAN DEFAULT false,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+
   console.log("Database schema ready");
 };
 

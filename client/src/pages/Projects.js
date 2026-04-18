@@ -37,6 +37,17 @@ export default function Projects() {
     }
   };
 
+  const handleDelete = async (id) => {
+    if (window.confirm('Are you sure you want to permanently delete this project? This action cannot be undone.')) {
+      try {
+        await api.delete(`/projects/${id}`);
+        load();
+      } catch (error) {
+        alert('Failed to delete project: ' + (error.response?.data?.error || error.message));
+      }
+    }
+  };
+
   const activeProjects = projects.filter(p => p.status !== 'archived');
   const archivedProjects = projects.filter(p => p.status === 'archived');
 
@@ -112,6 +123,7 @@ export default function Projects() {
                   isManager={isManager}
                   archived
                   onUnarchive={() => handleUnarchive(p.id)}
+                  onDelete={() => handleDelete(p.id)}
                 />
               ))}
             </div>
@@ -135,7 +147,7 @@ export default function Projects() {
   );
 }
 
-function ProjectCard({ project: p, isManager, onEdit, onArchive, onUnarchive, archived }) {
+function ProjectCard({ project: p, isManager, onEdit, onArchive, onUnarchive, onDelete, archived }) {
   return (
     <div className="card" style={{ opacity: archived ? 0.75 : 1 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '12px' }}>
@@ -177,13 +189,22 @@ function ProjectCard({ project: p, isManager, onEdit, onArchive, onUnarchive, ar
             <>
               <Link to={`/projects/${p.id}`} className="btn btn-ghost btn-sm">View</Link>
               {isManager && (
-                <button
-                  className="btn btn-ghost btn-sm"
-                  style={{ color: 'var(--accent)' }}
-                  onClick={onUnarchive}
-                >
-                  ↩ Restore
-                </button>
+                <>
+                  <button
+                    className="btn btn-ghost btn-sm"
+                    style={{ color: 'var(--accent)' }}
+                    onClick={onUnarchive}
+                  >
+                    ↩ Restore
+                  </button>
+                  <button
+                    className="btn btn-ghost btn-sm"
+                    style={{ color: 'var(--danger)' }}
+                    onClick={onDelete}
+                  >
+                    Delete
+                  </button>
+                </>
               )}
             </>
           )}

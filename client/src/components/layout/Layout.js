@@ -1,5 +1,6 @@
 import { Outlet, NavLink, useParams } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
+import NotificationBell from '../ui/NotificationBell';
 
 const Icon = ({ d }) => (
   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -49,6 +50,7 @@ export default function Layout() {
               <div className="user-name">{user?.name}</div>
               <div className="user-role">{user?.role}</div>
             </div>
+            <NotificationBell />
             <button className="btn-logout" onClick={logout} title="Logout">⏻</button>
           </div>
         </div>

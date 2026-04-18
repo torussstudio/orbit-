@@ -35,6 +35,17 @@ export default function Members() {
     if (window.confirm('Deactivate this member? They will no longer be able to log in.')) { await api.patch(`/members/${id}/deactivate`); load(); }
   };
 
+  const handleDelete = async id => {
+    if (window.confirm('Are you sure you want to permanently delete this member? All their data will be removed.')) {
+      try {
+        await api.delete(`/members/${id}`);
+        load();
+      } catch (error) {
+        alert('Failed to delete member: ' + (error.response?.data?.error || error.message));
+      }
+    }
+  };
+
   if (loading) return <div className="loading-screen"><div className="spinner" /></div>;
 
   return (
@@ -75,6 +86,7 @@ export default function Members() {
                       <div style={{ display: 'flex', gap: '4px' }}>
                         <button className="btn btn-ghost btn-sm" onClick={() => openEdit(m)}>Edit</button>
                         {m.active && <button className="btn btn-ghost btn-sm" style={{ color: 'var(--danger)' }} onClick={() => handleDeactivate(m.id)}>Deactivate</button>}
+                        <button className="btn btn-ghost btn-sm" style={{ color: 'var(--danger)' }} onClick={() => handleDelete(m.id)}>Delete</button>
                       </div>
                     </td>
                   )}

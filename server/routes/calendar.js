@@ -310,4 +310,33 @@ router.get("/search-members", auth, async (req, res) => {
   }
 });
 
+// Send notification to event guest
+router.post("/notify-guest", auth, async (req, res) => {
+  try {
+    const { guest_email, event_title, start_date, description } = req.body;
+    
+    // Check if guest is a member
+    const { rows: memberRows } = await db.query(
+      "SELECT id FROM members WHERE LOWER(email) = LOWER($1)",
+      [guest_email]
+    );
+    
+    if (memberRows.length > 0) {
+      // Create notification for member
+      const memberId = memberRows[0].id;
+      const message = `You have been invited to event: ${event_title}`;
+      await db.query(
+        "INSERT INTO notifications(member_id, message) VALUES($1, $2)",
+        [memberId, message]
+      );
+    }
+    
+    // In a real app, you would send an email here using nodemailer
+    // For now, we'll just return success
+    res.json({ success: true, message: "Invitation sent" });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 module.exports = router;

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import api from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import Modal from '../components/ui/Modal';
@@ -107,6 +107,7 @@ export default function Calendar() {
   const [editing, setEditing] = useState(null);
   const [selectedDay, setSelectedDay] = useState(null);
   const [selectedFilterMembers, setSelectedFilterMembers] = useState([]);
+  const [selectedTimeSlot, setSelectedTimeSlot] = useState(null);
 
   useEffect(() => {
     async function load() {
@@ -329,7 +330,23 @@ export default function Calendar() {
             <MonthView current={current} getItemsForDate={getItemsForDate} onDayClick={setSelectedDay} />
           )}
           {view === 'week' && (
-            <WeekView current={current} getItemsForDate={getItemsForDate} onDayClick={setSelectedDay} />
+            <WeekView 
+              current={current} 
+              getItemsForDate={getItemsForDate} 
+              onDayClick={setSelectedDay}
+              isManager={isManager}
+              onClickEvent={(item) => {
+                setEditing(item);
+                setShowModal(true);
+              }}
+              onClickTimeSlot={(date, hour) => {
+                setSelectedTimeSlot({ date, hour });
+                const newDate = new Date(date);
+                newDate.setHours(hour, 0);
+                setEditing({ start_date: newDate.toISOString(), type: 'event' });
+                setShowModal(true);
+              }}
+            />
           )}
           {view === 'day' && (
             <DayView
@@ -591,7 +608,7 @@ function MonthView({ current, getItemsForDate, onDayClick }) {
   );
 }
 
-function WeekView({ current, getItemsForDate, onDayClick }) {
+function WeekView({ current, getItemsForDate, onDayClick, isManager, onClickEvent, onClickTimeSlot }) {
   const startOfWeek = new Date(current);
   startOfWeek.setDate(current.getDate() - current.getDay());
   const today = new Date();
@@ -601,32 +618,67 @@ function WeekView({ current, getItemsForDate, onDayClick }) {
     return date;
   });
 
-  return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)' }}>
-      {days.map((date, index) => {
-        const items = getItemsForDate(date);
-        const isToday = date.toDateString() === today.toDateString();
+  const hours = Array.from({ length: 24 }, (_, i) => i);
+  
+  const getEventsForTimeSlot = (date, hour) => {
+    const dateItems = getItemsForDate(date);
+    return dateItems.filter(item => {
+      if (item.itemType === 'event' && item.start_date) {
+        const eventDate = new Date(item.start_date);
+        return eventDate.getHours() === hour;
+      }
+      return false;
+    });
+  };
 
-        return (
+  return (
+    <div style={{ display: 'flex', height: '100%', overflow: 'auto', borderTop: '1px solid var(--border)' }}>
+      {/* Time column on the left */}
+      <div style={{ minWidth: '80px', borderRight: '1px solid var(--border)', background: 'var(--bg-3)' }}>
+        <div style={{ height: '60px', display: 'flex', alignItems: 'flex-end', justifyContent: 'center', paddingBottom: '8px', fontWeight: 600, fontSize: '12px' }}></div>
+        {hours.map(hour => (
           <div
-            key={date.toISOString()}
-            onClick={() => onDayClick(date)}
+            key={hour}
             style={{
-              minHeight: '300px',
-              padding: '12px 8px',
-              borderRight: index < 6 ? '1px solid var(--border)' : 'none',
-              cursor: 'pointer',
-              background: isToday ? 'rgba(99,102,241,0.04)' : 'var(--bg-2)',
+              height: '60px',
+              display: 'flex',
+              alignItems: 'flex-start',
+              justifyContent: 'center',
+              padding: '2px 0',
+              fontSize: '11px',
+              color: 'var(--text-3)',
+              fontWeight: 500,
+              borderBottom: '1px solid var(--border)',
             }}
           >
-            <div style={{ textAlign: 'center', marginBottom: '10px' }}>
+            {String(hour).padStart(2, '0')}:00
+          </div>
+        ))}
+      </div>
+
+      {/* Days grid */}
+      <div style={{ display: 'grid', gridTemplateColumns: `repeat(7, 1fr)`, flex: 1 }}>
+        {/* Day headers */}
+        {days.map((date, dayIndex) => {
+          const isToday = date.toDateString() === today.toDateString();
+          return (
+            <div
+              key={`header-${date.toISOString()}`}
+              style={{
+                padding: '12px 4px',
+                textAlign: 'center',
+                borderRight: dayIndex < 6 ? '1px solid var(--border)' : 'none',
+                borderBottom: '1px solid var(--border)',
+                background: isToday ? 'rgba(99,102,241,0.04)' : 'var(--bg-2)',
+              }}
+            >
               <div style={{ fontSize: '11px', color: 'var(--text-3)', fontWeight: 600, textTransform: 'uppercase' }}>
-                {DAYS[index]}
+                {DAYS[dayIndex]}
               </div>
               <div
                 style={{
-                  width: '30px',
-                  height: '30px',
+                  width: '32px',
+                  height: '32px',
                   borderRadius: '50%',
                   margin: '4px auto 0',
                   display: 'flex',
@@ -641,28 +693,59 @@ function WeekView({ current, getItemsForDate, onDayClick }) {
                 {date.getDate()}
               </div>
             </div>
+          );
+        })}
 
-            {items.map((item, itemIndex) => (
+        {/* Time slots grid */}
+        {hours.map(hour =>
+          days.map((date, dayIndex) => {
+            const isToday = date.toDateString() === today.toDateString();
+            const slotEvents = getEventsForTimeSlot(date, hour);
+            
+            return (
               <div
-                key={`${item.itemType}-${item.id || item.name || itemIndex}`}
+                key={`slot-${date.toISOString()}-${hour}`}
+                onClick={() => isManager && onClickTimeSlot(date, hour)}
                 style={{
-                  fontSize: '11px',
-                  padding: '4px 6px',
-                  borderRadius: '6px',
-                  marginBottom: '4px',
-                  background: `${COLORS[item.itemType]}20`,
-                  color: COLORS[item.itemType],
-                  fontWeight: 600,
-                  borderLeft: `2px solid ${COLORS[item.itemType]}`,
+                  minHeight: '60px',
+                  padding: '4px',
+                  borderRight: dayIndex < 6 ? '1px solid var(--border)' : 'none',
+                  borderBottom: '1px solid var(--border)',
+                  background: isToday ? 'rgba(99,102,241,0.02)' : 'var(--bg-2)',
+                  cursor: isManager ? 'pointer' : 'default',
+                  position: 'relative',
                 }}
-                title={formatCellLabel(item)}
               >
-                {formatCellLabel(item)}
+                {slotEvents.map((event, idx) => (
+                  <div
+                    key={`${event.id}-${idx}`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onClickEvent(event);
+                    }}
+                    style={{
+                      fontSize: '11px',
+                      padding: '4px 6px',
+                      borderRadius: '4px',
+                      marginBottom: '2px',
+                      background: COLORS[event.itemType],
+                      color: 'white',
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}
+                    title={event.displayTitle}
+                  >
+                    {event.displayTitle}
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
-        );
-      })}
+            );
+          })
+        )}
+      </div>
     </div>
   );
 }
@@ -729,6 +812,7 @@ function EventForm({ initial, members, onSave, onCancel }) {
     end_date: initial?.end_date ? new Date(initial.end_date).toISOString().slice(0, 16) : '',
     type: initial?.type || 'event',
     member_ids: initial?.attendees?.map((attendee) => attendee.id) || [],
+    guest_email: '',
   });
 
   const setField = (key, value) => {
@@ -742,6 +826,24 @@ function EventForm({ initial, members, onSave, onCancel }) {
         ? form.member_ids.filter((memberId) => memberId !== id)
         : [...form.member_ids, id],
     );
+  };
+
+  const handleAddGuest = async () => {
+    if (!form.guest_email.trim()) return;
+    
+    try {
+      // Send notification email to guest
+      await api.post('/calendar/notify-guest', {
+        guest_email: form.guest_email,
+        event_title: form.title,
+        start_date: form.start_date,
+        description: form.description,
+      });
+      setField('guest_email', '');
+      alert('Invitation sent to ' + form.guest_email);
+    } catch (error) {
+      alert('Failed to send invitation: ' + (error.response?.data?.error || error.message));
+    }
   };
 
   return (
@@ -820,12 +922,34 @@ function EventForm({ initial, members, onSave, onCancel }) {
         </div>
       </div>
 
+      <div className="form-group">
+        <label className="form-label">Add Guest by Email</label>
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <input
+            className="form-input"
+            type="email"
+            value={form.guest_email}
+            onChange={(event) => setField('guest_email', event.target.value)}
+            placeholder="guest@example.com"
+            onKeyPress={(e) => e.key === 'Enter' && handleAddGuest()}
+          />
+          <button 
+            type="button" 
+            className="btn btn-primary" 
+            onClick={handleAddGuest}
+            style={{ whiteSpace: 'nowrap' }}
+          >
+            Send Invite
+          </button>
+        </div>
+      </div>
+
       <div className="modal-actions">
         <button className="btn btn-ghost" onClick={onCancel}>
           Cancel
         </button>
         <button className="btn btn-primary" onClick={() => onSave(form)}>
-          {initial ? 'Save Changes' : 'Create Event'}
+          {initial?.id ? 'Save Changes' : 'Create Event'}
         </button>
       </div>
     </div>

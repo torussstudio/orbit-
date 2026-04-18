@@ -70,4 +70,13 @@ router.patch("/:id/deactivate", auth, managerOnly, async (req, res) => {
   res.json({ success: true });
 });
 
+router.delete("/:id", auth, managerOnly, async (req, res) => {
+  try {
+    await db.query("DELETE FROM members WHERE id=$1", [req.params.id]);
+    res.json({ success: true });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
 module.exports = router;
