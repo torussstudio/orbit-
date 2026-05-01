@@ -95,8 +95,8 @@ export default function NotificationBell() {
           style={{
             position: 'absolute',
             bottom: '40px',
-            right: '-10px',
-            width: '320px',
+            right: '-70px',
+            width: '220px',
             maxHeight: '400px',
             background: 'var(--bg-2)',
             borderRadius: '12px',
