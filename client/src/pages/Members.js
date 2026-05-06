@@ -3,6 +3,7 @@ import api from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { formatDate } from '../utils/helpers';
 import Modal from '../components/ui/Modal';
+import ConfirmModal from '../components/ui/ConfirmModal';
 
 export default function Members() {
   const { isManager } = useAuth();
@@ -13,6 +14,7 @@ export default function Members() {
   const [form, setForm] = useState({ name: '', email: '', password: '', role: 'developer', skills: '' });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [confirmModal, setConfirmModal] = useState({ show: false, title: '', message: '', action: null, loading: false, isDangerous: false });
 
   const load = () => api.get('/members').then(r => setMembers(r.data)).finally(() => setLoading(false));
   useEffect(() => { load(); }, []);
@@ -31,18 +33,45 @@ export default function Members() {
     finally { setSaving(false); }
   };
 
-  const handleDeactivate = async id => {
-    if (window.confirm('Deactivate this member? They will no longer be able to log in.')) { await api.patch(`/members/${id}/deactivate`); load(); }
+  const handleDeactivate = (id) => {
+    setConfirmModal({
+      show: true,
+      title: 'Deactivate Member',
+      message: 'Deactivate this member? They will no longer be able to log in.',
+      isDangerous: true,
+      action: async () => {
+        await api.patch(`/members/${id}/deactivate`);
+        load();
+      },
+      loading: false
+    });
   };
 
-  const handleDelete = async id => {
-    if (window.confirm('Are you sure you want to permanently delete this member? All their data will be removed.')) {
-      try {
-        await api.delete(`/members/${id}`);
-        load();
-      } catch (error) {
-        alert('Failed to delete member: ' + (error.response?.data?.error || error.message));
-      }
+  const handleDelete = (id) => {
+    setConfirmModal({
+      show: true,
+      title: 'Delete Member',
+      message: 'Are you sure you want to permanently delete this member? All their data will be removed.',
+      isDangerous: true,
+      action: async () => {
+        try {
+          await api.delete(`/members/${id}`);
+          load();
+        } catch (error) {
+          alert('Failed to delete member: ' + (error.response?.data?.error || error.message));
+        }
+      },
+      loading: false
+    });
+  };
+
+  const executeConfirmAction = async () => {
+    if (!confirmModal.action) return;
+    setConfirmModal(prev => ({ ...prev, loading: true }));
+    try {
+      await confirmModal.action();
+    } finally {
+      setConfirmModal({ show: false, title: '', message: '', action: null, loading: false, isDangerous: false });
     }
   };
 
@@ -131,6 +160,17 @@ export default function Members() {
           </div>
         </Modal>
       )}
+
+      <ConfirmModal 
+        isOpen={confirmModal.show}
+        title={confirmModal.title}
+        message={confirmModal.message}
+        confirmText={confirmModal.isDangerous ? 'Confirm' : 'Confirm'}
+        isDangerous={confirmModal.isDangerous}
+        onConfirm={executeConfirmAction}
+        onCancel={() => setConfirmModal({ show: false, title: '', message: '', action: null, loading: false, isDangerous: false })}
+        loading={confirmModal.loading}
+      />
     </>
   );
 }

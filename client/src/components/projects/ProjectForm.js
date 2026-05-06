@@ -3,7 +3,7 @@ import api from '../../api/client';
 
 const DEFAULT_STAGES = ["Todo","In Progress","In Review","Done","Deployed"];
 
-export default function ProjectForm({ initial, onSave, onCancel }) {
+export default function ProjectForm({ initial, onSave, onCancel, saving = false }) {
   const [form, setForm] = useState({
     name: initial?.name || '',
     client_name: initial?.client_name || '',
@@ -93,7 +93,9 @@ export default function ProjectForm({ initial, onSave, onCancel }) {
 
       <div className="modal-actions">
         <button className="btn btn-ghost" onClick={onCancel}>Cancel</button>
-        <button className="btn btn-primary" onClick={() => onSave(form)}>Save Project</button>
+        <button className="btn btn-primary" onClick={() => onSave(form)} disabled={saving}>
+          {saving ? 'Saving...' : 'Save Project'}
+        </button>
       </div>
     </>
   );

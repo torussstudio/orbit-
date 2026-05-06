@@ -2,6 +2,7 @@ import { useEffect, useState, useRef } from 'react';
 import api from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import Modal from '../components/ui/Modal';
+import ConfirmModal from '../components/ui/ConfirmModal';
 import MemberFilterBar from '../components/ui/MemberFilterBar';
 
 const COLORS = {
@@ -108,6 +109,8 @@ export default function Calendar() {
   const [selectedDay, setSelectedDay] = useState(null);
   const [selectedFilterMembers, setSelectedFilterMembers] = useState([]);
   const [selectedTimeSlot, setSelectedTimeSlot] = useState(null);
+  const [confirmModal, setConfirmModal] = useState({ show: false, title: '', message: '', action: null, loading: false, isDangerous: false });
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     async function load() {
@@ -153,47 +156,66 @@ export default function Calendar() {
     });
 
   const handleSave = async (formData) => {
-    if (editing) {
-      await api.put(`/calendar/${editing.id}`, formData);
-    } else {
-      await api.post('/calendar', formData);
-    }
-
-    setShowModal(false);
-    setEditing(null);
-    setSelectedDay(null);
-    setLoading(true);
-
+    setSaving(true);
     try {
-      const memberEmails = selectedFilterMembers
-        .map((member) => normalizeEmail(member.email))
-        .filter(Boolean);
-      const params = memberEmails.length > 0 ? { members: memberEmails.join(',') } : {};
-      const response = await api.get('/calendar', { params });
-      setData(response.data);
+      if (editing) {
+        await api.put(`/calendar/${editing.id}`, formData);
+      } else {
+        await api.post('/calendar', formData);
+      }
+
+      setShowModal(false);
+      setEditing(null);
+      setSelectedDay(null);
+      setLoading(true);
+
+      try {
+        const memberEmails = selectedFilterMembers
+          .map((member) => normalizeEmail(member.email))
+          .filter(Boolean);
+        const params = memberEmails.length > 0 ? { members: memberEmails.join(',') } : {};
+        const response = await api.get('/calendar', { params });
+        setData(response.data);
+      } finally {
+        setLoading(false);
+      }
     } finally {
-      setLoading(false);
+      setSaving(false);
     }
   };
 
-  const handleDelete = async (id) => {
-    if (!window.confirm('Delete this event?')) {
-      return;
-    }
+  const handleDelete = (id) => {
+    setConfirmModal({
+      show: true,
+      title: 'Delete Event',
+      message: 'Delete this event?',
+      isDangerous: true,
+      action: async () => {
+        await api.delete(`/calendar/${id}`);
+        setSelectedDay(null);
+        setLoading(true);
+        try {
+          const memberEmails = selectedFilterMembers
+            .map((member) => normalizeEmail(member.email))
+            .filter(Boolean);
+          const params = memberEmails.length > 0 ? { members: memberEmails.join(',') } : {};
+          const response = await api.get('/calendar', { params });
+          setData(response.data);
+        } finally {
+          setLoading(false);
+        }
+      },
+      loading: false
+    });
+  };
 
-    await api.delete(`/calendar/${id}`);
-    setSelectedDay(null);
-    setLoading(true);
-
+  const executeConfirmAction = async () => {
+    if (!confirmModal.action) return;
+    setConfirmModal(prev => ({ ...prev, loading: true }));
     try {
-      const memberEmails = selectedFilterMembers
-        .map((member) => normalizeEmail(member.email))
-        .filter(Boolean);
-      const params = memberEmails.length > 0 ? { members: memberEmails.join(',') } : {};
-      const response = await api.get('/calendar', { params });
-      setData(response.data);
+      await confirmModal.action();
     } finally {
-      setLoading(false);
+      setConfirmModal({ show: false, title: '', message: '', action: null, loading: false, isDangerous: false });
     }
   };
 
@@ -468,6 +490,7 @@ export default function Calendar() {
             initial={editing}
             members={members.filter((member) => member.active !== false)}
             onSave={handleSave}
+            saving={saving}
             onCancel={() => {
               setShowModal(false);
               setEditing(null);
@@ -475,6 +498,17 @@ export default function Calendar() {
           />
         </Modal>
       )}
+
+      <ConfirmModal 
+        isOpen={confirmModal.show}
+        title={confirmModal.title}
+        message={confirmModal.message}
+        confirmText={confirmModal.isDangerous ? 'Delete' : 'Confirm'}
+        isDangerous={confirmModal.isDangerous}
+        onConfirm={executeConfirmAction}
+        onCancel={() => setConfirmModal({ show: false, title: '', message: '', action: null, loading: false, isDangerous: false })}
+        loading={confirmModal.loading}
+      />
     </>
   );
 }
@@ -804,7 +838,7 @@ function DayView({ current, items, isManager, onEdit, onDelete }) {
   );
 }
 
-function EventForm({ initial, members, onSave, onCancel }) {
+function EventForm({ initial, members, onSave, onCancel, saving = false }) {
   const [form, setForm] = useState({
     title: initial?.title || '',
     description: initial?.description || '',
@@ -814,6 +848,7 @@ function EventForm({ initial, members, onSave, onCancel }) {
     member_ids: initial?.attendees?.map((attendee) => attendee.id) || [],
     guest_email: '',
   });
+  const [invitingGuest, setInvitingGuest] = useState(false);
 
   const setField = (key, value) => {
     setForm((previous) => ({ ...previous, [key]: value }));
@@ -831,6 +866,7 @@ function EventForm({ initial, members, onSave, onCancel }) {
   const handleAddGuest = async () => {
     if (!form.guest_email.trim()) return;
     
+    setInvitingGuest(true);
     try {
       // Send notification email to guest
       await api.post('/calendar/notify-guest', {
@@ -843,6 +879,8 @@ function EventForm({ initial, members, onSave, onCancel }) {
       alert('Invitation sent to ' + form.guest_email);
     } catch (error) {
       alert('Failed to send invitation: ' + (error.response?.data?.error || error.message));
+    } finally {
+      setInvitingGuest(false);
     }
   };
 
@@ -937,9 +975,10 @@ function EventForm({ initial, members, onSave, onCancel }) {
             type="button" 
             className="btn btn-primary" 
             onClick={handleAddGuest}
+            disabled={invitingGuest}
             style={{ whiteSpace: 'nowrap' }}
           >
-            Send Invite
+            {invitingGuest ? 'Sending...' : 'Send Invite'}
           </button>
         </div>
       </div>
@@ -948,8 +987,8 @@ function EventForm({ initial, members, onSave, onCancel }) {
         <button className="btn btn-ghost" onClick={onCancel}>
           Cancel
         </button>
-        <button className="btn btn-primary" onClick={() => onSave(form)}>
-          {initial?.id ? 'Save Changes' : 'Create Event'}
+        <button className="btn btn-primary" onClick={() => onSave(form)} disabled={saving}>
+          {saving ? 'Saving...' : (initial?.id ? 'Save Changes' : 'Create Event')}
         </button>
       </div>
     </div>

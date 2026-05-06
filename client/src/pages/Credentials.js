@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom';
 import api from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import Modal from '../components/ui/Modal';
+import ConfirmModal from '../components/ui/ConfirmModal';
 
 export default function Credentials({ project: propProject }) {
   const params = useParams();
@@ -17,27 +18,70 @@ export default function Credentials({ project: propProject }) {
   const [selectedClusterId, setSelectedClusterId] = useState(null);
   const [clusterForm, setClusterForm] = useState({ name: '', visibility: 'private' });
   const [entryForm, setEntryForm] = useState({ label: '', value: '' });
+  const [savingCluster, setSavingCluster] = useState(false);
+  const [savingEntry, setSavingEntry] = useState(false);
+  const [confirmModal, setConfirmModal] = useState({ show: false, title: '', message: '', action: null, loading: false, isDangerous: false });
 
   const load = () => api.get(`/credentials/project/${projectId}`).then(r => setClusters(r.data)).finally(() => setLoading(false));
   useEffect(() => { if (projectId) load(); }, [projectId]);
 
   const saveCluster = async () => {
-    if (editingCluster) await api.put(`/credentials/clusters/${editingCluster.id}`, clusterForm);
-    else await api.post('/credentials/clusters', { ...clusterForm, project_id: projectId });
-    setShowClusterModal(false); setEditingCluster(null); load();
+    setSavingCluster(true);
+    try {
+      if (editingCluster) await api.put(`/credentials/clusters/${editingCluster.id}`, clusterForm);
+      else await api.post('/credentials/clusters', { ...clusterForm, project_id: projectId });
+      setShowClusterModal(false); setEditingCluster(null); load();
+    } finally {
+      setSavingCluster(false);
+    }
   };
 
-  const deleteCluster = async id => {
-    if (window.confirm('Delete this credential cluster and all its entries?')) { await api.delete(`/credentials/clusters/${id}`); load(); }
+  const deleteCluster = (id) => {
+    setConfirmModal({
+      show: true,
+      title: 'Delete Cluster',
+      message: 'Delete this credential cluster and all its entries?',
+      isDangerous: true,
+      action: async () => {
+        await api.delete(`/credentials/clusters/${id}`);
+        load();
+      },
+      loading: false
+    });
   };
 
   const saveEntry = async () => {
-    await api.post('/credentials/entries', { ...entryForm, cluster_id: selectedClusterId });
-    setShowEntryModal(false); setEntryForm({ label: '', value: '' }); load();
+    setSavingEntry(true);
+    try {
+      await api.post('/credentials/entries', { ...entryForm, cluster_id: selectedClusterId });
+      setShowEntryModal(false); setEntryForm({ label: '', value: '' }); load();
+    } finally {
+      setSavingEntry(false);
+    }
   };
 
-  const deleteEntry = async id => {
-    if (window.confirm('Delete this credential?')) { await api.delete(`/credentials/entries/${id}`); load(); }
+  const deleteEntry = (id) => {
+    setConfirmModal({
+      show: true,
+      title: 'Delete Credential',
+      message: 'Delete this credential?',
+      isDangerous: true,
+      action: async () => {
+        await api.delete(`/credentials/entries/${id}`);
+        load();
+      },
+      loading: false
+    });
+  };
+
+  const executeConfirmAction = async () => {
+    if (!confirmModal.action) return;
+    setConfirmModal(prev => ({ ...prev, loading: true }));
+    try {
+      await confirmModal.action();
+    } finally {
+      setConfirmModal({ show: false, title: '', message: '', action: null, loading: false, isDangerous: false });
+    }
   };
 
   const toggleReveal = (id) => setRevealed(r => ({ ...r, [id]: !r[id] }));
@@ -124,7 +168,9 @@ export default function Credentials({ project: propProject }) {
           </div>
           <div className="modal-actions">
             <button className="btn btn-ghost" onClick={() => setShowClusterModal(false)}>Cancel</button>
-            <button className="btn btn-primary" onClick={saveCluster}>Save</button>
+            <button className="btn btn-primary" onClick={saveCluster} disabled={savingCluster}>
+              {savingCluster ? 'Saving...' : 'Save'}
+            </button>
           </div>
         </Modal>
       )}
@@ -141,10 +187,23 @@ export default function Credentials({ project: propProject }) {
           </div>
           <div className="modal-actions">
             <button className="btn btn-ghost" onClick={() => setShowEntryModal(false)}>Cancel</button>
-            <button className="btn btn-primary" onClick={saveEntry}>Save</button>
+            <button className="btn btn-primary" onClick={saveEntry} disabled={savingEntry}>
+              {savingEntry ? 'Saving...' : 'Save'}
+            </button>
           </div>
         </Modal>
       )}
+
+      <ConfirmModal 
+        isOpen={confirmModal.show}
+        title={confirmModal.title}
+        message={confirmModal.message}
+        confirmText={confirmModal.isDangerous ? 'Delete' : 'Confirm'}
+        isDangerous={confirmModal.isDangerous}
+        onConfirm={executeConfirmAction}
+        onCancel={() => setConfirmModal({ show: false, title: '', message: '', action: null, loading: false, isDangerous: false })}
+        loading={confirmModal.loading}
+      />
     </div>
   );
 }

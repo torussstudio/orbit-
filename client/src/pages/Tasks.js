@@ -4,6 +4,7 @@ import api from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { formatDate, isOverdue } from '../utils/helpers';
 import Modal from '../components/ui/Modal';
+import ConfirmModal from '../components/ui/ConfirmModal';
 import TaskForm from '../components/tasks/TaskForm';
 
 const PRIORITY_COLORS = { low: 'var(--accent)', medium: 'var(--warning)', high: 'var(--danger)', critical: 'var(--critical)' };
@@ -19,6 +20,9 @@ export default function Tasks({ project: propProject }) {
   const [view, setView] = useState('board');
   const [members, setMembers] = useState([]);
   const [clusters, setClusters] = useState([]);
+  const [showSubTaskModal, setShowSubTaskModal] = useState(false);
+  const [subTaskParent, setSubTaskParent] = useState(null);
+  const [deleteConfirm, setDeleteConfirm] = useState({ show: false, id: null, loading: false });
 
   const stages = propProject?.custom_stages || ["Todo","In Progress","In Review","Done","Deployed"];
 
@@ -39,8 +43,23 @@ export default function Tasks({ project: propProject }) {
     setShowModal(false); setEditing(null); load();
   };
 
-  const handleDelete = async (id) => {
-    if (window.confirm('Delete task?')) { await api.delete(`/tasks/${id}`); load(); }
+  const handleSubTaskSave = async (data) => {
+    await api.post('/tasks', { ...data, project_id: projectId, parent_task_id: subTaskParent.id });
+    setShowSubTaskModal(false); setSubTaskParent(null); load();
+  };
+
+  const handleDelete = (id) => {
+    setDeleteConfirm({ show: true, id, loading: false });
+  };
+
+  const confirmDelete = async () => {
+    setDeleteConfirm(prev => ({ ...prev, loading: true }));
+    try {
+      await api.delete(`/tasks/${deleteConfirm.id}`);
+      load();
+    } finally {
+      setDeleteConfirm({ show: false, id: null, loading: false });
+    }
   };
 
   if (loading) return <div style={{ padding: '24px' }}><div className="spinner" /></div>;
@@ -56,8 +75,8 @@ export default function Tasks({ project: propProject }) {
       </div>
 
       {view === 'board'
-        ? <BoardView tasks={tasks} stages={stages} projectId={projectId} onEdit={t => { setEditing(t); setShowModal(true); }} onDelete={handleDelete} onUpdate={load} isManager={isManager} />
-        : <ListView tasks={tasks} projectId={projectId} onEdit={t => { setEditing(t); setShowModal(true); }} onDelete={handleDelete} isManager={isManager} />
+        ? <BoardView tasks={tasks} stages={stages} projectId={projectId} onEdit={t => { setEditing(t); setShowModal(true); }} onDelete={handleDelete} onUpdate={load} isManager={isManager} onAddSubTask={t => { setSubTaskParent(t); setShowSubTaskModal(true); }} />
+        : <ListView tasks={tasks} projectId={projectId} onEdit={t => { setEditing(t); setShowModal(true); }} onDelete={handleDelete} isManager={isManager} onAddSubTask={t => { setSubTaskParent(t); setShowSubTaskModal(true); }} />
       }
 
       {showModal && (
@@ -65,11 +84,27 @@ export default function Tasks({ project: propProject }) {
           <TaskForm initial={editing} members={members} clusters={clusters} stages={stages} onSave={handleSave} onCancel={() => { setShowModal(false); setEditing(null); }} />
         </Modal>
       )}
+
+      {showSubTaskModal && subTaskParent && (
+        <Modal title={`Sub Task — ${subTaskParent.title}`} onClose={() => { setShowSubTaskModal(false); setSubTaskParent(null); }}>
+          <TaskForm members={members} clusters={clusters} stages={stages} onSave={handleSubTaskSave} onCancel={() => { setShowSubTaskModal(false); setSubTaskParent(null); }} hideCluster />
+        </Modal>
+      )}
+
+      <ConfirmModal 
+        isOpen={deleteConfirm.show}
+        title="Delete Task"
+        message="Are you sure you want to delete this task? This action cannot be undone."
+        confirmText="Delete"
+        onConfirm={confirmDelete}
+        onCancel={() => setDeleteConfirm({ show: false, id: null, loading: false })}
+        loading={deleteConfirm.loading}
+      />
     </div>
   );
 }
 
-function BoardView({ tasks, stages, projectId, onEdit, onDelete, onUpdate, isManager }) {
+function BoardView({ tasks, stages, projectId, onEdit, onDelete, onUpdate, isManager, onAddSubTask }) {
   const { user } = useAuth();
 
   const handleDrop = async (taskId, newStage) => {
@@ -98,7 +133,7 @@ style={{ display: 'flex', justifyContent: 'start', alignItems: 'center', marginB
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', minHeight: '80px' }}>
               {stageTasks.map(t => (
-                <TaskCard key={t.id} task={t} projectId={projectId} onEdit={onEdit} onDelete={onDelete} isManager={isManager} />
+                <TaskCard key={t.id} task={t} projectId={projectId} onEdit={onEdit} onDelete={onDelete} isManager={isManager} onAddSubTask={onAddSubTask} />
               ))}
             </div>
           </div>
@@ -108,7 +143,7 @@ style={{ display: 'flex', justifyContent: 'start', alignItems: 'center', marginB
   );
 }
 
-function TaskCard({ task, projectId, onEdit, onDelete, isManager }) {
+function TaskCard({ task, projectId, onEdit, onDelete, isManager, onAddSubTask }) {
   const overdue = isOverdue(task.due_date, task.stage);
   return (
     <div draggable onDragStart={e => e.dataTransfer.setData('taskId', task.id)}
@@ -125,6 +160,7 @@ function TaskCard({ task, projectId, onEdit, onDelete, isManager }) {
       {isManager && (
         <div style={{ display: 'flex', gap: '4px', marginTop: '8px', borderTop: '1px solid var(--border)', paddingTop: '8px' }}>
           <button className="btn btn-ghost btn-sm" style={{ fontSize: '11px', padding: '2px 8px' }} onClick={() => onEdit(task)}>Edit</button>
+          <button className="btn btn-ghost btn-sm" style={{ fontSize: '11px', padding: '2px 8px', color: 'var(--accent)' }} onClick={() => onAddSubTask(task)}>Sub Task</button>
           <button className="btn btn-ghost btn-sm" style={{ fontSize: '11px', padding: '2px 8px', color: 'var(--danger)' }} onClick={() => onDelete(task.id)}>Del</button>
         </div>
       )}
@@ -132,7 +168,7 @@ function TaskCard({ task, projectId, onEdit, onDelete, isManager }) {
   );
 }
 
-function ListView({ tasks, projectId, onEdit, onDelete, isManager }) {
+function ListView({ tasks, projectId, onEdit, onDelete, isManager, onAddSubTask }) {
   return (
     <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
       <div className="table-wrap">
@@ -152,6 +188,7 @@ function ListView({ tasks, projectId, onEdit, onDelete, isManager }) {
                   {isManager && <td>
                     <div style={{ display: 'flex', gap: '4px' }}>
                       <button className="btn btn-ghost btn-sm" onClick={() => onEdit(t)}>Edit</button>
+                      <button className="btn btn-ghost btn-sm" style={{ color: 'var(--accent)' }} onClick={() => onAddSubTask(t)}>Sub Task</button>
                       <button className="btn btn-ghost btn-sm" style={{ color: 'var(--danger)' }} onClick={() => onDelete(t.id)}>Del</button>
                     </div>
                   </td>}

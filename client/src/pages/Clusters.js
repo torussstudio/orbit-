@@ -4,6 +4,7 @@ import api from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { formatDate } from '../utils/helpers';
 import Modal from '../components/ui/Modal';
+import ConfirmModal from '../components/ui/ConfirmModal';
 
 const STATUS_COLORS = { draft: 'var(--text-3)', in_review: 'var(--accent-2)', approved: 'var(--success)', needs_rework: 'var(--danger)', completed: 'var(--success)' };
 
@@ -16,22 +17,56 @@ export default function Clusters({ project: propProject }) {
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState({ name: '', description: '', target_date: '' });
+  const [saving, setSaving] = useState(false);
+  const [submittingReview, setSubmittingReview] = useState(null);
+  const [confirmModal, setConfirmModal] = useState({ show: false, title: '', message: '', action: null, loading: false, isDangerous: false });
 
   const load = () => api.get(`/clusters/project/${projectId}`).then(r => setClusters(r.data)).finally(() => setLoading(false));
   useEffect(() => { if (projectId) load(); }, [projectId]);
 
   const handleSave = async () => {
-    if (editing) await api.put(`/clusters/${editing.id}`, form);
-    else await api.post('/clusters', { ...form, project_id: projectId });
-    setShowModal(false); setEditing(null); setForm({ name: '', description: '', target_date: '' }); load();
+    setSaving(true);
+    try {
+      if (editing) await api.put(`/clusters/${editing.id}`, form);
+      else await api.post('/clusters', { ...form, project_id: projectId });
+      setShowModal(false); setEditing(null); setForm({ name: '', description: '', target_date: '' }); load();
+    } finally {
+      setSaving(false);
+    }
   };
 
-  const handleDelete = async id => {
-    if (window.confirm('Delete cluster?')) { await api.delete(`/clusters/${id}`); load(); }
+  const handleDelete = (id) => {
+    setConfirmModal({
+      show: true,
+      title: 'Delete Cluster',
+      message: 'Delete cluster?',
+      isDangerous: true,
+      action: async () => {
+        await api.delete(`/clusters/${id}`);
+        load();
+      },
+      loading: false
+    });
+  };
+
+  const executeConfirmAction = async () => {
+    if (!confirmModal.action) return;
+    setConfirmModal(prev => ({ ...prev, loading: true }));
+    try {
+      await confirmModal.action();
+    } finally {
+      setConfirmModal({ show: false, title: '', message: '', action: null, loading: false, isDangerous: false });
+    }
   };
 
   const handleSubmitReview = async id => {
-    await api.post(`/clusters/${id}/submit-review`); load();
+    setSubmittingReview(id);
+    try {
+      await api.post(`/clusters/${id}/submit-review`); 
+      load();
+    } finally {
+      setSubmittingReview(null);
+    }
   };
 
   if (loading) return <div style={{ padding: '24px' }}><div className="spinner" /></div>;
@@ -67,7 +102,9 @@ export default function Clusters({ project: propProject }) {
                 <Link to={`/projects/${projectId}/clusters/${c.id}`} className="btn btn-ghost btn-sm">View</Link>
                 {isManager && <>
                   {c.status === 'draft' || c.status === 'needs_rework' ? (
-                    <button className="btn btn-ghost btn-sm" style={{ color: 'var(--accent-2)' }} onClick={() => handleSubmitReview(c.id)}>Submit for Review</button>
+                    <button className="btn btn-ghost btn-sm" style={{ color: 'var(--accent-2)' }} onClick={() => handleSubmitReview(c.id)} disabled={submittingReview === c.id}>
+                      {submittingReview === c.id ? 'Submitting...' : 'Submit for Review'}
+                    </button>
                   ) : null}
                   <button className="btn btn-ghost btn-sm" onClick={() => { setEditing(c); setForm({ name: c.name, description: c.description||'', target_date: c.target_date||'' }); setShowModal(true); }}>Edit</button>
                   <button className="btn btn-ghost btn-sm" style={{ color: 'var(--danger)' }} onClick={() => handleDelete(c.id)}>Delete</button>
@@ -94,10 +131,23 @@ export default function Clusters({ project: propProject }) {
           </div>
           <div className="modal-actions">
             <button className="btn btn-ghost" onClick={() => setShowModal(false)}>Cancel</button>
-            <button className="btn btn-primary" onClick={handleSave}>Save</button>
+            <button className="btn btn-primary" onClick={handleSave} disabled={saving}>
+              {saving ? 'Saving...' : 'Save'}
+            </button>
           </div>
         </Modal>
       )}
+
+      <ConfirmModal 
+        isOpen={confirmModal.show}
+        title={confirmModal.title}
+        message={confirmModal.message}
+        confirmText={confirmModal.isDangerous ? 'Delete' : 'Confirm'}
+        isDangerous={confirmModal.isDangerous}
+        onConfirm={executeConfirmAction}
+        onCancel={() => setConfirmModal({ show: false, title: '', message: '', action: null, loading: false, isDangerous: false })}
+        loading={confirmModal.loading}
+      />
     </div>
   );
 }

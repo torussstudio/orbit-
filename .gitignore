@@ -1,31 +1,101 @@
-# Node modules
+# # Node modules
+# node_modules/
+
+# # Environment files (IMPORTANT 🔒)
+# .env
+# .env.*
+# .env.example
+
+# # Build files
+# build/
+# dist/
+
+# # Logs
+# *.log
+# npm-debug.log*
+# yarn-debug.log*
+# yarn-error.log*
+
+# # OS files
+# .DS_Store
+# Thumbs.db
+
+# # Vercel
+# .vercel
+
+# # IDE / Editor
+# .vscode/
+# .idea/
+
+# # Misc
+# coverage/
+
+# =========================
+# Dependencies
+# =========================
 node_modules/
 
-# Environment files (IMPORTANT 🔒)
+# =========================
+# Environment Variables
+# =========================
 .env
-.env.*
-!.env.example
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+.env.example
 
-# Build files
+# =========================
+# Build / Production
+# =========================
 build/
 dist/
+.next/
+out/
 
+# =========================
 # Logs
+# =========================
+logs/
 *.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+pnpm-debug.log*
 
-# OS files
+# =========================
+# Cache / Coverage
+# =========================
+.cache/
+.parcel-cache/
+coverage/
+
+# =========================
+# OS Files
+# =========================
 .DS_Store
 Thumbs.db
 
-# Vercel
-.vercel
-
+# =========================
 # IDE / Editor
+# =========================
 .vscode/
 .idea/
+*.swp
+*.swo
 
-# Misc
-coverage/
+# =========================
+# Vercel / Deployment
+# =========================
+.vercel/
+
+# =========================
+# Temporary Files
+# =========================
+tmp/
+temp/
+
+# =========================
+# Optional
+# =========================
+*.tsbuildinfo

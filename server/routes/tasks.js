@@ -9,7 +9,7 @@ router.get("/project/:projectId", auth, async (req, res) => {
     `SELECT t.*, m.name as assignee_name, c.name as cluster_name FROM tasks t
      LEFT JOIN members m ON t.assignee_id=m.id
      LEFT JOIN clusters c ON t.cluster_id=c.id
-     WHERE t.project_id=$1 ORDER BY t.created_at DESC`,
+     WHERE t.project_id=$1 AND t.parent_task_id IS NULL ORDER BY t.created_at DESC`,
     [req.params.projectId],
   );
   res.json(rows);
@@ -26,18 +26,34 @@ router.get("/:id", auth, async (req, res) => {
      JOIN members m ON tc.author_id=m.id WHERE tc.task_id=$1 ORDER BY tc.created_at`,
     [req.params.id],
   );
+  // Activity includes both own activity and sub-task activity (labelled [Sub Task])
   const activity = await db.query(
-    `SELECT ta.*, m.name as actor_name FROM task_activity ta
-     LEFT JOIN members m ON ta.actor_id=m.id WHERE ta.task_id=$1 ORDER BY ta.created_at DESC LIMIT 20`,
+    `SELECT ta.*, m.name as actor_name, 'own' as source FROM task_activity ta
+     LEFT JOIN members m ON ta.actor_id=m.id WHERE ta.task_id=$1
+     UNION ALL
+     SELECT ta.*, m.name as actor_name, 'subtask' as source FROM task_activity ta
+     LEFT JOIN members m ON ta.actor_id=m.id
+     WHERE ta.task_id IN (SELECT id FROM tasks WHERE parent_task_id=$1)
+     ORDER BY created_at DESC LIMIT 30`,
     [req.params.id],
   );
-  res.json({ ...rows[0], comments: comments.rows, activity: activity.rows });
+  const subtasks = await db.query(
+    `SELECT t.*, m.name as assignee_name FROM tasks t LEFT JOIN members m ON t.assignee_id=m.id WHERE t.parent_task_id=$1 ORDER BY t.created_at`,
+    [req.params.id],
+  );
+  res.json({
+    ...rows[0],
+    comments: comments.rows,
+    activity: activity.rows,
+    subtasks: subtasks.rows,
+  });
 });
 
 router.post("/", auth, managerOnly, async (req, res) => {
   const {
     project_id,
     cluster_id,
+    parent_task_id,
     title,
     description,
     assignee_id,
@@ -46,11 +62,12 @@ router.post("/", auth, managerOnly, async (req, res) => {
     due_date,
   } = req.body;
   const { rows } = await db.query(
-    `INSERT INTO tasks(project_id,cluster_id,title,description,assignee_id,priority,stage,due_date,created_by)
-     VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
+    `INSERT INTO tasks(project_id,cluster_id,parent_task_id,title,description,assignee_id,priority,stage,due_date,created_by)
+     VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
     [
       project_id,
       cluster_id || null,
+      parent_task_id || null,
       title,
       description,
       assignee_id || null,
@@ -60,9 +77,10 @@ router.post("/", auth, managerOnly, async (req, res) => {
       req.user.id,
     ],
   );
+  const actionLabel = parent_task_id ? "[Sub Task] Created sub task" : "Created task";
   await db.query(
     `INSERT INTO task_activity(task_id,actor_id,action) VALUES($1,$2,$3)`,
-    [rows[0].id, req.user.id, "Created task"],
+    [rows[0].id, req.user.id, actionLabel],
   );
   res.status(201).json(rows[0]);
 });
@@ -82,6 +100,8 @@ router.put("/:id", auth, async (req, res) => {
   ]);
   if (!task.rows[0]) return res.status(404).json({ error: "Not found" });
 
+  const isSubTask = Boolean(task.rows[0].parent_task_id);
+
   if (req.user.role === "developer") {
     if (MANAGER_STAGES.includes(stage))
       return res
@@ -96,7 +116,7 @@ router.put("/:id", auth, async (req, res) => {
       [
         req.params.id,
         req.user.id,
-        "Stage changed",
+        isSubTask ? "[Sub Task] Stage changed" : "Stage changed",
         JSON.stringify({ from: task.rows[0].stage, to: stage }),
       ],
     );
@@ -123,7 +143,7 @@ router.put("/:id", auth, async (req, res) => {
       [
         req.params.id,
         req.user.id,
-        "Stage changed",
+        isSubTask ? "[Sub Task] Stage changed" : "Stage changed",
         JSON.stringify({ from: task.rows[0].stage, to: stage }),
       ],
     );

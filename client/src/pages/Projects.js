@@ -4,6 +4,7 @@ import api from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { formatDate } from '../utils/helpers';
 import Modal from '../components/ui/Modal';
+import ConfirmModal from '../components/ui/ConfirmModal';
 import ProjectForm from '../components/projects/ProjectForm';
 
 export default function Projects() {
@@ -13,38 +14,76 @@ export default function Projects() {
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState(null);
   const [showArchived, setShowArchived] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [confirmModal, setConfirmModal] = useState({ show: false, title: '', message: '', action: null, loading: false, isDangerous: false });
 
   const load = () => api.get('/projects').then(r => setProjects(r.data)).finally(() => setLoading(false));
   useEffect(() => { load(); }, []);
 
   const handleSave = async (data) => {
-    if (editing) await api.put(`/projects/${editing.id}`, data);
-    else await api.post('/projects', data);
-    setShowModal(false); setEditing(null); load();
-  };
-
-  const handleArchive = async (id) => {
-    if (window.confirm('Archive this project?')) {
-      await api.patch(`/projects/${id}/archive`);
-      load();
+    setSaving(true);
+    try {
+      if (editing) await api.put(`/projects/${editing.id}`, data);
+      else await api.post('/projects', data);
+      setShowModal(false); setEditing(null); load();
+    } finally {
+      setSaving(false);
     }
   };
 
-  const handleUnarchive = async (id) => {
-    if (window.confirm('Restore this project?')) {
-      await api.patch(`/projects/${id}/unarchive`);
-      load();
-    }
-  };
-
-  const handleDelete = async (id) => {
-    if (window.confirm('Are you sure you want to permanently delete this project? This action cannot be undone.')) {
-      try {
-        await api.delete(`/projects/${id}`);
+  const handleArchive = (id) => {
+    setConfirmModal({
+      show: true,
+      title: 'Archive Project',
+      message: 'Archive this project?',
+      isDangerous: false,
+      action: async () => {
+        await api.patch(`/projects/${id}/archive`);
         load();
-      } catch (error) {
-        alert('Failed to delete project: ' + (error.response?.data?.error || error.message));
-      }
+      },
+      loading: false
+    });
+  };
+
+  const handleUnarchive = (id) => {
+    setConfirmModal({
+      show: true,
+      title: 'Restore Project',
+      message: 'Restore this project?',
+      isDangerous: false,
+      action: async () => {
+        await api.patch(`/projects/${id}/unarchive`);
+        load();
+      },
+      loading: false
+    });
+  };
+
+  const handleDelete = (id) => {
+    setConfirmModal({
+      show: true,
+      title: 'Delete Project',
+      message: 'Are you sure you want to permanently delete this project? This action cannot be undone.',
+      isDangerous: true,
+      action: async () => {
+        try {
+          await api.delete(`/projects/${id}`);
+          load();
+        } catch (error) {
+          alert('Failed to delete project: ' + (error.response?.data?.error || error.message));
+        }
+      },
+      loading: false
+    });
+  };
+
+  const executeConfirmAction = async () => {
+    if (!confirmModal.action) return;
+    setConfirmModal(prev => ({ ...prev, loading: true }));
+    try {
+      await confirmModal.action();
+    } finally {
+      setConfirmModal({ show: false, title: '', message: '', action: null, loading: false, isDangerous: false });
     }
   };
 
@@ -140,9 +179,21 @@ export default function Projects() {
             initial={editing}
             onSave={handleSave}
             onCancel={() => { setShowModal(false); setEditing(null); }}
+            saving={saving}
           />
         </Modal>
       )}
+
+      <ConfirmModal 
+        isOpen={confirmModal.show}
+        title={confirmModal.title}
+        message={confirmModal.message}
+        confirmText={confirmModal.isDangerous ? 'Delete' : 'Confirm'}
+        isDangerous={confirmModal.isDangerous}
+        onConfirm={executeConfirmAction}
+        onCancel={() => setConfirmModal({ show: false, title: '', message: '', action: null, loading: false, isDangerous: false })}
+        loading={confirmModal.loading}
+      />
     </>
   );
 }

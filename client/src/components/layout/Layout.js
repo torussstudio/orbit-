@@ -1,6 +1,8 @@
-import { Outlet, NavLink, useParams } from 'react-router-dom';
+import { useState } from 'react';
+import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import NotificationBell from '../ui/NotificationBell';
+import ConfirmModal from '../ui/ConfirmModal';
 
 const Icon = ({ d }) => (
   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -10,6 +12,22 @@ const Icon = ({ d }) => (
 
 export default function Layout() {
   const { user, logout, isManager } = useAuth();
+  const navigate = useNavigate();
+  const [confirmModal, setConfirmModal] = useState({ show: false, loading: false });
+
+  const handleLogoutClick = () => {
+    setConfirmModal({ show: true, loading: false });
+  };
+
+  const handleConfirmLogout = async () => {
+    setConfirmModal(prev => ({ ...prev, loading: true }));
+    try {
+      await logout();
+      navigate('/login');
+    } finally {
+      setConfirmModal({ show: false, loading: false });
+    }
+  };
 
   return (
     <div className="app-layout">
@@ -51,7 +69,7 @@ export default function Layout() {
               <div className="user-role">{user?.role}</div>
             </div>
             <NotificationBell />
-            <button className="btn-logout" onClick={logout} title="Logout">⏻</button>
+            <button className="btn-logout" onClick={handleLogoutClick} title="Logout">⏻</button>
           </div>
         </div>
       </aside>
@@ -59,6 +77,17 @@ export default function Layout() {
       <main className="main-content">
         <Outlet />
       </main>
+
+      <ConfirmModal 
+        isOpen={confirmModal.show}
+        title="Logout"
+        message="Are you sure you want to log out?"
+        confirmText="Logout"
+        isDangerous={true}
+        onConfirm={handleConfirmLogout}
+        onCancel={() => setConfirmModal({ show: false, loading: false })}
+        loading={confirmModal.loading}
+      />
     </div>
   );
 }

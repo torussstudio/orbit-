@@ -2,6 +2,7 @@ require('dotenv').config();
 
 const express = require('express');
 const cors = require('cors');
+const cookieParser = require('cookie-parser');
 
 // Routes
 const authRoutes = require('./routes/auth');
@@ -33,10 +34,17 @@ if (!process.env.JWT_SECRET) {
 // =========================
 // 🌐 MIDDLEWARE
 // =========================
+
+// 🍪 Cookie parser — must come before routes so req.cookies is populated
+app.use(cookieParser());
+
+// CORS — origin: '*' is incompatible with credentials: true.
+// CLIENT_ORIGIN must be set to your frontend URL (e.g. http://localhost:3000 or https://your-app.vercel.app)
+const allowedOrigin = process.env.CLIENT_ORIGIN || 'http://localhost:3000';
 app.use(
   cors({
-    origin: '*', // can restrict later
-    credentials: true,
+    origin: allowedOrigin,
+    credentials: true, // Required to allow cookies to be sent cross-origin
   })
 );
 

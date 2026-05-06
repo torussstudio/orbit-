@@ -1,8 +1,0 @@
-=3002 : The term '=3002' is not recognized as the name of a cmdlet, function, script file, or operable program. Check 
-the spelling of the name, or if a path was included, verify that the path is correct and try again.
-At line:1 char:1
-+ ='3002'; Set-Location 'c:\Users\gk21\OneDrive\Desktop\orbit-\client'; ...
-+ ~~~~~~~
-    + CategoryInfo          : ObjectNotFound: (=3002:String) [], CommandNotFoundException
-    + FullyQualifiedErrorId : CommandNotFoundException
- 

@@ -1,9 +1,9 @@
 import { useState } from 'react';
 
-export default function TaskForm({ initial, members, clusters, stages, onSave, onCancel }) {
+export default function TaskForm({ initial, members, clusters, stages, onSave, onCancel, hideCluster, saving = false }) {
   const [form, setForm] = useState({
     title: initial?.title || '',
-    description: initial?.description || '',
+    description: initial?.description || initial?.details || initial?.desc || '',
     assignee_id: initial?.assignee_id || '',
     priority: initial?.priority || 'medium',
     stage: initial?.stage || stages[0] || 'Todo',
@@ -51,16 +51,20 @@ export default function TaskForm({ initial, members, clusters, stages, onSave, o
           <input className="form-input" type="date" value={form.due_date || ''} onChange={e => setForm(f => ({ ...f, due_date: e.target.value }))} />
         </div>
       </div>
-      <div className="form-group">
-        <label className="form-label">Cluster (optional)</label>
-        <select className="form-select" value={form.cluster_id} onChange={e => setForm(f => ({ ...f, cluster_id: e.target.value }))}>
-          <option value="">No cluster</option>
-          {clusters?.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-        </select>
-      </div>
+      {!hideCluster && (
+        <div className="form-group">
+          <label className="form-label">Cluster (optional)</label>
+          <select className="form-select" value={form.cluster_id} onChange={e => setForm(f => ({ ...f, cluster_id: e.target.value }))}>
+            <option value="">No cluster</option>
+            {clusters?.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+        </div>
+      )}
       <div className="modal-actions">
         <button className="btn btn-ghost" onClick={onCancel}>Cancel</button>
-        <button className="btn btn-primary" onClick={() => onSave(form)}>Save Task</button>
+        <button className="btn btn-primary" onClick={() => onSave(form)} disabled={saving}>
+          {saving ? 'Saving...' : 'Save Task'}
+        </button>
       </div>
     </>
   );

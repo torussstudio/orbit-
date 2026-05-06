@@ -4,6 +4,7 @@ import api from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { formatDate } from '../utils/helpers';
 import Modal from '../components/ui/Modal';
+import ConfirmModal from '../components/ui/ConfirmModal';
 
 export default function Knowledge({ project: propProject }) {
   const params = useParams();
@@ -18,18 +19,36 @@ export default function Knowledge({ project: propProject }) {
   const [editingNote, setEditingNote] = useState(null);
   const [folderName, setFolderName] = useState('');
   const [uploading, setUploading] = useState(false);
+  const [savingFolder, setSavingFolder] = useState(false);
+  const [savingNote, setSavingNote] = useState(false);
+  const [confirmModal, setConfirmModal] = useState({ show: false, title: '', message: '', action: null, loading: false, isDangerous: false });
   const fileRef = useRef();
 
   const load = () => api.get(`/knowledge/project/${projectId}`).then(r => setData(r.data)).finally(() => setLoading(false));
   useEffect(() => { if (projectId) load(); }, [projectId]);
 
   const createFolder = async () => {
-    await api.post('/knowledge/folders', { project_id: projectId, name: folderName });
-    setShowFolderModal(false); setFolderName(''); load();
+    setSavingFolder(true);
+    try {
+      await api.post('/knowledge/folders', { project_id: projectId, name: folderName });
+      setShowFolderModal(false); setFolderName(''); load();
+    } finally {
+      setSavingFolder(false);
+    }
   };
 
-  const deleteFolder = async id => {
-    if (window.confirm('Delete folder and all its contents?')) { await api.delete(`/knowledge/folders/${id}`); load(); }
+  const deleteFolder = (id) => {
+    setConfirmModal({
+      show: true,
+      title: 'Delete Folder',
+      message: 'Delete folder and all its contents?',
+      isDangerous: true,
+      action: async () => {
+        await api.delete(`/knowledge/folders/${id}`);
+        load();
+      },
+      loading: false
+    });
   };
 
   const handleUpload = async e => {
@@ -45,18 +64,53 @@ export default function Knowledge({ project: propProject }) {
     finally { setUploading(false); fileRef.current.value = ''; }
   };
 
-  const deleteFile = async id => {
-    if (window.confirm('Delete file?')) { await api.delete(`/knowledge/files/${id}`); load(); }
+  const deleteFile = (id) => {
+    setConfirmModal({
+      show: true,
+      title: 'Delete File',
+      message: 'Delete file?',
+      isDangerous: true,
+      action: async () => {
+        await api.delete(`/knowledge/files/${id}`);
+        load();
+      },
+      loading: false
+    });
   };
 
   const saveNote = async () => {
-    if (editingNote) await api.put(`/knowledge/notes/${editingNote.id}`, noteForm);
-    else await api.post('/knowledge/notes', { ...noteForm, project_id: projectId, folder_id: selectedFolder || null });
-    setShowNoteModal(false); setNoteForm({ title: '', content: '' }); setEditingNote(null); load();
+    setSavingNote(true);
+    try {
+      if (editingNote) await api.put(`/knowledge/notes/${editingNote.id}`, noteForm);
+      else await api.post('/knowledge/notes', { ...noteForm, project_id: projectId, folder_id: selectedFolder || null });
+      setShowNoteModal(false); setNoteForm({ title: '', content: '' }); setEditingNote(null); load();
+    } finally {
+      setSavingNote(false);
+    }
   };
 
-  const deleteNote = async id => {
-    if (window.confirm('Delete note?')) { await api.delete(`/knowledge/notes/${id}`); load(); }
+  const deleteNote = (id) => {
+    setConfirmModal({
+      show: true,
+      title: 'Delete Note',
+      message: 'Delete note?',
+      isDangerous: true,
+      action: async () => {
+        await api.delete(`/knowledge/notes/${id}`);
+        load();
+      },
+      loading: false
+    });
+  };
+
+  const executeConfirmAction = async () => {
+    if (!confirmModal.action) return;
+    setConfirmModal(prev => ({ ...prev, loading: true }));
+    try {
+      await confirmModal.action();
+    } finally {
+      setConfirmModal({ show: false, title: '', message: '', action: null, loading: false, isDangerous: false });
+    }
   };
 
   const filteredFiles = data.files.filter(f => selectedFolder ? f.folder_id === selectedFolder : !f.folder_id);
@@ -156,7 +210,9 @@ export default function Knowledge({ project: propProject }) {
           </div>
           <div className="modal-actions">
             <button className="btn btn-ghost" onClick={() => setShowFolderModal(false)}>Cancel</button>
-            <button className="btn btn-primary" onClick={createFolder}>Create</button>
+            <button className="btn btn-primary" onClick={createFolder} disabled={savingFolder}>
+              {savingFolder ? 'Creating...' : 'Create'}
+            </button>
           </div>
         </Modal>
       )}
@@ -173,10 +229,23 @@ export default function Knowledge({ project: propProject }) {
           </div>
           <div className="modal-actions">
             <button className="btn btn-ghost" onClick={() => setShowNoteModal(false)}>Cancel</button>
-            <button className="btn btn-primary" onClick={saveNote}>Save</button>
+            <button className="btn btn-primary" onClick={saveNote} disabled={savingNote}>
+              {savingNote ? 'Saving...' : 'Save'}
+            </button>
           </div>
         </Modal>
       )}
+
+      <ConfirmModal 
+        isOpen={confirmModal.show}
+        title={confirmModal.title}
+        message={confirmModal.message}
+        confirmText={confirmModal.isDangerous ? 'Delete' : 'Confirm'}
+        isDangerous={confirmModal.isDangerous}
+        onConfirm={executeConfirmAction}
+        onCancel={() => setConfirmModal({ show: false, title: '', message: '', action: null, loading: false, isDangerous: false })}
+        loading={confirmModal.loading}
+      />
     </div>
   );
 }

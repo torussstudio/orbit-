@@ -159,6 +159,8 @@ const initDB = async () => {
     )
   `);
 
+  await ensureColumn("tasks", `parent_task_id ${refType(taskIdType)} REFERENCES tasks(id) ON DELETE CASCADE`);
+
   await pool.query(`
     CREATE TABLE IF NOT EXISTS task_comments (
       id ${idDefinition(defaultIdType)},
