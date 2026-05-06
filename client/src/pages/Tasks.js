@@ -91,7 +91,7 @@ function BoardView({ tasks, stages, projectId, onEdit, onDelete, onUpdate, isMan
           <div key={stage} style={{ minWidth: '240px', width: '240px' }}
             onDragOver={e => e.preventDefault()}
             onDrop={e => { e.preventDefault(); handleDrop(e.dataTransfer.getData('taskId'), stage); }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+            <div style={{ display: 'flex', justifyContent: 'start', alignItems: 'center', marginBottom: '8px', flex-direction: row-reverse;, gap: 20px;}}>
               <span style={{ fontSize: '11px', fontWeight: 700, letterSpacing: '1px', textTransform: 'uppercase', color: 'var(--text-2)' }}>{stage}</span>
               <span style={{ fontSize: '11px', background: 'var(--bg-4)', borderRadius: '10px', padding: '1px 7px', color: 'var(--text-3)' }}>{stageTasks.length}</span>
             </div>
