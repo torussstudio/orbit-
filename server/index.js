@@ -17,6 +17,7 @@ const calendarRoutes = require('./routes/calendar');
 const notificationRoutes = require('./routes/notifications');
 
 const app = express();
+app.set('trust proxy', 1);
 
 
 // =========================
@@ -40,11 +41,32 @@ app.use(cookieParser());
 
 // CORS — origin: '*' is incompatible with credentials: true.
 // CLIENT_ORIGIN must be set to your frontend URL (e.g. http://localhost:3000 or https://your-app.vercel.app)
-const allowedOrigin = process.env.CLIENT_ORIGIN || 'http://localhost:3000';
+const allowedOrigins = [
+  'http://localhost:3000',
+  'http://localhost:5173',
+  'https://orbit.torusdxn.in',
+];
+
+if (
+  process.env.CLIENT_ORIGIN &&
+  !allowedOrigins.includes(process.env.CLIENT_ORIGIN)
+) {
+  allowedOrigins.push(process.env.CLIENT_ORIGIN);
+}
+
 app.use(
   cors({
-    origin: allowedOrigin,
-    credentials: true, // Required to allow cookies to be sent cross-origin
+    origin: function (origin, callback) {
+      // Allow Postman / server-to-server requests
+      if (!origin) return callback(null, true);
+
+      if (allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+
+      return callback(new Error(`CORS blocked for origin: ${origin}`));
+    },
+    credentials: true,
   })
 );
 
@@ -89,9 +111,20 @@ app.get('/health', (req, res) => {
 app.use((err, req, res, next) => {
   console.error("🔥 GLOBAL ERROR:", err);
 
+  // Handle CORS errors cleanly
+  if (err.message?.includes('CORS')) {
+    return res.status(403).json({
+      error: 'CORS blocked',
+      message: err.message,
+    });
+  }
+
   res.status(500).json({
     error: 'Server error',
-    message: err.message,
+    message:
+      process.env.NODE_ENV === 'production'
+        ? 'Internal server error'
+        : err.message,
   });
 });
 
