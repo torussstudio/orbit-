@@ -62,8 +62,6 @@ router.post("/login", async (req, res) => {
     // Store refresh token as httpOnly cookie; JS never sees it.
     res.cookie("orbit_refresh", refreshToken, getRefreshCookieOptions());
 
-    // Best-effort cleanup of legacy session cookies.
-    res.clearCookie("orbit_token", { path: "/" });
 
     res.json({
       user,
@@ -177,10 +175,10 @@ if (!stored) {
 // Clears the auth cookie to invalidate the session.
 // =========================
 router.post("/logout", async (req, res) => {
-const allowedOrigins =
-  process.env.ALLOWED_ORIGINS?.split(",").map(origin =>
-    origin.trim()
-  ) || [];
+const allowedOrigins = [
+  "http://localhost:3000",
+  "https://orbit.torusdxn.in",
+];
 
   const origin = req.get("origin");
 
