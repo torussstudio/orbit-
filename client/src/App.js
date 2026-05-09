@@ -1,5 +1,6 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { AuthProvider, useAuth } from './context/AuthContext';
+import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { AuthProvider } from './context/AuthContext';
+import { RequireAuth, RequireManager } from './routes/guards';
 import Layout from './components/layout/Layout';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
@@ -14,19 +15,13 @@ import Knowledge from './pages/Knowledge';
 import Members from './pages/Members';
 import Calendar from './pages/Calendar';
 
-function PrivateRoute({ children }) {
-  const { user, loading } = useAuth();
-  if (loading) return <div className="loading-screen"><div className="spinner" /></div>;
-  return user ? children : <Navigate to="/login" />;
-}
-
 export default function App() {
   return (
     <AuthProvider>
       <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
         <Routes>
           <Route path="/login" element={<Login />} />
-          <Route path="/" element={<PrivateRoute><Layout /></PrivateRoute>}>
+          <Route path="/" element={<RequireAuth><Layout /></RequireAuth>}>
             <Route index element={<Dashboard />} />
             <Route path="projects" element={<Projects />} />
             <Route path="projects/:id" element={<ProjectDetail />} />
@@ -36,7 +31,7 @@ export default function App() {
             <Route path="projects/:id/clusters/:clusterId" element={<ClusterDetail />} />
             <Route path="projects/:id/credentials" element={<Credentials />} />
             <Route path="projects/:id/knowledge" element={<Knowledge />} />
-            <Route path="members" element={<Members />} />
+            <Route path="members" element={<RequireManager><Members /></RequireManager>} />
             <Route path="calendar" element={<Calendar />} />
           </Route>
         </Routes>

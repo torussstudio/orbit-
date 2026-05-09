@@ -102,6 +102,21 @@ const initDB = async () => {
   `);
 
   await pool.query(`
+    CREATE TABLE IF NOT EXISTS refresh_tokens (
+      id ${idDefinition(defaultIdType)},
+      member_id ${refType(memberIdType)} REFERENCES members(id) ON DELETE CASCADE,
+      jti TEXT UNIQUE NOT NULL,
+      expires_at TIMESTAMPTZ NOT NULL,
+      revoked_at TIMESTAMPTZ,
+      replaced_by TEXT,
+      revoke_reason TEXT,
+      user_agent TEXT,
+      ip_address TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS projects (
       id ${idDefinition(projectIdType)},
       name VARCHAR(255) NOT NULL,

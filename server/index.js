@@ -27,8 +27,12 @@ if (!process.env.DATABASE_URL) {
   console.error("❌ DATABASE_URL is missing");
 }
 
-if (!process.env.JWT_SECRET) {
-  console.error("❌ JWT_SECRET is missing");
+if (!process.env.JWT_ACCESS_SECRET && !process.env.JWT_SECRET) {
+  console.error("❌ JWT_ACCESS_SECRET (or legacy JWT_SECRET) is missing");
+}
+
+if (!process.env.JWT_REFRESH_SECRET && !process.env.JWT_SECRET) {
+  console.error("❌ JWT_REFRESH_SECRET (or legacy JWT_SECRET) is missing");
 }
 
 
@@ -40,18 +44,25 @@ if (!process.env.JWT_SECRET) {
 app.use(cookieParser());
 
 // CORS — origin: '*' is incompatible with credentials: true.
-// CLIENT_ORIGIN must be set to your frontend URL (e.g. http://localhost:3000 or https://your-app.vercel.app)
+// Supports multiple env origins via CLIENT_ORIGIN / CLIENT_ORIGINS (comma separated).
 const allowedOrigins = [
   'http://localhost:3000',
+  'http://localhost:3001',
   'http://localhost:5173',
   'https://orbit.torusdxn.in',
 ];
 
-if (
-  process.env.CLIENT_ORIGIN &&
-  !allowedOrigins.includes(process.env.CLIENT_ORIGIN)
-) {
-  allowedOrigins.push(process.env.CLIENT_ORIGIN);
+const envOrigins = [
+  process.env.CLIENT_ORIGIN,
+  ...(process.env.CLIENT_ORIGINS || '').split(','),
+]
+  .map(v => String(v || '').trim())
+  .filter(Boolean);
+
+for (const origin of envOrigins) {
+  if (!allowedOrigins.includes(origin)) {
+    allowedOrigins.push(origin);
+  }
 }
 
 app.use(
@@ -100,7 +111,12 @@ app.get('/health', (req, res) => {
   res.json({
     status: 'ok',
     database: process.env.DATABASE_URL ? 'connected' : 'missing',
-    jwt: process.env.JWT_SECRET ? 'configured' : 'missing',
+    jwt:
+      process.env.JWT_ACCESS_SECRET ||
+      process.env.JWT_REFRESH_SECRET ||
+      process.env.JWT_SECRET
+        ? 'configured'
+        : 'missing',
   });
 });
 

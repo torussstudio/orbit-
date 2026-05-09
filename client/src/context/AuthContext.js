@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useEffect } from 'react';
-import api from '../api/client';
+import api, { clearClientAuthState, setLogoutInProgress } from '../api/client';
+import { setAccessToken } from '../api/tokenStore';
 
 const AuthContext = createContext(null);
 
@@ -13,32 +14,63 @@ export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [accessToken, setAccessTokenState] = useState(null);
 
-  // Attempt to restore session on app mount by calling /auth/me.
-  // The httpOnly cookie is sent automatically by the browser.
-  // No localStorage check needed.
-  useEffect(() => {
-    // Proactively clean up any legacy localStorage tokens to fix hybrid state
+  const clearClientSideAuth = () => {
     localStorage.removeItem('orbit_token');
     localStorage.removeItem('token');
     localStorage.removeItem('refreshToken');
     localStorage.removeItem('adminToken');
+    sessionStorage.removeItem('orbit_token');
+    sessionStorage.removeItem('token');
+    sessionStorage.removeItem('refreshToken');
+    sessionStorage.removeItem('adminToken');
 
-    api.get('/auth/me')
+    clearClientAuthState();
+    setAccessTokenState(null);
+    setUser(null);
+    setError(null);
+  };
+
+  useEffect(() => {
+    // Proactively clean up any legacy browser token storage.
+    localStorage.removeItem('orbit_token');
+    localStorage.removeItem('token');
+    localStorage.removeItem('refreshToken');
+    localStorage.removeItem('adminToken');
+    sessionStorage.removeItem('orbit_token');
+    sessionStorage.removeItem('token');
+    sessionStorage.removeItem('refreshToken');
+    sessionStorage.removeItem('adminToken');
+
+    const onLogout = () => {
+      clearClientSideAuth();
+    };
+    window.addEventListener('orbit:logout', onLogout);
+
+    api.post('/auth/refresh')
       .then(r => {
-        setUser(r.data);
+        const token = r.data?.accessToken;
+        const u = r.data?.user;
+        if (token) {
+          setAccessToken(token);
+          setAccessTokenState(token);
+        }
+        if (u) {
+          setUser(u);
+        }
         setError(null);
       })
       .catch(err => {
-        // 401 means no valid session — this is expected when logged out
-        // Don't treat 401 as an error, just leave user as null
         if (err.response?.status !== 401) {
-          console.error('Auth check failed:', err.message);
+          console.error('Auth restore failed:', err.message);
           setError(err.message);
         }
-        setUser(null);
+        clearClientSideAuth();
       })
       .finally(() => setLoading(false));
+
+    return () => window.removeEventListener('orbit:logout', onLogout);
   }, []);
 
   // =========================
@@ -50,6 +82,10 @@ export function AuthProvider({ children }) {
     try {
       const { data } = await api.post('/auth/login', { email, password });
       setUser(data.user);
+      if (data.accessToken) {
+        setAccessToken(data.accessToken);
+        setAccessTokenState(data.accessToken);
+      }
       setError(null);
       return data.user;
     } catch (err) {
@@ -65,25 +101,20 @@ export function AuthProvider({ children }) {
   // Then clears client-side user state.
   // =========================
   const logout = async () => {
+    setLogoutInProgress(true);
     try {
       await api.post('/auth/logout');
     } catch (err) {
-      // Even if the server call fails, clear local state
       console.error('Logout request failed:', err.message);
     } finally {
-      // Clear any legacy localStorage tokens just to be sure
-      localStorage.removeItem('orbit_token');
-      localStorage.removeItem('token');
-      localStorage.removeItem('refreshToken');
-      localStorage.removeItem('adminToken');
-      
-      setUser(null);
-      setError(null);
+      clearClientSideAuth();
+      setLogoutInProgress(false);
+      window.dispatchEvent(new Event('orbit:logout'));
     }
   };
 
   return (
-    <AuthContext.Provider value={{ user, login, logout, loading, error, isManager: user?.role === 'manager' }}>
+    <AuthContext.Provider value={{ user, accessToken, login, logout, loading, error, isManager: user?.role === 'manager' }}>
       {children}
     </AuthContext.Provider>
   );
