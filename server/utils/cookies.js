@@ -11,9 +11,8 @@ function baseCookieOptions() {
   return {
     httpOnly: true,
     secure: prod,
-    sameSite: "lax",
+    sameSite: prod ? "none" : "lax",
     path: "/",
-    domain: cookieDomain(),
   };
 }
 
