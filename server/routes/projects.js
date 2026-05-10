@@ -65,7 +65,6 @@ router.post("/", auth, managerOnly, async (req, res) => {
             "In Progress",
             "In Review",
             "Done",
-            "Deployed",
           ],
         ),
         req.user.id,

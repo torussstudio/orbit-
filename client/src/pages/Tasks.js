@@ -24,7 +24,7 @@ export default function Tasks({ project: propProject }) {
   const [subTaskParent, setSubTaskParent] = useState(null);
   const [deleteConfirm, setDeleteConfirm] = useState({ show: false, id: null, loading: false });
 
-  const stages = propProject?.custom_stages || ["Todo","In Progress","In Review","Done","Deployed"];
+  const stages = propProject?.custom_stages || ["Todo","In Progress","In Review","Done"];
 
   const load = () => {
     Promise.all([
@@ -106,26 +106,33 @@ export default function Tasks({ project: propProject }) {
 
 function BoardView({ tasks, stages, projectId, onEdit, onDelete, onUpdate, isManager, onAddSubTask }) {
   const { user } = useAuth();
+  const [dragOver, setDragOver] = useState(null);
 
-  const handleDrop = async (taskId, newStage) => {
-    const task = tasks.find(t => t.id === taskId);
+   const handleDrop = async (taskId, newStage) => {
+    const id = parseInt(taskId) || taskId;
+    const task = tasks.find(t => String(t.id) === String(taskId));
     if (!task) return;
-    const managerOnly = ['Done', 'Deployed'];
-    if (user.role === 'developer' && managerOnly.includes(newStage)) return;
+    if (task.stage === newStage) return;
+    const managerOnly = ['Done'];
+    if (user.role === 'member' && managerOnly.includes(newStage)) return;
     try {
-      await api.put(`/tasks/${taskId}`, { ...task, stage: newStage });
+      await api.put(`/tasks/${task.id}`, { ...task, stage: newStage });
       onUpdate();
-    } catch {}
+    } catch (e) {
+      console.error('Drop failed:', e);
+    }
   };
 
   return (
-    <div style={{ display: 'flex', gap: '12px', overflowX: 'auto', paddingBottom: '12px' }}>
+    <div style={{ display: 'flex', gap: '20px', overflowX: 'auto', paddingBottom: '12px' }}>
       {stages.map(stage => {
         const stageTasks = tasks.filter(t => t.stage === stage);
         return (
-          <div key={stage} style={{ minWidth: '240px', width: '240px' }}
-            onDragOver={e => e.preventDefault()}
-            onDrop={e => { e.preventDefault(); handleDrop(e.dataTransfer.getData('taskId'), stage); }}>
+          // AFTER
+          <div key={stage} style={{ minWidth: '290px', width: '290px', borderRadius: '10px', padding: '8px', transition: 'background 0.2s', background: dragOver === stage ? 'var(--bg-3)' : 'transparent' }}
+            onDragOver={e => { e.preventDefault(); setDragOver(stage); }}
+            onDragLeave={() => setDragOver(null)}
+            onDrop={e => { e.preventDefault(); setDragOver(null); handleDrop(e.dataTransfer.getData('taskId'), stage); }}>
             <div
 style={{ display: 'flex', justifyContent: 'start', alignItems: 'center', marginBottom: '8px', flexDirection: 'row-reverse', gap: '15px' }}>
               <span style={{ fontSize: '11px', fontWeight: 700, letterSpacing: '1px', textTransform: 'uppercase', color: 'var(--text-2)' }}>{stage}</span>
@@ -146,7 +153,7 @@ style={{ display: 'flex', justifyContent: 'start', alignItems: 'center', marginB
 function TaskCard({ task, projectId, onEdit, onDelete, isManager, onAddSubTask }) {
   const overdue = isOverdue(task.due_date, task.stage);
   return (
-    <div draggable onDragStart={e => e.dataTransfer.setData('taskId', task.id)}
+    <div draggable onDragStart={e => { e.dataTransfer.setData('taskId', String(task.id)); e.dataTransfer.effectAllowed = 'move'; }}
       className="card" style={{ padding: '12px', cursor: 'grab', borderColor: overdue ? 'rgba(248,113,113,0.3)' : undefined }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '6px' }}>
         <Link to={`/projects/${projectId}/tasks/${task.id}`} style={{ fontSize: '13px', color: 'var(--text)', textDecoration: 'none', fontWeight: 500, lineHeight: 1.4, flex: 1 }}>{task.title}</Link>

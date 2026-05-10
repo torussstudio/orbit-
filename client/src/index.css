@@ -257,7 +257,6 @@ body {
 .badge-inprogress { background: rgba(245,158,11,0.12); color: var(--warning); }
 .badge-inreview { background: rgba(139,92,246,0.12); color: var(--accent-2); }
 .badge-done { background: rgba(16,185,129,0.12); color: var(--success); }
-.badge-deployed { background: rgba(16,185,129,0.2); color: var(--success); }
 .badge-blocked { background: rgba(239,68,68,0.12); color: var(--danger); }
 .badge-low { background: rgba(99,102,241,0.08); color: var(--accent); }
 .badge-medium { background: rgba(245,158,11,0.12); color: var(--warning); }

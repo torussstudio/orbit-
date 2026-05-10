@@ -42,7 +42,7 @@ export default function ClusterDetail() {
           <div className="breadcrumb">
             <Link to="/projects">Projects</Link>
             <span className="breadcrumb-sep">/</span>
-            <Link to={`/projects/${projectId}`}>Project</Link>
+             <Link to={`/projects/${projectId}`}>{cluster.project_name || 'Project'}</Link>
             <span className="breadcrumb-sep">/</span>
             <span>Cluster</span>
           </div>

@@ -550,7 +550,7 @@ function MonthView({ current, getItemsForDate, onDayClick }) {
         ))}
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', overflow:'auto'}}>
         {cells.map((date, index) => {
           if (!date) {
             return (

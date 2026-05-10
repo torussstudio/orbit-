@@ -1,6 +1,6 @@
 import { useState } from 'react';
 
-export default function TaskForm({ initial, members, clusters, stages, onSave, onCancel, hideCluster, saving = false }) {
+export default function TaskForm({ initial, members, clusters, stages, onSave, onCancel, hideCluster, saving = false, userRole }) {
   const [form, setForm] = useState({
     title: initial?.title || '',
     description: initial?.description || initial?.details || initial?.desc || '',
@@ -10,6 +10,9 @@ export default function TaskForm({ initial, members, clusters, stages, onSave, o
     due_date: initial?.due_date || '',
     cluster_id: initial?.cluster_id || '',
   });
+
+  // AFTER
+  const allowedStages = userRole === 'member' ? stages.filter(s => s !== 'Done') : stages;
 
   return (
     <>
@@ -43,7 +46,7 @@ export default function TaskForm({ initial, members, clusters, stages, onSave, o
         <div className="form-group">
           <label className="form-label">Stage</label>
           <select className="form-select" value={form.stage} onChange={e => setForm(f => ({ ...f, stage: e.target.value }))}>
-            {stages.map(s => <option key={s} value={s}>{s}</option>)}
+           {allowedStages.map(s => <option key={s} value={s}>{s}</option>)}
           </select>
         </div>
         <div className="form-group">

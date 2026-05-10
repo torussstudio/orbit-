@@ -15,13 +15,13 @@ router.get("/", auth, async (req, res) => {
         ),
         db.query(`SELECT t.id,t.title,t.due_date,t.stage,p.name as project_name,m.name as assignee_name
         FROM tasks t JOIN projects p ON t.project_id=p.id LEFT JOIN members m ON t.assignee_id=m.id
-        WHERE t.due_date < NOW() AND t.stage NOT IN ('Done','Deployed') ORDER BY t.due_date LIMIT 10`),
+        WHERE t.due_date < NOW() AND t.stage NOT IN ('Done') ORDER BY t.due_date LIMIT 10`),
         db.query(
           `SELECT id,name,rework_count,status FROM clusters WHERE rework_count > 0 ORDER BY rework_count DESC LIMIT 5`,
         ),
         db.query(`SELECT m.id,m.name,COUNT(t.id) as task_count FROM members m
-        LEFT JOIN tasks t ON t.assignee_id=m.id AND t.stage NOT IN ('Done','Deployed')
-        WHERE m.role='developer' AND m.active=true GROUP BY m.id,m.name`),
+        LEFT JOIN tasks t ON t.assignee_id=m.id AND t.stage NOT IN ('Done')
+        WHERE m.role='member' AND m.active=true GROUP BY m.id,m.name`),
       ]);
     return res.json({
       projects: projects.rows,
@@ -34,13 +34,13 @@ router.get("/", auth, async (req, res) => {
     const [myTasks, overdue, recentComments] = await Promise.all([
       db.query(
         `SELECT t.*,p.name as project_name FROM tasks t JOIN projects p ON t.project_id=p.id
-        WHERE t.assignee_id=$1 AND t.stage NOT IN ('Done','Deployed') ORDER BY t.due_date NULLS LAST`,
+        WHERE t.assignee_id=$1 AND t.stage NOT IN ('Done') ORDER BY t.due_date NULLS LAST`,
         [req.user.id],
       ),
       db.query(
         `SELECT t.id,t.title,t.due_date,p.name as project_name FROM tasks t
         JOIN projects p ON t.project_id=p.id
-        WHERE t.assignee_id=$1 AND t.due_date < NOW() AND t.stage NOT IN ('Done','Deployed')
+        WHERE t.assignee_id=$1 AND t.due_date < NOW() AND t.stage NOT IN ('Done')
         ORDER BY t.due_date`,
         [req.user.id],
       ),

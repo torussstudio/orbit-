@@ -11,7 +11,7 @@ export default function Members() {
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState(null);
-  const [form, setForm] = useState({ name: '', email: '', password: '', role: 'developer', skills: '' });
+  const [form, setForm] = useState({ name: '', email: '', password: '', role: 'member', skills: '' });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [confirmModal, setConfirmModal] = useState({ show: false, title: '', message: '', action: null, loading: false, isDangerous: false });
@@ -19,7 +19,7 @@ export default function Members() {
   const load = () => api.get('/members').then(r => setMembers(r.data)).finally(() => setLoading(false));
   useEffect(() => { load(); }, []);
 
-  const openCreate = () => { setEditing(null); setForm({ name: '', email: '', password: '', role: 'developer', skills: '' }); setError(''); setShowModal(true); };
+  const openCreate = () => { setEditing(null); setForm({ name: '', email: '', password: '', role: 'member', skills: '' }); setError(''); setShowModal(true); };
   const openEdit = m => { setEditing(m); setForm({ name: m.name, email: m.email, password: '', role: m.role, skills: m.skills?.join(', ') || '' }); setError(''); setShowModal(true); };
 
   const handleSave = async () => {
@@ -136,7 +136,7 @@ export default function Members() {
             <div className="form-group">
               <label className="form-label">Role</label>
               <select className="form-select" value={form.role} onChange={e => setForm(f => ({ ...f, role: e.target.value }))}>
-                <option value="developer">Developer</option>
+                <option value="member">Member</option>
                 <option value="manager">Manager</option>
               </select>
             </div>
@@ -151,7 +151,7 @@ export default function Members() {
           </div>
           <div className="form-group">
             <label className="form-label">Skills (comma-separated)</label>
-            <input className="form-input" value={form.skills} onChange={e => setForm(f => ({ ...f, skills: e.target.value }))} placeholder="React, Node.js, CSS" />
+            <input className="form-input" value={form.skills} onChange={e => setForm(f => ({ ...f, skills: e.target.value }))} placeholder="Designer, Video Editor, Content Writer  " />
           </div>
           {error && <div style={{ color: 'var(--danger)', fontSize: '13px', marginBottom: '12px', padding: '8px 12px', background: 'rgba(248,113,113,0.1)', borderRadius: '6px' }}>{error}</div>}
           <div className="modal-actions">

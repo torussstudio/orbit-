@@ -2,7 +2,7 @@ const router = require("express").Router();
 const db = require("../db");
 const { auth, managerOnly } = require("../middleware/auth");
 
-const COMPLETED_TASK_STAGES = ["Done", "Deployed"];
+const COMPLETED_TASK_STAGES = ["Done"];
 
 function parseMemberEmails(rawMembers) {
   if (!rawMembers) return [];

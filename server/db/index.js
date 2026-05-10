@@ -93,7 +93,7 @@ const initDB = async () => {
       name VARCHAR(255) NOT NULL,
       email VARCHAR(255) UNIQUE NOT NULL,
       password_hash VARCHAR(255) NOT NULL,
-      role VARCHAR(20) NOT NULL CHECK (role IN ('manager', 'developer')),
+      role VARCHAR(20) NOT NULL CHECK (role IN ('manager', 'member')),
       birthday DATE,
       skills TEXT[],
       active BOOLEAN DEFAULT true,
@@ -125,7 +125,7 @@ const initDB = async () => {
       status VARCHAR(30) DEFAULT 'active' CHECK (status IN ('active', 'on_hold', 'completed', 'archived')),
       start_date DATE,
       end_date DATE,
-      custom_stages JSONB DEFAULT '["Todo","In Progress","In Review","Done","Deployed"]',
+      custom_stages JSONB DEFAULT '["Todo","In Progress","In Review","Done"]',
       created_by ${refType(memberIdType)} REFERENCES members(id),
       created_at TIMESTAMPTZ DEFAULT NOW()
     )
@@ -306,6 +306,17 @@ const initDB = async () => {
       read BOOLEAN DEFAULT false,
       created_at TIMESTAMPTZ DEFAULT NOW()
     )
+  `);
+
+  // Migration: remove 'Deployed' from existing projects' custom_stages
+  await pool.query(`
+    UPDATE projects
+    SET custom_stages = (
+      SELECT jsonb_agg(stage)
+      FROM jsonb_array_elements_text(custom_stages) AS stage
+      WHERE stage != 'Deployed'
+    )
+    WHERE custom_stages @> '["Deployed"]'::jsonb
   `);
 
   console.log("Database schema ready");

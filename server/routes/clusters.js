@@ -13,9 +13,12 @@ router.get("/project/:projectId", auth, async (req, res) => {
 });
 
 router.get("/:id", auth, async (req, res) => {
-  const { rows } = await db.query("SELECT * FROM clusters WHERE id=$1", [
-    req.params.id,
-  ]);
+  const { rows } = await db.query(
+    `SELECT c.*, p.name as project_name FROM clusters c 
+     JOIN projects p ON c.project_id = p.id 
+     WHERE c.id=$1`,
+    [req.params.id]
+  );
   if (!rows[0]) return res.status(404).json({ error: "Not found" });
   const tasks = await db.query(
     `SELECT t.*, m.name as assignee_name FROM tasks t LEFT JOIN members m ON t.assignee_id=m.id

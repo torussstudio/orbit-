@@ -84,6 +84,17 @@ export default function TaskDetail() {
     });
   };
 
+  const handleSubTaskStageClick = async (st) => {
+    const allowedStages = isManager
+      ? ['Todo', 'In Progress', 'In Review', 'Done']
+      : ['Todo', 'In Progress', 'In Review'];
+    const currentIndex = allowedStages.indexOf(st.stage);
+    const nextIndex = currentIndex === -1 ? 0 : (currentIndex + 1) % allowedStages.length;
+    const nextStage = allowedStages[nextIndex];
+    await api.put(`/tasks/${st.id}`, { ...st, stage: nextStage });
+    load();
+  };
+
   const executeConfirmAction = async () => {
     if (!confirmModal.action) return;
     setConfirmModal(prev => ({ ...prev, loading: true }));
@@ -97,20 +108,28 @@ export default function TaskDetail() {
   if (loading) return <div className="loading-screen"><div className="spinner" /></div>;
   if (!task) return <div className="page-body">Task not found.</div>;
 
-  const stages = project?.custom_stages || ["Todo","In Progress","In Review","Done","Deployed"];
-  const allowedStages = isManager ? stages : stages.filter(s => !['Done','Deployed'].includes(s));
+  const stages = project?.custom_stages || ["Todo","In Progress","In Review","Done"];
+  const allowedStages = isManager ? stages : stages.filter(s => !['Done'].includes(s));
 
 
   return (
     <>
       <div className="page-header">
         <div>
-          <div className="breadcrumb">
+           <div className="breadcrumb">
             <Link to="/projects">Projects</Link>
             <span className="breadcrumb-sep">/</span>
             <Link to={`/projects/${projectId}`}>{project?.name}</Link>
             <span className="breadcrumb-sep">/</span>
-            <span>Task</span>
+            {task.parent_task_id ? (
+              <>
+                <Link to={`/projects/${projectId}/tasks/${task.parent_task_id}`}>Task</Link>
+                <span className="breadcrumb-sep">/</span>
+                <span>Sub Task</span>
+              </>
+            ) : (
+              <span>Task</span>
+            )}
           </div>
           <div className="page-title" style={{ fontSize: '18px' }}>{task.title}</div>
         </div>
@@ -147,7 +166,12 @@ export default function TaskDetail() {
                     <div>
                       <Link to={`/projects/${projectId}/tasks/${st.id}`} style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text)', textDecoration: 'none', display: 'block', marginBottom: '4px' }}>{st.title}</Link>
                       <div style={{ display: 'flex', gap: '8px', fontSize: '11px', color: 'var(--text-3)' }}>
-                        <span className={`badge badge-${st.stage?.toLowerCase().replace(/\s/g,'')}`}>{st.stage}</span>
+                        <span
+                          className={`badge badge-${st.stage?.toLowerCase().replace(/\s/g,'')}`}
+                          onClick={() => handleSubTaskStageClick(st)}
+                          style={{ cursor: 'pointer' }}
+                          title="Click to advance stage"
+                        >{st.stage} →</span>
                         <span>{st.assignee_name || 'Unassigned'}</span>
                       </div>
                     </div>
@@ -162,20 +186,41 @@ export default function TaskDetail() {
             </div>
           )}
 
-          {/* Stage changer */}
-          <div className="card" style={{ marginBottom: '16px' }}>
-            <h3 style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-2)', marginBottom: '12px' }}>Move Stage</h3>
-            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-              {allowedStages.map(s => (
-                <button key={s} onClick={() => handleStageChange(s)}
-                  disabled={changingStage !== null}
-                  className={`btn ${task.stage === s ? 'btn-primary' : 'btn-ghost'} btn-sm`}>
-                  {changingStage === s ? 'Moving...' : s}
-                </button>
-              ))}
+          {/* Stage changer - Manager only, not shown for subtasks */}
+          {isManager && !task.parent_task_id && (
+            <div className="card" style={{ marginBottom: '16px' }}>
+              <h3 style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-2)', marginBottom: '12px' }}>Move Stage</h3>
+              <p style={{ fontSize: '11px', color: 'var(--text-3)', marginBottom: '10px' }}>
+                This task moves to Done automatically when all subtasks are completed. You can also move it manually.
+              </p>
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                {stages.map(s => (
+                  <button key={s} onClick={() => handleStageChange(s)}
+                    disabled={changingStage !== null}
+                    className={`btn ${task.stage === s ? 'btn-primary' : 'btn-ghost'} btn-sm`}>
+                    {changingStage === s ? 'Moving...' : s}
+                  </button>
+                ))}
+              </div>
             </div>
-            {!isManager && <p style={{ fontSize: '11px', color: 'var(--text-3)', marginTop: '8px' }}>Manager approval required to mark Done or Deployed.</p>}
-          </div>
+          )}
+
+          {/* Stage changer - shown inside subtasks for everyone */}
+          {task.parent_task_id && (
+            <div className="card" style={{ marginBottom: '16px' }}>
+              <h3 style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-2)', marginBottom: '12px' }}>Move Stage</h3>
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                {allowedStages.map(s => (
+                  <button key={s} onClick={() => handleStageChange(s)}
+                    disabled={changingStage !== null}
+                    className={`btn ${task.stage === s ? 'btn-primary' : 'btn-ghost'} btn-sm`}>
+                    {changingStage === s ? 'Moving...' : s}
+                  </button>
+                ))}
+              </div>
+              {!isManager && <p style={{ fontSize: '11px', color: 'var(--text-3)', marginTop: '8px' }}>Manager approval required to mark Done</p>}
+            </div>
+          )}
 
           {/* Comments */}
           <div className="card">
@@ -242,6 +287,7 @@ export default function TaskDetail() {
             onSave={handleSaveSubTask}
             onCancel={() => setShowSubTaskModal(false)}
             saving={savingSubTask}
+            userRole={user?.role}
           />
         </Modal>
       )}

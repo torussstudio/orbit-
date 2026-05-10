@@ -2,7 +2,7 @@ const router = require("express").Router();
 const db = require("../db");
 const { auth, managerOnly } = require("../middleware/auth");
 
-const MANAGER_STAGES = ["Done", "Deployed"];
+const MANAGER_STAGES = ["Done"];
 
 router.get("/project/:projectId", auth, async (req, res) => {
   const { rows } = await db.query(
@@ -77,11 +77,30 @@ router.post("/", auth, managerOnly, async (req, res) => {
       req.user.id,
     ],
   );
-  const actionLabel = parent_task_id ? "[Sub Task] Created sub task" : "Created task";
+   const actionLabel = parent_task_id ? "[Sub Task] Created sub task" : "Created task";
   await db.query(
     `INSERT INTO task_activity(task_id,actor_id,action) VALUES($1,$2,$3)`,
     [rows[0].id, req.user.id, actionLabel],
   );
+
+  // If a new subtask is added to a Done parent task, reset parent back to In Progress
+  if (parent_task_id) {
+    const { rows: parentRows } = await db.query(
+      `SELECT stage FROM tasks WHERE id = $1`,
+      [parent_task_id]
+    );
+    if (parentRows[0]?.stage === 'Done') {
+      await db.query(
+        `UPDATE tasks SET stage = 'In Progress', updated_at = NOW() WHERE id = $1`,
+        [parent_task_id]
+      );
+      await db.query(
+        `INSERT INTO task_activity(task_id,actor_id,action,meta) VALUES($1,$2,$3,$4)`,
+        [parent_task_id, req.user.id, 'Stage changed', JSON.stringify({ from: 'Done', to: 'In Progress' })]
+      );
+    }
+  }
+
   res.status(201).json(rows[0]);
 });
 
@@ -102,7 +121,7 @@ router.put("/:id", auth, async (req, res) => {
 
   const isSubTask = Boolean(task.rows[0].parent_task_id);
 
-  if (req.user.role === "developer") {
+  if (req.user.role === "member") {
     if (MANAGER_STAGES.includes(stage))
       return res
         .status(403)
@@ -120,6 +139,29 @@ router.put("/:id", auth, async (req, res) => {
         JSON.stringify({ from: task.rows[0].stage, to: stage }),
       ],
     );
+
+    if (task.rows[0].parent_task_id) {
+      const { rows: siblings } = await db.query(
+        `SELECT stage FROM tasks WHERE parent_task_id = $1`,
+        [task.rows[0].parent_task_id]
+      );
+      const allDone = siblings.every(s => s.stage === 'Done');
+      const { rows: parentRows } = await db.query(
+        `SELECT stage FROM tasks WHERE id = $1`,
+        [task.rows[0].parent_task_id]
+      );
+      if (allDone && parentRows[0]?.stage !== 'Done') {
+        await db.query(
+          `UPDATE tasks SET stage = 'Done', updated_at = NOW() WHERE id = $1`,
+          [task.rows[0].parent_task_id]
+        );
+      } else if (!allDone && parentRows[0]?.stage === 'Done') {
+        await db.query(
+          `UPDATE tasks SET stage = 'In Progress', updated_at = NOW() WHERE id = $1`,
+          [task.rows[0].parent_task_id]
+        );
+      }
+    }
     return res.json(rows[0]);
   }
 
@@ -148,11 +190,70 @@ router.put("/:id", auth, async (req, res) => {
       ],
     );
   }
+// AFTER
+  // Auto-complete parent task if all subtasks are Done
+   if (task.rows[0].parent_task_id) {
+    const { rows: siblings } = await db.query(
+      `SELECT stage FROM tasks WHERE parent_task_id = $1`,
+      [task.rows[0].parent_task_id]
+    );
+    const allDone = siblings.every(s => s.stage === 'Done');
+    const { rows: parentRows } = await db.query(
+      `SELECT stage FROM tasks WHERE id = $1`,
+      [task.rows[0].parent_task_id]
+    );
+    if (allDone && parentRows[0]?.stage !== 'Done') {
+      await db.query(
+        `UPDATE tasks SET stage = 'Done', updated_at = NOW() WHERE id = $1`,
+        [task.rows[0].parent_task_id]
+      );
+    } else if (!allDone && parentRows[0]?.stage === 'Done') {
+      await db.query(
+        `UPDATE tasks SET stage = 'In Progress', updated_at = NOW() WHERE id = $1`,
+        [task.rows[0].parent_task_id]
+      );
+    }
+  }
   res.json(rows[0]);
 });
 
 router.delete("/:id", auth, managerOnly, async (req, res) => {
+  const { rows: taskRows } = await db.query("SELECT * FROM tasks WHERE id=$1", [req.params.id]);
+  const parentId = taskRows[0]?.parent_task_id || null;
+
   await db.query("DELETE FROM tasks WHERE id=$1", [req.params.id]);
+
+  if (parentId) {
+    const { rows: siblings } = await db.query(
+      `SELECT stage FROM tasks WHERE parent_task_id = $1`,
+      [parentId]
+    );
+    const { rows: parentRows } = await db.query(
+      `SELECT stage FROM tasks WHERE id = $1`,
+      [parentId]
+    );
+
+    if (siblings.length === 0) {
+      await db.query(
+        `UPDATE tasks SET stage = 'Todo', updated_at = NOW() WHERE id = $1`,
+        [parentId]
+      );
+    } else {
+      const allDone = siblings.every(s => s.stage === 'Done');
+      if (allDone && parentRows[0]?.stage !== 'Done') {
+        await db.query(
+          `UPDATE tasks SET stage = 'Done', updated_at = NOW() WHERE id = $1`,
+          [parentId]
+        );
+      } else if (!allDone && parentRows[0]?.stage === 'Done') {
+        await db.query(
+          `UPDATE tasks SET stage = 'In Progress', updated_at = NOW() WHERE id = $1`,
+          [parentId]
+        );
+      }
+    }
+  }
+
   res.json({ success: true });
 });
 

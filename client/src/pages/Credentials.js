@@ -163,7 +163,7 @@ export default function Credentials({ project: propProject }) {
             <label className="form-label">Visibility</label>
             <select className="form-select" value={clusterForm.visibility} onChange={e => setClusterForm(f => ({ ...f, visibility: e.target.value }))}>
               <option value="private">🔒 Private — Manager only</option>
-              <option value="public">👁 Public — Visible to developers (values masked)</option>
+              <option value="public">👁 Public — Visible to members (values masked)</option>
             </select>
           </div>
           <div className="modal-actions">

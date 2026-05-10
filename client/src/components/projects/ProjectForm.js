@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import api from '../../api/client';
 
-const DEFAULT_STAGES = ["Todo","In Progress","In Review","Done","Deployed"];
+const DEFAULT_STAGES = ["Todo","In Progress","In Review","Done"];
 
 export default function ProjectForm({ initial, onSave, onCancel, saving = false }) {
   const [form, setForm] = useState({
