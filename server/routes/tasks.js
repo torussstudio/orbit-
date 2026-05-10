@@ -49,7 +49,11 @@ router.get("/:id", auth, async (req, res) => {
   });
 });
 
-router.post("/", auth, managerOnly, async (req, res) => {
+router.post("/", auth, async (req, res) => {
+  // Only managers can create main tasks; members can create subtasks
+  if (req.user.role === 'member' && !req.body.parent_task_id) {
+    return res.status(403).json({ error: 'Only managers can create main tasks' });
+  }
   const {
     project_id,
     cluster_id,
@@ -126,9 +130,10 @@ router.put("/:id", auth, async (req, res) => {
       return res
         .status(403)
         .json({ error: "Manager approval required for this stage" });
+    const time_taken = req.body.time_taken !== undefined ? req.body.time_taken : task.rows[0].time_taken;
     const { rows } = await db.query(
-      "UPDATE tasks SET stage=$1,updated_at=NOW() WHERE id=$2 RETURNING *",
-      [stage, req.params.id],
+      "UPDATE tasks SET stage=$1,updated_at=NOW(),time_taken=$2 WHERE id=$3 RETURNING *",
+      [stage, time_taken, req.params.id],
     );
     await db.query(
       `INSERT INTO task_activity(task_id,actor_id,action,meta) VALUES($1,$2,$3,$4)`,
@@ -166,18 +171,9 @@ router.put("/:id", auth, async (req, res) => {
   }
 
   const { rows } = await db.query(
-    `UPDATE tasks SET title=$1,description=$2,assignee_id=$3,priority=$4,stage=$5,due_date=$6,cluster_id=$7,updated_at=NOW()
-     WHERE id=$8 RETURNING *`,
-    [
-      title,
-      description,
-      assignee_id || null,
-      priority,
-      stage,
-      due_date || null,
-      cluster_id || null,
-      req.params.id,
-    ],
+    `UPDATE tasks SET title=$1,description=$2,assignee_id=$3,priority=$4,stage=$5,due_date=$6,cluster_id=$7,updated_at=NOW(),time_taken=$8
+     WHERE id=$9 RETURNING *`,
+    [title, description, assignee_id || null, priority, stage, due_date || null, cluster_id || null, req.body.time_taken ?? task.rows[0].time_taken, req.params.id],
   );
   if (task.rows[0].stage !== stage) {
     await db.query(

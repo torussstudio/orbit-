@@ -25,6 +25,10 @@ export default function TaskDetail() {
   const [savingSubTask, setSavingSubTask] = useState(false);
   const [confirmModal, setConfirmModal] = useState({ show: false, title: '', message: '', action: null, loading: false, isDangerous: false });
 
+  const [timeTakenModal, setTimeTakenModal] = useState({ show: false, subtask: null, nextStage: null });
+  const [timeTakenInput, setTimeTakenInput] = useState('');
+  const [timeTakenError, setTimeTakenError] = useState('');
+
   const load = () => {
     Promise.all([
       api.get(`/tasks/${taskId}`),
@@ -84,14 +88,35 @@ export default function TaskDetail() {
     });
   };
 
-  const handleSubTaskStageClick = async (st) => {
+   const handleSubTaskStageClick = async (st) => {
     const allowedStages = isManager
       ? ['Todo', 'In Progress', 'In Review', 'Done']
       : ['Todo', 'In Progress', 'In Review'];
     const currentIndex = allowedStages.indexOf(st.stage);
     const nextIndex = currentIndex === -1 ? 0 : (currentIndex + 1) % allowedStages.length;
     const nextStage = allowedStages[nextIndex];
+
+    // Show time taken modal when moving In Progress → In Review
+    if (st.stage === 'In Progress' && nextStage === 'In Review') {
+      setTimeTakenInput('');
+      setTimeTakenError('');
+      setTimeTakenModal({ show: true, subtask: st, nextStage });
+      return;
+    }
+
     await api.put(`/tasks/${st.id}`, { ...st, stage: nextStage });
+    load();
+  };
+
+  const handleTimeTakenSubmit = async () => {
+    if (!timeTakenInput || isNaN(timeTakenInput) || parseInt(timeTakenInput) <= 0) {
+      setTimeTakenError('Please enter a valid time in minutes.');
+      return;
+    }
+    const { subtask, nextStage } = timeTakenModal;
+    await api.put(`/tasks/${subtask.id}`, { ...subtask, stage: nextStage, time_taken: parseInt(timeTakenInput) });
+    setTimeTakenModal({ show: false, subtask: null, nextStage: null });
+    setTimeTakenInput('');
     load();
   };
 
@@ -153,7 +178,14 @@ export default function TaskDetail() {
           {!task.parent_task_id && (
             <div className="card" style={{ marginBottom: '16px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-              <h3 style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-2)' }}>Sub Tasks ({task.subtasks?.length || 0})</h3>
+              <h3 style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-2)' }}>
+                Sub Tasks ({task.subtasks?.length || 0})
+                {task.subtasks?.some(s => s.time_taken) && (
+                  <span style={{ marginLeft: '12px', fontSize: '11px', color: 'var(--accent)', fontWeight: 600 }}>
+                    ⏱ Total: {task.subtasks.reduce((sum, s) => sum + (s.time_taken || 0), 0)} min
+                  </span>
+                )}
+              </h3>
               <button className="btn btn-ghost btn-sm" onClick={() => { setEditingSubTask(null); setShowSubTaskModal(true); }}>+ Add Sub Task</button>
             </div>
             
@@ -165,14 +197,10 @@ export default function TaskDetail() {
                   <div key={st.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 12px', background: 'var(--bg-3)', borderRadius: '6px', borderLeft: `3px solid ${PRIORITY_COLORS[st.priority]}` }}>
                     <div>
                       <Link to={`/projects/${projectId}/tasks/${st.id}`} style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text)', textDecoration: 'none', display: 'block', marginBottom: '4px' }}>{st.title}</Link>
-                      <div style={{ display: 'flex', gap: '8px', fontSize: '11px', color: 'var(--text-3)' }}>
-                        <span
-                          className={`badge badge-${st.stage?.toLowerCase().replace(/\s/g,'')}`}
-                          onClick={() => handleSubTaskStageClick(st)}
-                          style={{ cursor: 'pointer' }}
-                          title="Click to advance stage"
-                        >{st.stage} →</span>
+                      <div style={{ display: 'flex', gap: '8px', fontSize: '11px', color: 'var(--text-3)', flexWrap: 'wrap' }}>
+                        <span className={`badge badge-${st.stage?.toLowerCase().replace(/\s/g,'')}`} onClick={() => handleSubTaskStageClick(st)} style={{ cursor: 'pointer' }} title="Click to advance stage">{st.stage} →</span>
                         <span>{st.assignee_name || 'Unassigned'}</span>
+                        {st.time_taken && <span style={{ color: 'var(--accent)', fontWeight: 600 }}>⏱ {st.time_taken} min</span>}
                       </div>
                     </div>
                     <div style={{ display: 'flex', gap: '6px' }}>
@@ -254,6 +282,9 @@ export default function TaskDetail() {
               ['Due Date', formatDate(task.due_date)],
               ['Cluster', task.cluster_name || '—'],
               ['Created', formatDate(task.created_at)],
+              ...(task.subtasks?.some(s => s.time_taken)
+                ? [['Total Time', `⏱ ${task.subtasks.reduce((sum, s) => sum + (s.time_taken || 0), 0)} min`]]
+                : []),
             ].map(([l, v]) => (
               <div key={l} style={{ display: 'flex', justifyContent: 'space-between', padding: '7px 0', borderBottom: '1px solid var(--border)', fontSize: '13px' }}>
                 <span style={{ color: 'var(--text-3)' }}>{l}</span>
@@ -302,6 +333,32 @@ export default function TaskDetail() {
         onCancel={() => setConfirmModal({ show: false, title: '', message: '', action: null, loading: false, isDangerous: false })}
         loading={confirmModal.loading}
       />
+
+      {timeTakenModal.show && (
+        <Modal title="Time Taken" onClose={() => setTimeTakenModal({ show: false, subtask: null, nextStage: null })}>
+          <p style={{ fontSize: '13px', color: 'var(--text-2)', marginBottom: '16px' }}>
+            Moving <strong>{timeTakenModal.subtask?.title}</strong> to <strong>In Review</strong>.
+            How long did this subtask take?
+          </p>
+          <div className="form-group">
+            <label className="form-label">Time Taken (minutes) *</label>
+            <input
+              className="form-input"
+              type="number"
+              min="1"
+              value={timeTakenInput}
+              onChange={e => { setTimeTakenInput(e.target.value); setTimeTakenError(''); }}
+              placeholder="e.g. 45"
+              autoFocus
+            />
+            {timeTakenError && <div style={{ color: 'var(--danger)', fontSize: '12px', marginTop: '6px' }}>{timeTakenError}</div>}
+          </div>
+          <div className="modal-actions">
+            <button className="btn btn-ghost" onClick={() => setTimeTakenModal({ show: false, subtask: null, nextStage: null })}>Cancel</button>
+            <button className="btn btn-primary" onClick={handleTimeTakenSubmit}>Confirm & Move</button>
+          </div>
+        </Modal>
+      )}
     </>
   );
 }

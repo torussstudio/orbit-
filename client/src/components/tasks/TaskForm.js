@@ -9,10 +9,23 @@ export default function TaskForm({ initial, members, clusters, stages, onSave, o
     stage: initial?.stage || stages[0] || 'Todo',
     due_date: initial?.due_date || '',
     cluster_id: initial?.cluster_id || '',
+    time_taken: initial?.time_taken || '',
   });
+  const [timeTakenError, setTimeTakenError] = useState('');
+
+  const handleSave = () => {
+    const isMovingToReview = form.stage === 'In Review' && initial?.stage === 'In Progress';
+    if (isMovingToReview && (!form.time_taken || isNaN(form.time_taken) || parseInt(form.time_taken) <= 0)) {
+      setTimeTakenError('Please enter time taken before moving to In Review.');
+      return;
+    }
+    onSave({ ...form, time_taken: form.time_taken ? parseInt(form.time_taken) : null });
+  };
 
   // AFTER
-  const allowedStages = userRole === 'member' ? stages.filter(s => s !== 'Done') : stages;
+  const allowedStages = userRole === 'member'
+    ? (initial ? stages.filter(s => s !== 'Done') : stages.filter(s => s !== 'Done' && s !== 'In Review'))
+    : stages;
 
   return (
     <>
@@ -54,6 +67,38 @@ export default function TaskForm({ initial, members, clusters, stages, onSave, o
           <input className="form-input" type="date" value={form.due_date || ''} onChange={e => setForm(f => ({ ...f, due_date: e.target.value }))} />
         </div>
       </div>
+      {(form.stage === 'In Review' && (initial?.stage === 'In Progress' || (initial?.stage === 'In Review' && !initial?.time_taken))) && (
+        <div className="form-group" style={{ background: 'var(--bg-3)', padding: '14px', borderRadius: '8px', border: '1px solid var(--border)' }}>
+          <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <span>⏱</span>
+            <span>Time Taken (minutes) <span style={{ color: 'var(--danger)' }}>*</span></span>
+          </label>
+          <input
+            className="form-input"
+            type="number"
+            min="1"
+            value={form.time_taken}
+            onChange={e => { setForm(f => ({ ...f, time_taken: e.target.value })); setTimeTakenError(''); }}
+            placeholder="e.g. 45"
+            autoFocus
+          />
+          <div style={{ fontSize: '11px', color: 'var(--text-3)', marginTop: '6px' }}>
+            How long did this subtask take to reach In Review?
+          </div>
+          {timeTakenError && (
+            <div style={{ color: 'var(--danger)', fontSize: '12px', marginTop: '6px', padding: '6px 10px', background: 'rgba(248,113,113,0.1)', borderRadius: '4px' }}>
+              ⚠ {timeTakenError}
+            </div>
+          )}
+        </div>
+      )}
+
+      {form.time_taken && initial?.stage === 'In Review' && initial?.time_taken && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 14px', background: 'var(--bg-3)', borderRadius: '8px', fontSize: '13px', color: 'var(--accent)' }}>
+          <span>⏱</span>
+          <span>Time logged: <strong>{form.time_taken} min</strong></span>
+        </div>
+      )}
       {!hideCluster && (
         <div className="form-group">
           <label className="form-label">Cluster (optional)</label>
@@ -65,7 +110,7 @@ export default function TaskForm({ initial, members, clusters, stages, onSave, o
       )}
       <div className="modal-actions">
         <button className="btn btn-ghost" onClick={onCancel}>Cancel</button>
-        <button className="btn btn-primary" onClick={() => onSave(form)} disabled={saving}>
+        <button className="btn btn-primary" onClick={handleSave} disabled={saving}>
           {saving ? 'Saving...' : 'Save Task'}
         </button>
       </div>
