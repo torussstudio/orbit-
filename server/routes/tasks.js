@@ -130,10 +130,13 @@ router.put("/:id", auth, async (req, res) => {
       return res
         .status(403)
         .json({ error: "Manager approval required for this stage" });
-    const time_taken = req.body.time_taken !== undefined ? req.body.time_taken : task.rows[0].time_taken;
+    const incomingTime = req.body.time_taken ? parseInt(req.body.time_taken) : 0;
+  const existingTime = task.rows[0].time_taken || 0;
+  const time_taken = incomingTime > 0 ? existingTime + incomingTime : (existingTime > 0 ? existingTime : null);
+    const isRework = stage === 'Rework';
     const { rows } = await db.query(
-      "UPDATE tasks SET stage=$1,updated_at=NOW(),time_taken=$2 WHERE id=$3 RETURNING *",
-      [stage, time_taken, req.params.id],
+      "UPDATE tasks SET stage=$1,updated_at=NOW(),time_taken=$2,rework_count=rework_count+$3 WHERE id=$4 RETURNING *",
+      [stage, time_taken, isRework ? 1 : 0, req.params.id],
     );
     await db.query(
       `INSERT INTO task_activity(task_id,actor_id,action,meta) VALUES($1,$2,$3,$4)`,
@@ -160,7 +163,7 @@ router.put("/:id", auth, async (req, res) => {
           `UPDATE tasks SET stage = 'Done', updated_at = NOW() WHERE id = $1`,
           [task.rows[0].parent_task_id]
         );
-      } else if (!allDone && parentRows[0]?.stage === 'Done') {
+      } else if ((!allDone || hasRework) && parentRows[0]?.stage === 'Done') {
         await db.query(
           `UPDATE tasks SET stage = 'In Progress', updated_at = NOW() WHERE id = $1`,
           [task.rows[0].parent_task_id]
@@ -170,10 +173,14 @@ router.put("/:id", auth, async (req, res) => {
     return res.json(rows[0]);
   }
 
+  const incomingTime = req.body.time_taken ? parseInt(req.body.time_taken) : 0;
+  const existingTime = task.rows[0].time_taken || 0;
+  const time_taken = incomingTime > 0 ? existingTime + incomingTime : (existingTime > 0 ? existingTime : null);
+  const isRework = stage === 'Rework';
   const { rows } = await db.query(
-    `UPDATE tasks SET title=$1,description=$2,assignee_id=$3,priority=$4,stage=$5,due_date=$6,cluster_id=$7,updated_at=NOW(),time_taken=$8
-     WHERE id=$9 RETURNING *`,
-    [title, description, assignee_id || null, priority, stage, due_date || null, cluster_id || null, req.body.time_taken ?? task.rows[0].time_taken, req.params.id],
+    `UPDATE tasks SET title=$1,description=$2,assignee_id=$3,priority=$4,stage=$5,due_date=$6,cluster_id=$7,updated_at=NOW(),time_taken=$8,rework_count=rework_count+$9
+     WHERE id=$10 RETURNING *`,
+    [title, description, assignee_id || null, priority, stage, due_date || null, cluster_id || null, time_taken, isRework ? 1 : 0, req.params.id],
   );
   if (task.rows[0].stage !== stage) {
     await db.query(
@@ -194,6 +201,7 @@ router.put("/:id", auth, async (req, res) => {
       [task.rows[0].parent_task_id]
     );
     const allDone = siblings.every(s => s.stage === 'Done');
+    const hasRework = siblings.some(s => s.stage === 'Rework');
     const { rows: parentRows } = await db.query(
       `SELECT stage FROM tasks WHERE id = $1`,
       [task.rows[0].parent_task_id]

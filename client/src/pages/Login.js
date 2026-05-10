@@ -27,8 +27,22 @@ export default function Login() {
       <div style={{ width: '100%', maxWidth: '380px' }}>
         {/* Logo */}
         <div style={{ textAlign: 'center', marginBottom: '40px' }}>
-          <div style={{ fontSize: '36px', fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--accent)', letterSpacing: '4px', marginBottom: '6px' }}>
-            ⬡ ORBIT
+          <div
+  style={{
+    fontSize: '36px',
+    fontFamily: 'var(--font-mono)',
+    fontWeight: 700,
+    color: 'var(--accent)',
+    letterSpacing: '4px',
+    marginBottom: '6px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: '10px'
+  }}
+>
+            <span>⬡</span>
+            <span>ORBIT</span>
           </div>
           <div style={{ fontSize: '12px', color: 'var(--text-3)', letterSpacing: '2px', textTransform: 'uppercase' }}>
             Agency OS

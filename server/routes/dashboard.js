@@ -17,7 +17,11 @@ router.get("/", auth, async (req, res) => {
         FROM tasks t JOIN projects p ON t.project_id=p.id LEFT JOIN members m ON t.assignee_id=m.id
         WHERE t.due_date < NOW() AND t.stage NOT IN ('Done') ORDER BY t.due_date LIMIT 10`),
         db.query(
-          `SELECT id,name,rework_count,status FROM clusters WHERE rework_count > 0 ORDER BY rework_count DESC LIMIT 5`,
+          `SELECT id,name,rework_count,status FROM clusters WHERE rework_count > 0
+           UNION ALL
+           SELECT t.id, t.title as name, t.rework_count, t.stage as status FROM tasks t
+           WHERE t.rework_count > 0 AND t.parent_task_id IS NOT NULL
+           ORDER BY rework_count DESC LIMIT 5`,
         ),
         db.query(`SELECT m.id,m.name,COUNT(t.id) as task_count FROM members m
         LEFT JOIN tasks t ON t.assignee_id=m.id AND t.stage NOT IN ('Done')
