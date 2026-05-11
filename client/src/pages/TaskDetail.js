@@ -29,6 +29,10 @@ export default function TaskDetail() {
   const [timeTakenInput, setTimeTakenInput] = useState('');
   const [timeTakenError, setTimeTakenError] = useState('');
 
+  const [managerReviewModal, setManagerReviewModal] = useState({ show: false, subtask: null });
+  const [reworkDeadline, setReworkDeadline] = useState('');
+  const [reviewAction, setReviewAction] = useState(null);
+
   const load = () => {
     Promise.all([
       api.get(`/tasks/${taskId}`),
@@ -88,47 +92,63 @@ export default function TaskDetail() {
     });
   };
 
-   const handleSubTaskStageClick = async (st) => {
-    const forwardStages = isManager
-      ? ['Todo', 'In Progress', 'In Review', 'Done']
-      : ['Todo', 'In Progress', 'In Review'];
+    const handleSubTaskStageClick = async (st) => {
+    const memberStages = ['Todo', 'In Progress', 'In Review'];
+    const managerStages = ['Todo', 'In Progress', 'In Review', 'Done'];
 
-    // If currently at last forward stage or in Rework, next is Rework confirmation
-    const isAtEnd = isManager ? st.stage === 'Done' : st.stage === 'In Review';
-    const isInRework = st.stage === 'Rework';
-
-    if (isAtEnd) {
-      setReworkConfirm({ show: true, subtask: st });
+    // MEMBER flow: stop at In Review, no rework
+    if (!isManager) {
+      if (st.stage === 'In Review') return; // stop here for members
+      const currentIndex = memberStages.indexOf(st.stage);
+      const nextIndex = currentIndex === -1 ? 0 : currentIndex + 1;
+      const nextStage = memberStages[nextIndex];
+      // Show time taken modal for members only
+      if (st.stage === 'In Progress' && nextStage === 'In Review') {
+        setTimeTakenInput('');
+        setTimeTakenError('');
+        setTimeTakenModal({ show: true, subtask: st, nextStage });
+        return;
+      }
+      await api.put(`/tasks/${st.id}`, { ...st, stage: nextStage, time_taken: null });
+      load();
       return;
     }
 
-    // From Rework, go back to Todo
-    if (isInRework) {
+    // MANAGER flow
+    if (st.stage === 'In Review') {
+      // Show Done/Rework choice modal
+      setManagerReviewModal({ show: true, subtask: st });
+      setReviewAction(null);
+      setReworkDeadline('');
+      return;
+    }
+
+    if (st.stage === 'Done') {
+      // Loop back to Todo for managers
       await api.put(`/tasks/${st.id}`, { ...st, stage: 'Todo', time_taken: null });
       load();
       return;
     }
 
-    const currentIndex = forwardStages.indexOf(st.stage);
+    const currentIndex = managerStages.indexOf(st.stage);
     const nextIndex = currentIndex === -1 ? 0 : currentIndex + 1;
-    const nextStage = forwardStages[nextIndex] || forwardStages[0];
-
-    // Show time taken modal when moving In Progress → In Review
-    if (st.stage === 'In Progress' && nextStage === 'In Review') {
-      setTimeTakenInput('');
-      setTimeTakenError('');
-      setTimeTakenModal({ show: true, subtask: st, nextStage });
-      return;
-    }
-
+    const nextStage = managerStages[nextIndex];
     await api.put(`/tasks/${st.id}`, { ...st, stage: nextStage, time_taken: null });
     load();
   };
 
-  const handleReworkConfirm = async () => {
-    const { subtask } = reworkConfirm;
-    await api.put(`/tasks/${subtask.id}`, { ...subtask, stage: 'Rework', time_taken: null });
-    setReworkConfirm({ show: false, subtask: null });
+  const handleManagerReviewSubmit = async () => {
+    const { subtask } = managerReviewModal;
+    if (!reviewAction) return;
+    await api.put(`/tasks/${subtask.id}`, {
+      ...subtask,
+      stage: reviewAction === 'done' ? 'Done' : 'Rework',
+      time_taken: null,
+      new_due_date: reviewAction === 'rework' && reworkDeadline ? reworkDeadline : null
+    });
+    setManagerReviewModal({ show: false, subtask: null });
+    setReviewAction(null);
+    setReworkDeadline('');
     load();
   };
 
@@ -224,12 +244,12 @@ export default function TaskDetail() {
                     <div>
                       <Link to={`/projects/${projectId}/tasks/${st.id}`} style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text)', textDecoration: 'none', display: 'block', marginBottom: '4px' }}>{st.title}</Link>
                       <div style={{ display: 'flex', gap: '8px', fontSize: '11px', color: 'var(--text-3)', flexWrap: 'wrap' }}>
-                        <span
+                         <span
                           className={`badge badge-${st.stage?.toLowerCase().replace(/\s/g,'')}`}
                           onClick={() => handleSubTaskStageClick(st)}
-                          style={{ cursor: 'pointer', border: st.stage === 'Rework' ? '1px solid var(--danger)' : undefined }}
-                          title={st.stage === 'Rework' ? 'Click to restart from Todo' : 'Click to advance stage'}
-                        >{st.stage === 'Rework' ? '↺ Rework' : `${st.stage} →`}</span>
+                          style={{ cursor: !isManager && st.stage === 'In Review' ? 'default' : 'pointer' }}
+                          title={!isManager && st.stage === 'In Review' ? 'Awaiting manager review' : 'Click to advance stage'}
+                        >{st.stage}{!isManager && st.stage === 'In Review' ? '' : ' →'}</span>
                         <span>{st.assignee_name || 'Unassigned'}</span>
                         {st.time_taken && <span style={{ color: 'var(--accent)', fontWeight: 600 }}>⏱ {st.time_taken} min</span>}
                         {st.rework_count > 0 && <span style={{ color: 'var(--danger)', fontWeight: 600 }}>↺ {st.rework_count} rework{st.rework_count > 1 ? 's' : ''}</span>}
@@ -393,22 +413,47 @@ export default function TaskDetail() {
         
       )}
 
-        {reworkConfirm.show && (
-        <Modal title="Move to Rework?" onClose={() => setReworkConfirm({ show: false, subtask: null })}>
-          <div style={{ textAlign: 'center', padding: '8px 0 20px' }}>
-            <div style={{ fontSize: '40px', marginBottom: '12px' }}>↺</div>
-            <p style={{ fontSize: '14px', color: 'var(--text)', fontWeight: 600, marginBottom: '8px' }}>
-              Move "{reworkConfirm.subtask?.title}" to Rework?
-            </p>
-            <p style={{ fontSize: '13px', color: 'var(--text-3)' }}>
-              This will mark the subtask as needing rework and increment its rework counter.
-              Click the stage pill again to restart from Todo.
-            </p>
+       {managerReviewModal.show && (
+        <Modal title="Review Subtask" onClose={() => { setManagerReviewModal({ show: false, subtask: null }); setReviewAction(null); setReworkDeadline(''); }}>
+          <p style={{ fontSize: '13px', color: 'var(--text-2)', marginBottom: '20px' }}>
+            What would you like to do with <strong>"{managerReviewModal.subtask?.title}"</strong>?
+          </p>
+          <div style={{ display: 'flex', gap: '12px', marginBottom: '20px' }}>
+            <div
+              onClick={() => setReviewAction('done')}
+              style={{ flex: 1, padding: '16px', borderRadius: '8px', border: `2px solid ${reviewAction === 'done' ? 'var(--success)' : 'var(--border)'}`, cursor: 'pointer', textAlign: 'center', background: reviewAction === 'done' ? 'rgba(16,185,129,0.08)' : 'var(--bg-2)', transition: 'all 0.15s' }}>
+              <div style={{ fontSize: '28px', marginBottom: '8px' }}>✅</div>
+              <div style={{ fontSize: '13px', fontWeight: 600, color: reviewAction === 'done' ? 'var(--success)' : 'var(--text)' }}>Mark as Done</div>
+              <div style={{ fontSize: '11px', color: 'var(--text-3)', marginTop: '4px' }}>Subtask is completed</div>
+            </div>
+            <div
+              onClick={() => setReviewAction('rework')}
+              style={{ flex: 1, padding: '16px', borderRadius: '8px', border: `2px solid ${reviewAction === 'rework' ? 'var(--danger)' : 'var(--border)'}`, cursor: 'pointer', textAlign: 'center', background: reviewAction === 'rework' ? 'rgba(248,113,113,0.08)' : 'var(--bg-2)', transition: 'all 0.15s' }}>
+              <div style={{ fontSize: '28px', marginBottom: '8px' }}>↺</div>
+              <div style={{ fontSize: '13px', fontWeight: 600, color: reviewAction === 'rework' ? 'var(--danger)' : 'var(--text)' }}>Send for Rework</div>
+              <div style={{ fontSize: '11px', color: 'var(--text-3)', marginTop: '4px' }}>Needs more work</div>
+            </div>
           </div>
+          {reviewAction === 'rework' && (
+            <div className="form-group" style={{ background: 'var(--bg-3)', padding: '14px', borderRadius: '8px', border: '1px solid var(--border)', marginBottom: '16px' }}>
+              <label className="form-label">New Deadline (optional)</label>
+              <input
+                className="form-input"
+                type="date"
+                value={reworkDeadline}
+                onChange={e => setReworkDeadline(e.target.value)}
+              />
+              <div style={{ fontSize: '11px', color: 'var(--text-3)', marginTop: '6px' }}>Set a new due date for the rework cycle</div>
+            </div>
+          )}
           <div className="modal-actions">
-            <button className="btn btn-ghost" onClick={() => setReworkConfirm({ show: false, subtask: null })}>Cancel</button>
-            <button className="btn btn-primary" style={{ background: 'var(--danger)', borderColor: 'var(--danger)' }} onClick={handleReworkConfirm}>
-              ↺ Move to Rework
+            <button className="btn btn-ghost" onClick={() => { setManagerReviewModal({ show: false, subtask: null }); setReviewAction(null); setReworkDeadline(''); }}>Cancel</button>
+            <button
+              className="btn btn-primary"
+              onClick={handleManagerReviewSubmit}
+              disabled={!reviewAction}
+              style={reviewAction === 'rework' ? { background: 'var(--danger)', borderColor: 'var(--danger)' } : {}}>
+              {reviewAction === 'done' ? '✅ Mark Done' : reviewAction === 'rework' ? '↺ Send for Rework' : 'Select an action'}
             </button>
           </div>
         </Modal>

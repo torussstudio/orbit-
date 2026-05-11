@@ -33,12 +33,15 @@ export default function InReview() {
     } finally { setActionLoading(null); }
   };
 
+  const [reworkDeadline, setReworkDeadline] = useState('');
+
   const handleRework = async () => {
     const { subtask } = reworkModal;
     setActionLoading(subtask.id + '_rework');
     try {
-      await api.put(`/tasks/${subtask.id}`, { ...subtask, stage: 'Rework', time_taken: null });
+      await api.put(`/tasks/${subtask.id}`, { ...subtask, stage: 'Rework', time_taken: null, new_due_date: reworkDeadline || null });
       setReworkModal({ show: false, subtask: null });
+      setReworkDeadline('');
       load();
     } finally { setActionLoading(null); }
   };
@@ -187,8 +190,13 @@ export default function InReview() {
               This will mark the subtask as needing rework and increment its rework counter.
             </p>
           </div>
+          <div className="form-group" style={{ background: 'var(--bg-3)', padding: '14px', borderRadius: '8px', border: '1px solid var(--border)', marginBottom: '4px' }}>
+            <label className="form-label">New Deadline (optional)</label>
+            <input className="form-input" type="date" value={reworkDeadline} onChange={e => setReworkDeadline(e.target.value)} />
+            <div style={{ fontSize: '11px', color: 'var(--text-3)', marginTop: '6px' }}>Set a new due date for the rework cycle</div>
+          </div>
           <div className="modal-actions">
-            <button className="btn btn-ghost" onClick={() => setReworkModal({ show: false, subtask: null })}>Cancel</button>
+            <button className="btn btn-ghost" onClick={() => { setReworkModal({ show: false, subtask: null }); setReworkDeadline(''); }}>Cancel</button>
             <button className="btn btn-primary"
               style={{ background: 'var(--danger)', borderColor: 'var(--danger)' }}
               onClick={handleRework}
