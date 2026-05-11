@@ -58,6 +58,12 @@ export default function Layout() {
                 Members
               </NavLink>
             )}
+            {isManager && (
+              <NavLink to="/in-review">
+                <Icon d="M9 11l3 3L22 4M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11" />
+                In Review
+              </NavLink>
+            )}
           </nav>
         </div>
 

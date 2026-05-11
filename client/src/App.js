@@ -14,6 +14,7 @@ import Credentials from './pages/Credentials';
 import Knowledge from './pages/Knowledge';
 import Members from './pages/Members';
 import Calendar from './pages/Calendar';
+import InReview from './pages/InReview';
 
 export default function App() {
   return (
@@ -33,6 +34,7 @@ export default function App() {
             <Route path="projects/:id/knowledge" element={<Knowledge />} />
             <Route path="members" element={<RequireManager><Members /></RequireManager>} />
             <Route path="calendar" element={<Calendar />} />
+            <Route path="in-review" element={<RequireManager><InReview /></RequireManager>} />
           </Route>
         </Routes>
       </BrowserRouter>

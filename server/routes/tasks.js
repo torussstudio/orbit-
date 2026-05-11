@@ -270,4 +270,26 @@ router.post("/:id/comments", auth, async (req, res) => {
   res.status(201).json(rows[0]);
 });
 
+router.get("/in-review/all", auth, async (req, res) => {
+  try {
+    const { rows } = await db.query(
+      `SELECT 
+        t.id, t.title, t.stage, t.time_taken, t.rework_count, t.updated_at,
+        t.parent_task_id,
+        pt.title as parent_task_title,
+        p.id as project_id, p.name as project_name,
+        m.name as assignee_name
+       FROM tasks t
+       LEFT JOIN tasks pt ON t.parent_task_id = pt.id
+       LEFT JOIN projects p ON t.project_id = p.id
+       LEFT JOIN members m ON t.assignee_id = m.id
+       WHERE t.stage = 'In Review' AND t.parent_task_id IS NOT NULL
+       ORDER BY t.updated_at DESC`
+    );
+    res.json(rows);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 module.exports = router;
