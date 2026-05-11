@@ -104,7 +104,7 @@ export default function TaskDetail() {
 
     // From Rework, go back to Todo
     if (isInRework) {
-      await api.put(`/tasks/${st.id}`, { ...st, stage: 'Todo' });
+      await api.put(`/tasks/${st.id}`, { ...st, stage: 'Todo', time_taken: null });
       load();
       return;
     }
@@ -121,13 +121,13 @@ export default function TaskDetail() {
       return;
     }
 
-    await api.put(`/tasks/${st.id}`, { ...st, stage: nextStage });
+    await api.put(`/tasks/${st.id}`, { ...st, stage: nextStage, time_taken: null });
     load();
   };
 
   const handleReworkConfirm = async () => {
     const { subtask } = reworkConfirm;
-    await api.put(`/tasks/${subtask.id}`, { ...subtask, stage: 'Rework' });
+    await api.put(`/tasks/${subtask.id}`, { ...subtask, stage: 'Rework', time_taken: null });
     setReworkConfirm({ show: false, subtask: null });
     load();
   };

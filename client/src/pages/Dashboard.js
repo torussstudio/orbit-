@@ -41,7 +41,6 @@ function ManagerDash({ data }) {
   if (!data) return null;
   const totalTasks = data.tasks_by_stage?.reduce((s, r) => s + parseInt(r.count), 0) || 0;
   const doneTasks = data.tasks_by_stage?.find(r => r.stage === 'Done')?.count || 0;
-  const deployedTasks = data.tasks_by_stage?.find(r => r.stage === 'Deployed')?.count || 0;
 
   return (
     <>
@@ -55,7 +54,7 @@ function ManagerDash({ data }) {
           <div className="stat-label">Total Tasks</div>
         </div>
         <div className="stat-card">
-          <div className="stat-value" style={{ color: 'var(--success)' }}>{parseInt(doneTasks) + parseInt(deployedTasks)}</div>
+          <div className="stat-value" style={{ color: 'var(--success)' }}>{parseInt(doneTasks)}</div>
           <div className="stat-label">Completed Tasks</div>
         </div>
         <div className="stat-card">
@@ -90,7 +89,7 @@ function ManagerDash({ data }) {
         {/* Team Workload */}
         <div className="card">
           <h3 style={{ fontSize: '14px', fontWeight: 600, marginBottom: '16px' }}>Team Workload</h3>
-          {data.workload?.length === 0 ? <Empty text="No developers" /> :
+          {data.workload?.length === 0 ? <Empty text="No members yet" /> :
             data.workload?.map(w => (
               <div key={w.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>

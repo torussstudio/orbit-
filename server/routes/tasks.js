@@ -130,10 +130,10 @@ router.put("/:id", auth, async (req, res) => {
       return res
         .status(403)
         .json({ error: "Manager approval required for this stage" });
-    const incomingTime = req.body.time_taken ? parseInt(req.body.time_taken) : 0;
-  const existingTime = task.rows[0].time_taken || 0;
-  const time_taken = incomingTime > 0 ? existingTime + incomingTime : (existingTime > 0 ? existingTime : null);
     const isRework = stage === 'Rework';
+  const incomingTime = req.body.time_taken ? parseInt(req.body.time_taken) : 0;
+  const existingTime = task.rows[0].time_taken || 0;
+  const time_taken = isRework ? existingTime || null : (incomingTime > 0 ? existingTime + incomingTime : (existingTime > 0 ? existingTime : null));
     const { rows } = await db.query(
       "UPDATE tasks SET stage=$1,updated_at=NOW(),time_taken=$2,rework_count=rework_count+$3 WHERE id=$4 RETURNING *",
       [stage, time_taken, isRework ? 1 : 0, req.params.id],
@@ -173,15 +173,14 @@ router.put("/:id", auth, async (req, res) => {
     return res.json(rows[0]);
   }
 
+  const isRework = stage === 'Rework';
   const incomingTime = req.body.time_taken ? parseInt(req.body.time_taken) : 0;
   const existingTime = task.rows[0].time_taken || 0;
-  const time_taken = incomingTime > 0 ? existingTime + incomingTime : (existingTime > 0 ? existingTime : null);
-  const isRework = stage === 'Rework';
+  const time_taken = isRework ? existingTime || null : (incomingTime > 0 ? existingTime + incomingTime : (existingTime > 0 ? existingTime : null));
   const { rows } = await db.query(
-    `UPDATE tasks SET title=$1,description=$2,assignee_id=$3,priority=$4,stage=$5,due_date=$6,cluster_id=$7,updated_at=NOW(),time_taken=$8,rework_count=rework_count+$9
-     WHERE id=$10 RETURNING *`,
-    [title, description, assignee_id || null, priority, stage, due_date || null, cluster_id || null, time_taken, isRework ? 1 : 0, req.params.id],
-  );
+      "UPDATE tasks SET stage=$1,updated_at=NOW(),time_taken=$2,rework_count=rework_count+$3 WHERE id=$4 RETURNING *",
+      [stage, time_taken, isRework ? 1 : 0, req.params.id],
+    );
   if (task.rows[0].stage !== stage) {
     await db.query(
       `INSERT INTO task_activity(task_id,actor_id,action,meta) VALUES($1,$2,$3,$4)`,

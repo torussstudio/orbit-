@@ -12,7 +12,7 @@ export const formatDate = (d, formatStr = 'MMM d, yyyy') => {
 };
 
 export const isOverdue = (d, stage) => {
-  if (!d || ['Done', 'Deployed'].includes(stage)) return false;
+  if (!d || ['Done'].includes(stage)) return false;
   try {
     return isAfter(new Date(), typeof d === 'string' ? parseISO(d) : d);
   } catch {
@@ -29,7 +29,6 @@ export const getStageColor = (stage) => {
     'In Progress': 'var(--warning)',
     'In Review': 'var(--accent-2)',
     'Done': 'var(--success)',
-    'Deployed': 'var(--success)',
     'Blocked': 'var(--danger)',
   };
   return colors[stage] || 'var(--text-2)';
