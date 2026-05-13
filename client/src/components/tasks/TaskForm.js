@@ -14,6 +14,10 @@ export default function TaskForm({ initial, members, clusters, stages, onSave, o
   const [timeTakenError, setTimeTakenError] = useState('');
 
   const handleSave = () => {
+    if (!form.due_date) {
+      setTimeTakenError('Please select a due date.');
+      return;
+    }
     const isMovingToReview = form.stage === 'In Review' && initial?.stage === 'In Progress';
     if (isMovingToReview && (!form.time_taken || isNaN(form.time_taken) || parseInt(form.time_taken) <= 0)) {
       setTimeTakenError('Please enter time taken before moving to In Review.');
@@ -63,11 +67,11 @@ export default function TaskForm({ initial, members, clusters, stages, onSave, o
           </select>
         </div>
         <div className="form-group">
-          <label className="form-label">Due Date</label>
-          <input className="form-input" type="date" value={form.due_date || ''} onChange={e => setForm(f => ({ ...f, due_date: e.target.value }))} />
+          <label className="form-label">Due Date <span style={{ color: 'var(--danger)' }}>*</span></label>
+          <input className="form-input" type="date" value={form.due_date || ''} onChange={e => setForm(f => ({ ...f, due_date: e.target.value }))} required />
         </div>
       </div>
-      {(form.stage === 'In Review' && (initial?.stage === 'In Progress' || (initial?.stage === 'In Review' && !initial?.time_taken))) && (
+      {userRole === 'member' && (form.stage === 'In Review' && (initial?.stage === 'In Progress' || (initial?.stage === 'In Review' && !initial?.time_taken))) && (
         <div className="form-group" style={{ background: 'var(--bg-3)', padding: '14px', borderRadius: '8px', border: '1px solid var(--border)' }}>
           <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
             <span>⏱</span>

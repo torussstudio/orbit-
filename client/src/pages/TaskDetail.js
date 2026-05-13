@@ -33,6 +33,8 @@ export default function TaskDetail() {
   const [reworkDeadline, setReworkDeadline] = useState('');
   const [reviewAction, setReviewAction] = useState(null);
 
+  const [stageLoading, setStageLoading] = useState(null);
+
   const load = () => {
     Promise.all([
       api.get(`/tasks/${taskId}`),
@@ -68,6 +70,15 @@ export default function TaskDetail() {
   };
 
   const handleSaveSubTask = async (data) => {
+    // If manager is moving from In Review to Done via edit popup, show review modal instead
+    if (isManager && editingSubTask?.stage === 'In Review' && data.stage === 'Done') {
+      setShowSubTaskModal(false);
+      setManagerReviewModal({ show: true, subtask: editingSubTask });
+      setReviewAction(null);
+      setReworkDeadline('');
+      setEditingSubTask(null);
+      return;
+    }
     setSavingSubTask(true);
     try {
       if (editingSubTask) await api.put(`/tasks/${editingSubTask.id}`, data);
@@ -93,6 +104,7 @@ export default function TaskDetail() {
   };
 
     const handleSubTaskStageClick = async (st) => {
+    setStageLoading(st.id);
     const memberStages = ['Todo', 'In Progress', 'In Review'];
     const managerStages = ['Todo', 'In Progress', 'In Review', 'Done'];
 
@@ -104,7 +116,8 @@ export default function TaskDetail() {
       const nextStage = memberStages[nextIndex];
       // Show time taken modal for members only
       if (st.stage === 'In Progress' && nextStage === 'In Review') {
-        setTimeTakenInput('');
+      setStageLoading(null);
+      setTimeTakenInput('');
         setTimeTakenError('');
         setTimeTakenModal({ show: true, subtask: st, nextStage });
         return;
@@ -116,7 +129,7 @@ export default function TaskDetail() {
 
     // MANAGER flow
     if (st.stage === 'In Review') {
-      // Show Done/Rework choice modal
+      setStageLoading(null);
       setManagerReviewModal({ show: true, subtask: st });
       setReviewAction(null);
       setReworkDeadline('');
@@ -125,16 +138,24 @@ export default function TaskDetail() {
 
     if (st.stage === 'Done') {
       // Loop back to Todo for managers
-      await api.put(`/tasks/${st.id}`, { ...st, stage: 'Todo', time_taken: null });
-      load();
+      try {
+        await api.put(`/tasks/${st.id}`, { ...st, stage: 'Todo', time_taken: null });
+        load();
+      } finally {
+        setStageLoading(null);
+      }
       return;
     }
 
     const currentIndex = managerStages.indexOf(st.stage);
     const nextIndex = currentIndex === -1 ? 0 : currentIndex + 1;
     const nextStage = managerStages[nextIndex];
-    await api.put(`/tasks/${st.id}`, { ...st, stage: nextStage, time_taken: null });
-    load();
+      try {
+      await api.put(`/tasks/${st.id}`, { ...st, stage: nextStage, time_taken: null });
+      load();
+    } finally {
+      setStageLoading(null);
+    }
   };
 
   const handleManagerReviewSubmit = async () => {
@@ -246,10 +267,12 @@ export default function TaskDetail() {
                       <div style={{ display: 'flex', gap: '8px', fontSize: '11px', color: 'var(--text-3)', flexWrap: 'wrap' }}>
                          <span
                           className={`badge badge-${st.stage?.toLowerCase().replace(/\s/g,'')}`}
-                          onClick={() => handleSubTaskStageClick(st)}
-                          style={{ cursor: !isManager && st.stage === 'In Review' ? 'default' : 'pointer' }}
+                          onClick={() => stageLoading === st.id ? null : handleSubTaskStageClick(st)}
+                          style={{ cursor: stageLoading === st.id ? 'default' : (!isManager && st.stage === 'In Review' ? 'default' : 'pointer'), opacity: stageLoading === st.id ? 0.7 : 1 }}
                           title={!isManager && st.stage === 'In Review' ? 'Awaiting manager review' : 'Click to advance stage'}
-                        >{st.stage}{!isManager && st.stage === 'In Review' ? '' : ' →'}</span>
+                        >
+                          {stageLoading === st.id ? 'Moving...' : `${st.stage}${!isManager && st.stage === 'In Review' ? '' : ' →'}`}
+                        </span>
                         <span>{st.assignee_name || 'Unassigned'}</span>
                         {st.time_taken && <span style={{ color: 'var(--accent)', fontWeight: 600 }}>⏱ {st.time_taken} min</span>}
                         {st.rework_count > 0 && <span style={{ color: 'var(--danger)', fontWeight: 600 }}>↺ {st.rework_count} rework{st.rework_count > 1 ? 's' : ''}</span>}
