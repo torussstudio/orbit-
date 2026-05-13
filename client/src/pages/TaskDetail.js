@@ -44,6 +44,11 @@ export default function TaskDetail() {
       setTask(t.data); setProject(p.data); setMembers(m.data);
     }).finally(() => setLoading(false));
   };
+
+  const loadTaskOnly = () => {
+    api.get(`/tasks/${taskId}`).then(r => setTask(r.data));
+  };
+
   useEffect(() => { load(); }, [taskId]);
 
   const handleStageChange = async (stage) => {
@@ -123,7 +128,7 @@ export default function TaskDetail() {
         return;
       }
       await api.put(`/tasks/${st.id}`, { ...st, stage: nextStage, time_taken: null });
-      load();
+      loadTaskOnly();
       return;
     }
 
@@ -140,7 +145,7 @@ export default function TaskDetail() {
       // Loop back to Todo for managers
       try {
         await api.put(`/tasks/${st.id}`, { ...st, stage: 'Todo', time_taken: null });
-        load();
+        loadTaskOnly();
       } finally {
         setStageLoading(null);
       }
@@ -152,7 +157,7 @@ export default function TaskDetail() {
     const nextStage = managerStages[nextIndex];
       try {
       await api.put(`/tasks/${st.id}`, { ...st, stage: nextStage, time_taken: null });
-      load();
+      loadTaskOnly();
     } finally {
       setStageLoading(null);
     }
@@ -170,7 +175,7 @@ export default function TaskDetail() {
     setManagerReviewModal({ show: false, subtask: null });
     setReviewAction(null);
     setReworkDeadline('');
-    load();
+    loadTaskOnly();
   };
 
   const handleTimeTakenSubmit = async () => {
@@ -182,7 +187,7 @@ export default function TaskDetail() {
     await api.put(`/tasks/${subtask.id}`, { ...subtask, stage: nextStage, time_taken: parseInt(timeTakenInput) });
     setTimeTakenModal({ show: false, subtask: null, nextStage: null });
     setTimeTakenInput('');
-    load();
+    loadTaskOnly();
   };
 
   const [reworkConfirm, setReworkConfirm] = useState({ show: false, subtask: null });

@@ -127,9 +127,11 @@ router.put("/:id", auth, async (req, res) => {
 
   if (req.user.role === "member") {
     if (MANAGER_STAGES.includes(stage))
-      return res
-        .status(403)
-        .json({ error: "Manager approval required for this stage" });
+      return res.status(403).json({ error: "Manager approval required for this stage" });
+    // Skip update if stage hasn't changed and no time_taken
+    if (task.rows[0].stage === stage && !req.body.time_taken) {
+      return res.json(task.rows[0]);
+    }
    const isRework = stage === 'Rework';
     const actualStage = isRework ? 'Todo' : stage;
     const incomingTime = req.body.time_taken ? parseInt(req.body.time_taken) : 0;
@@ -284,11 +286,12 @@ router.get("/in-review/all", auth, async (req, res) => {
         p.id as project_id, p.name as project_name,
         m.name as assignee_name
        FROM tasks t
-       LEFT JOIN tasks pt ON t.parent_task_id = pt.id
-       LEFT JOIN projects p ON t.project_id = p.id
+       INNER JOIN tasks pt ON t.parent_task_id = pt.id
+       INNER JOIN projects p ON t.project_id = p.id
        LEFT JOIN members m ON t.assignee_id = m.id
-       WHERE t.stage = 'In Review' AND t.parent_task_id IS NOT NULL
-       ORDER BY t.updated_at DESC`
+       WHERE t.stage = 'In Review'
+       ORDER BY t.updated_at DESC
+       LIMIT 100`
     );
     res.json(rows);
   } catch (e) {
