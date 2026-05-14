@@ -94,9 +94,9 @@ export default function NotificationBell() {
         <div
           style={{
             position: 'absolute',
-            bottom: '40px',
-            right: '-70px',
-            width: '220px',
+            top: '40px',
+            right: '0px',
+            width: '280px',
             maxHeight: '400px',
             background: 'var(--bg-2)',
             borderRadius: '12px',

@@ -394,3 +394,8 @@ tr.overdue:hover td { background: rgba(239,68,68,0.04) !important; }
   border-radius: 20px; padding: 40px; width: 100%; max-width: 400px;
   box-shadow: 0 8px 40px rgba(99,102,241,0.12);
 }
+
+.main-content {
+  flex: 1;
+  overflow-y: auto;
+}

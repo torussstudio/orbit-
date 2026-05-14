@@ -98,6 +98,7 @@ app.use('/api/knowledge', knowledgeRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/calendar', calendarRoutes);
 app.use('/api/notifications', notificationRoutes);
+app.use('/api/search', require('./routes/search'));
 
 
 // =========================
