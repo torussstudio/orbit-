@@ -58,6 +58,9 @@ export default function InReview() {
       return 0;
     });
 
+  const mainTasks = filtered.filter(s => !s.parent_task_id);
+  const subTasks = filtered.filter(s => s.parent_task_id);
+
   if (loading) return <div className="loading-screen"><div className="spinner" /></div>;
 
   return (
@@ -65,7 +68,9 @@ export default function InReview() {
       <div className="page-header">
         <div>
           <div className="page-title">In Review</div>
-          <div className="page-subtitle">{filtered.length} subtask{filtered.length !== 1 ? 's' : ''} awaiting review</div>
+          <div className="page-subtitle">
+            {mainTasks.length} task{mainTasks.length !== 1 ? 's' : ''} · {subTasks.length} subtask{subTasks.length !== 1 ? 's' : ''} awaiting review
+          </div>
         </div>
       </div>
 
@@ -91,7 +96,7 @@ export default function InReview() {
             </select>
           </div>
           <div style={{ marginLeft: 'auto', fontSize: '12px', color: 'var(--text-3)' }}>
-            {filtered.length} of {subtasks.length} subtasks
+            {filtered.length} of {subtasks.length} items
           </div>
         </div>
 
@@ -99,16 +104,17 @@ export default function InReview() {
           <div className="card" style={{ textAlign: 'center', padding: '60px 24px' }}>
             <div style={{ fontSize: '48px', marginBottom: '16px' }}>✅</div>
             <div style={{ fontSize: '16px', fontWeight: 600, color: 'var(--text)', marginBottom: '8px' }}>All clear!</div>
-            <div style={{ fontSize: '13px', color: 'var(--text-3)' }}>No subtasks are currently in review.</div>
+            <div style={{ fontSize: '13px', color: 'var(--text-3)' }}>No tasks are currently in review.</div>
           </div>
         ) : (
           <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
             <table>
               <thead>
                 <tr>
-                  <th>Subtask</th>
+                  <th>Task</th>
+                  <th>Type</th>
                   <th>Project</th>
-                  <th>Main Task</th>
+                  <th>Parent Task</th>
                   <th>Assignee</th>
                   <th>Time</th>
                   <th>Reworks</th>
@@ -125,6 +131,15 @@ export default function InReview() {
                         style={{ color: 'var(--text)', textDecoration: 'none', fontWeight: 500, fontSize: '13px' }}>
                         {s.title}
                       </Link>
+                    </td>
+                    <td>
+                      <span style={{
+                        fontSize: '11px', fontWeight: 600, padding: '2px 8px', borderRadius: '20px',
+                        background: s.parent_task_id ? 'rgba(99,102,241,0.12)' : 'rgba(16,185,129,0.12)',
+                        color: s.parent_task_id ? 'var(--accent)' : 'var(--success)'
+                      }}>
+                        {s.parent_task_id ? 'Sub Task' : 'Task'}
+                      </span>
                     </td>
                     <td>
                       <Link to={`/projects/${s.project_id}`}
@@ -187,7 +202,7 @@ export default function InReview() {
               Move "{reworkModal.subtask?.title}" to Rework?
             </p>
             <p style={{ fontSize: '13px', color: 'var(--text-3)' }}>
-              This will mark the subtask as needing rework and increment its rework counter.
+              This will mark the {reworkModal.subtask?.parent_task_id ? 'subtask' : 'task'} as needing rework and increment its rework counter.
             </p>
           </div>
           <div className="form-group" style={{ background: 'var(--bg-3)', padding: '14px', borderRadius: '8px', border: '1px solid var(--border)', marginBottom: '4px' }}>

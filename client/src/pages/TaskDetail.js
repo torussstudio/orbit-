@@ -34,6 +34,7 @@ export default function TaskDetail() {
   const [reviewAction, setReviewAction] = useState(null);
 
   const [stageLoading, setStageLoading] = useState(null);
+  const [stageDropdown, setStageDropdown] = useState(null);
 
   const load = () => {
     Promise.all([
@@ -52,6 +53,20 @@ export default function TaskDetail() {
   useEffect(() => { load(); }, [taskId]);
 
   const handleStageChange = async (stage) => {
+    // For subtasks: members moving from In Progress → In Review must enter time taken
+    if (task.parent_task_id && !isManager && task.stage === 'In Progress' && stage === 'In Review') {
+      setTimeTakenInput('');
+      setTimeTakenError('');
+      setTimeTakenModal({ show: true, subtask: task, nextStage: stage });
+      return;
+    }
+    // For subtasks: manager moving from In Review → Done triggers review modal
+    if (task.parent_task_id && isManager && task.stage === 'In Review' && stage === 'Done') {
+      setManagerReviewModal({ show: true, subtask: task });
+      setReviewAction(null);
+      setReworkDeadline('');
+      return;
+    }
     setChangingStage(stage);
     try {
       await api.put(`/tasks/${taskId}`, { ...task, stage });
@@ -163,6 +178,43 @@ export default function TaskDetail() {
     }
   };
 
+  const handleSubTaskStageSelect = async (st, chosenStage) => {
+    setStageDropdown(null);
+    if (!chosenStage || chosenStage === st.stage) return;
+    if (!isManager) {
+      const memberStages = ['Todo', 'In Progress', 'In Review'];
+      if (!memberStages.includes(chosenStage)) return;
+      if (chosenStage === 'In Review' && st.stage === 'In Progress') {
+        setTimeTakenInput('');
+        setTimeTakenError('');
+        setTimeTakenModal({ show: true, subtask: st, nextStage: chosenStage });
+        return;
+      }
+      setStageLoading(st.id);
+      try {
+        await api.put(`/tasks/${st.id}`, { ...st, stage: chosenStage, time_taken: null });
+        loadTaskOnly();
+      } finally {
+        setStageLoading(null);
+      }
+      return;
+    }
+    if (chosenStage === 'Done' && st.stage === 'In Review') {
+      setManagerReviewModal({ show: true, subtask: st });
+      setReviewAction(null);
+      setReworkDeadline('');
+      return;
+    }
+    setStageLoading(st.id);
+    try {
+      await api.put(`/tasks/${st.id}`, { ...st, stage: chosenStage });
+      loadTaskOnly();
+    } finally {
+      setStageLoading(null);
+    }
+  };
+
+
   const handleManagerReviewSubmit = async () => {
     const { subtask } = managerReviewModal;
     if (!reviewAction) return;
@@ -175,7 +227,11 @@ export default function TaskDetail() {
     setManagerReviewModal({ show: false, subtask: null });
     setReviewAction(null);
     setReworkDeadline('');
-    loadTaskOnly();
+    if (subtask.id === taskId || subtask.id === parseInt(taskId)) {
+      load();
+    } else {
+      loadTaskOnly();
+    }
   };
 
   const handleTimeTakenSubmit = async () => {
@@ -187,7 +243,13 @@ export default function TaskDetail() {
     await api.put(`/tasks/${subtask.id}`, { ...subtask, stage: nextStage, time_taken: parseInt(timeTakenInput) });
     setTimeTakenModal({ show: false, subtask: null, nextStage: null });
     setTimeTakenInput('');
-    loadTaskOnly();
+    // If the modal was triggered from the subtask's own Move Stage pills (subtask.id === taskId),
+    // use load() so the page header badge and details also refresh
+    if (subtask.id === taskId || subtask.id === parseInt(taskId)) {
+      load();
+    } else {
+      loadTaskOnly();
+    }
   };
 
   const [reworkConfirm, setReworkConfirm] = useState({ show: false, subtask: null });
@@ -270,13 +332,53 @@ export default function TaskDetail() {
                     <div>
                       <Link to={`/projects/${projectId}/tasks/${st.id}`} style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text)', textDecoration: 'none', display: 'block', marginBottom: '4px' }}>{st.title}</Link>
                       <div style={{ display: 'flex', gap: '8px', fontSize: '11px', color: 'var(--text-3)', flexWrap: 'wrap' }}>
-                         <span
-                          className={`badge badge-${st.stage?.toLowerCase().replace(/\s/g,'')}`}
-                          onClick={() => stageLoading === st.id ? null : handleSubTaskStageClick(st)}
-                          style={{ cursor: stageLoading === st.id ? 'default' : (!isManager && st.stage === 'In Review' ? 'default' : 'pointer'), opacity: stageLoading === st.id ? 0.7 : 1 }}
-                          title={!isManager && st.stage === 'In Review' ? 'Awaiting manager review' : 'Click to advance stage'}
-                        >
-                          {stageLoading === st.id ? 'Moving...' : `${st.stage}${!isManager && st.stage === 'In Review' ? '' : ' →'}`}
+                         <span style={{ position: 'relative', display: 'inline-block' }}>
+                          <span
+                            className={`badge badge-${st.stage?.toLowerCase().replace(/\s/g,'')}`}
+                            onClick={() => {
+                              if (stageLoading === st.id) return;
+                              setStageDropdown(prev => prev === st.id ? null : st.id);
+                            }}
+                            style={{ cursor: stageLoading === st.id ? 'default' : 'pointer', opacity: stageLoading === st.id ? 0.7 : 1 }}
+                          >
+                            {stageLoading === st.id ? 'Moving...' : `${st.stage} ▾`}
+                          </span>
+                          {stageDropdown === st.id && (
+                            <div
+                              style={{
+                                position: 'absolute', top: '100%', left: 0, zIndex: 999,
+                                background: 'var(--bg-2)', border: '1px solid var(--border)',
+                                borderRadius: '8px', boxShadow: '0 4px 16px rgba(0,0,0,0.15)',
+                                minWidth: '140px', padding: '4px', marginTop: '4px'
+                              }}
+                              onMouseLeave={() => setStageDropdown(null)}
+                            >
+                              {(isManager
+                                ? ['Todo', 'In Progress', 'In Review', 'Done']
+                                : ['Todo', 'In Progress', 'In Review']
+                              ).map(s => (
+                                <div
+                                  key={s}
+                                  onClick={() => handleSubTaskStageSelect(st, s)}
+                                  style={{
+                                    padding: '7px 12px', borderRadius: '6px', cursor: s === st.stage ? 'default' : 'pointer',
+                                    fontSize: '12px', fontWeight: s === st.stage ? 700 : 400,
+                                    color: s === st.stage ? 'var(--accent)' : 'var(--text)',
+                                    background: s === st.stage ? 'var(--bg-3)' : 'transparent',
+                                    display: 'flex', alignItems: 'center', gap: '8px'
+                                  }}
+                                  onMouseEnter={e => { if (s !== st.stage) e.currentTarget.style.background = 'var(--bg-2)'; }}
+                                  onMouseLeave={e => { e.currentTarget.style.background = s === st.stage ? 'var(--bg-3)' : 'transparent'; }}
+                                >
+                                  <span style={{
+                                    width: 8, height: 8, borderRadius: '50%', display: 'inline-block', flexShrink: 0,
+                                    background: s === 'Todo' ? '#a78bfa' : s === 'In Progress' ? '#f59e0b' : s === 'In Review' ? '#3b82f6' : '#10b981'
+                                  }} />
+                                  {s}
+                                </div>
+                              ))}
+                            </div>
+                          )}
                         </span>
                         <span>{st.assignee_name || 'Unassigned'}</span>
                         {st.time_taken && <span style={{ color: 'var(--accent)', fontWeight: 600 }}>⏱ {st.time_taken} min</span>}
@@ -294,15 +396,17 @@ export default function TaskDetail() {
             </div>
           )}
 
-          {/* Stage changer - Manager only, not shown for subtasks */}
-          {isManager && !task.parent_task_id && (
+          {/* Stage changer - shown for all users on main tasks */}
+          {!task.parent_task_id && (
             <div className="card" style={{ marginBottom: '16px' }}>
               <h3 style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-2)', marginBottom: '12px' }}>Move Stage</h3>
-              <p style={{ fontSize: '11px', color: 'var(--text-3)', marginBottom: '10px' }}>
-                This task moves to Done automatically when all subtasks are completed. You can also move it manually.
-              </p>
+              {isManager && (
+                <p style={{ fontSize: '11px', color: 'var(--text-3)', marginBottom: '10px' }}>
+                  This task moves to Done automatically when all subtasks are completed. You can also move it manually.
+                </p>
+              )}
               <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                {stages.map(s => (
+                {allowedStages.map(s => (
                   <button key={s} onClick={() => handleStageChange(s)}
                     disabled={changingStage !== null}
                     className={`btn ${task.stage === s ? 'btn-primary' : 'btn-ghost'} btn-sm`}>
@@ -310,6 +414,7 @@ export default function TaskDetail() {
                   </button>
                 ))}
               </div>
+              {!isManager && <p style={{ fontSize: '11px', color: 'var(--text-3)', marginTop: '8px' }}>Manager approval required to mark Done</p>}
             </div>
           )}
 
