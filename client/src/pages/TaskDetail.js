@@ -54,14 +54,14 @@ export default function TaskDetail() {
 
   const handleStageChange = async (stage) => {
     // For subtasks: members moving from In Progress → In Review must enter time taken
-    if (task.parent_task_id && !isManager && task.stage === 'In Progress' && stage === 'In Review') {
+    if (task.parent_task_id && !isManager && stage === 'In Review' && task.stage !== 'In Review') {
       setTimeTakenInput('');
       setTimeTakenError('');
       setTimeTakenModal({ show: true, subtask: task, nextStage: stage });
       return;
     }
     // For subtasks: manager moving from In Review → Done triggers review modal
-    if (task.parent_task_id && isManager && task.stage === 'In Review' && stage === 'Done') {
+   if (task.parent_task_id && isManager && stage === 'Done' && task.stage !== 'Done') {
       setManagerReviewModal({ show: true, subtask: task });
       setReviewAction(null);
       setReworkDeadline('');
@@ -135,7 +135,7 @@ export default function TaskDetail() {
       const nextIndex = currentIndex === -1 ? 0 : currentIndex + 1;
       const nextStage = memberStages[nextIndex];
       // Show time taken modal for members only
-      if (st.stage === 'In Progress' && nextStage === 'In Review') {
+      if (nextStage === 'In Review') {
       setStageLoading(null);
       setTimeTakenInput('');
         setTimeTakenError('');
@@ -148,28 +148,27 @@ export default function TaskDetail() {
     }
 
     // MANAGER flow
-    if (st.stage === 'In Review') {
-      setStageLoading(null);
-      setManagerReviewModal({ show: true, subtask: st });
-      setReviewAction(null);
-      setReworkDeadline('');
-      return;
-    }
+   if (st.stage === 'Done') {
+  try {
+    await api.put(`/tasks/${st.id}`, { ...st, stage: 'Todo', time_taken: null });
+    loadTaskOnly();
+  } finally {
+    setStageLoading(null);
+  }
+  return;
+}
 
-    if (st.stage === 'Done') {
-      // Loop back to Todo for managers
-      try {
-        await api.put(`/tasks/${st.id}`, { ...st, stage: 'Todo', time_taken: null });
-        loadTaskOnly();
-      } finally {
-        setStageLoading(null);
-      }
-      return;
-    }
+const currentIndex = managerStages.indexOf(st.stage);
+const nextIndex = currentIndex === -1 ? 0 : currentIndex + 1;
+const nextStage = managerStages[nextIndex];
 
-    const currentIndex = managerStages.indexOf(st.stage);
-    const nextIndex = currentIndex === -1 ? 0 : currentIndex + 1;
-    const nextStage = managerStages[nextIndex];
+if (nextStage === 'Done') {
+  setStageLoading(null);
+  setManagerReviewModal({ show: true, subtask: st });
+  setReviewAction(null);
+  setReworkDeadline('');
+  return;
+}
       try {
       await api.put(`/tasks/${st.id}`, { ...st, stage: nextStage, time_taken: null });
       loadTaskOnly();
@@ -184,7 +183,7 @@ export default function TaskDetail() {
     if (!isManager) {
       const memberStages = ['Todo', 'In Progress', 'In Review'];
       if (!memberStages.includes(chosenStage)) return;
-      if (chosenStage === 'In Review' && st.stage === 'In Progress') {
+      if (chosenStage === 'In Review') {
         setTimeTakenInput('');
         setTimeTakenError('');
         setTimeTakenModal({ show: true, subtask: st, nextStage: chosenStage });
@@ -199,7 +198,7 @@ export default function TaskDetail() {
       }
       return;
     }
-    if (chosenStage === 'Done' && st.stage === 'In Review') {
+    if (chosenStage === 'Done') {
       setManagerReviewModal({ show: true, subtask: st });
       setReviewAction(null);
       setReworkDeadline('');
@@ -208,7 +207,11 @@ export default function TaskDetail() {
     setStageLoading(st.id);
     try {
       await api.put(`/tasks/${st.id}`, { ...st, stage: chosenStage });
-      loadTaskOnly();
+      if (task.parent_task_id && subtask.id === task.id) {
+  load();
+} else {
+  loadTaskOnly();
+}
     } finally {
       setStageLoading(null);
     }
