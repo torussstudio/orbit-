@@ -134,9 +134,9 @@ router.put("/:id", auth, async (req, res) => {
     }
    const isRework = stage === 'Rework';
     const actualStage = isRework ? 'Todo' : stage;
-    const incomingTime = req.body.time_taken ? parseInt(req.body.time_taken) : 0;
-    const existingTime = task.rows[0].time_taken || 0;
-    const time_taken = isRework ? existingTime || null : (incomingTime > 0 ? existingTime + incomingTime : (existingTime > 0 ? existingTime : null));
+   const incomingTime = req.body.time_taken && req.body.time_taken !== task.rows[0].time_taken ? parseInt(req.body.time_taken) : 0;
+const existingTime = task.rows[0].time_taken || 0;
+const time_taken = isRework ? null : (incomingTime > 0 ? existingTime + incomingTime : (existingTime > 0 ? existingTime : null));
     const { rows } = await db.query(
       "UPDATE tasks SET stage=$1,updated_at=NOW(),time_taken=$2,rework_count=rework_count+$3,due_date=COALESCE($4,due_date) WHERE id=$5 RETURNING *",
       [actualStage, time_taken, isRework ? 1 : 0, req.body.new_due_date || null, req.params.id],
@@ -178,9 +178,9 @@ router.put("/:id", auth, async (req, res) => {
 
   const isRework = stage === 'Rework';
   const actualStage = isRework ? 'Todo' : stage;
-  const incomingTime = req.body.time_taken ? parseInt(req.body.time_taken) : 0;
-  const existingTime = task.rows[0].time_taken || 0;
-  const time_taken = isRework ? existingTime || null : (incomingTime > 0 ? existingTime + incomingTime : (existingTime > 0 ? existingTime : null));
+ const incomingTime = req.body.time_taken && req.body.time_taken !== task.rows[0].time_taken ? parseInt(req.body.time_taken) : 0;
+const existingTime = task.rows[0].time_taken || 0;
+const time_taken = isRework ? null : (incomingTime > 0 ? existingTime + incomingTime : (existingTime > 0 ? existingTime : null));
   const finalDueDate = isRework ? (req.body.new_due_date || due_date || null) : (due_date || null);
   const { rows } = await db.query(
     `UPDATE tasks SET title=$1,description=$2,assignee_id=$3,priority=$4,stage=$5,due_date=$6,cluster_id=$7,updated_at=NOW(),time_taken=$8,rework_count=rework_count+$9
@@ -286,7 +286,7 @@ router.get("/in-review/all", auth, async (req, res) => {
         p.id as project_id, p.name as project_name,
         m.name as assignee_name
        FROM tasks t
-       INNER JOIN tasks pt ON t.parent_task_id = pt.id
+       LEFT JOIN tasks pt ON t.parent_task_id = pt.id
        INNER JOIN projects p ON t.project_id = p.id
        LEFT JOIN members m ON t.assignee_id = m.id
        WHERE t.stage = 'In Review'
@@ -299,4 +299,4 @@ router.get("/in-review/all", auth, async (req, res) => {
   }
 });
 
-module.exports = router;
+module.exports = router;  
