@@ -149,9 +149,11 @@ app.use((err, req, res, next) => {
 // =========================
 // 🟢 LOCAL SERVER (DEV ONLY)
 // =========================
+const { scheduleDailyReminders } = require('./utils/dailyReminder');
+scheduleDailyReminders();
+
 if (process.env.NODE_ENV !== 'production') {
   const PORT = process.env.PORT || 4000;
-
   app.listen(PORT, () => {
     console.log(`🚀 Server running on http://localhost:${PORT}`);
   });

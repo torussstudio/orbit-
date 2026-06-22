@@ -308,6 +308,17 @@ const initDB = async () => {
     )
   `);
 
+  await pool.query(`
+  CREATE TABLE IF NOT EXISTS push_subscriptions (
+    id         ${idDefinition(defaultIdType)},
+    member_id  ${refType(memberIdType)} REFERENCES members(id) ON DELETE CASCADE,
+    endpoint   TEXT UNIQUE NOT NULL,
+    p256dh     TEXT NOT NULL,
+    auth       TEXT NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+  )
+`);
+
   // Migration: remove 'Deployed' from existing projects' custom_stages
   await pool.query(`
     UPDATE projects
