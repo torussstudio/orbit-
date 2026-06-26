@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Outlet, NavLink, useNavigate, Link } from 'react-router-dom';
+import { Outlet, NavLink, useNavigate, Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import NotificationBell from '../ui/NotificationBell';
 import ConfirmModal from '../ui/ConfirmModal';
@@ -174,9 +174,20 @@ function GlobalSearch() {
 export default function Layout() {
   const { user, logout, isManager } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const [confirmModal, setConfirmModal] = useState({ show: false, loading: false });
+  const [profileDropdownOpen, setProfileDropdownOpen] = useState(false);
+  const profileDropdownRef = useRef(null);
 
-  const handleLogoutClick = () => setConfirmModal({ show: true, loading: false });
+  // Close dropdown on route change
+  useEffect(() => {
+    setProfileDropdownOpen(false);
+  }, [location.pathname]);
+
+  const handleLogoutClick = () => {
+    setProfileDropdownOpen(false);
+    setConfirmModal({ show: true, loading: false });
+  };
 
   const handleConfirmLogout = async () => {
     setConfirmModal(prev => ({ ...prev, loading: true }));
@@ -187,6 +198,17 @@ export default function Layout() {
       setConfirmModal({ show: false, loading: false });
     }
   };
+
+  // Close profile dropdown on outside click
+  useEffect(() => {
+    const handleClick = (e) => {
+      if (profileDropdownRef.current && !profileDropdownRef.current.contains(e.target)) {
+        setProfileDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, []);
 
   return (
     <div className="app-layout">
@@ -226,14 +248,10 @@ export default function Layout() {
           </nav>
         </div>
 
-        <div className="sidebar-footer">
-          <div className="sidebar-user">
-            <div className="user-avatar">{user?.name?.[0]?.toUpperCase()}</div>
-            <div className="user-info">
-              <div className="user-name">{user?.name}</div>
-              <div className="user-role">{user?.role}</div>
-            </div>
-            <button className="btn-logout" onClick={handleLogoutClick} title="Logout">⏻</button>
+        {/* Sidebar footer kept minimal — main profile now lives in header */}
+        <div className="sidebar-footer" style={{ padding: '12px 16px' }}>
+          <div style={{ fontSize: '11px', color: 'var(--text-3)', textAlign: 'center' }}>
+            Orbit Agency OS
           </div>
         </div>
       </aside>
@@ -246,17 +264,164 @@ export default function Layout() {
           position: 'sticky', top: 0, zIndex: 100,
         }}>
           <GlobalSearch />
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginLeft: 'auto' }}>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginLeft: 'auto' }}>
             <NotificationBell />
-            <div style={{ width: '1px', height: '20px', background: 'var(--border)' }} />
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <div className="user-avatar" style={{ width: '32px', height: '32px', fontSize: '13px' }}>
-                {user?.name?.[0]?.toUpperCase()}
-              </div>
-              <div style={{ display: 'none' }}>
-                <div style={{ fontSize: '13px', fontWeight: 500, color: 'var(--text)' }}>{user?.name}</div>
-                <div style={{ fontSize: '11px', color: 'var(--text-3)' }}>{user?.role}</div>
-              </div>
+
+            <div style={{ width: '1px', height: '24px', background: 'var(--border)' }} />
+
+            {/* Profile Section */}
+            <div ref={profileDropdownRef} style={{ position: 'relative' }}>
+              {/* Profile trigger button */}
+              <button
+                onClick={() => setProfileDropdownOpen(prev => !prev)}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: '10px',
+                  background: 'none', border: 'none', cursor: 'pointer',
+                  padding: '6px 8px', borderRadius: '10px',
+                  transition: 'background 0.15s',
+                }}
+                onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-3)'}
+                onMouseLeave={e => e.currentTarget.style.background = 'none'}
+              >
+                {/* Text info (left side) */}
+                <div style={{ textAlign: 'right' }}>
+                  <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text)', lineHeight: 1.3 }}>
+                    {user?.name}
+                  </div>
+                  <div style={{ display: 'flex' , gap: '5px' , justifyContent: 'end', paddingTop: '3px'}}>
+
+                {/* Chevron down */}
+                <svg
+                  width="13" height="13" viewBox="0 0 24 24" fill="none"
+                  stroke="var(--text-3)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+                  style={{ flexShrink: 0, transition: 'transform 0.2s', transform: profileDropdownOpen ? 'rotate(180deg)' : 'rotate(0deg)' }}
+                >
+                  <path d="M6 9l6 6 6-6" />
+                </svg>
+
+
+                  <div style={{ fontSize: '11px', color: 'var(--text-3)', lineHeight: 1.3, textTransform: 'capitalize' }}>
+                    {user?.role}
+                  </div>
+
+                  </div>
+                </div>
+
+                {/* Avatar (right side) */}
+                <div className="user-avatar" style={{ width: '36px', height: '36px', fontSize: '14px', fontWeight: 700, flexShrink: 0, overflow: 'hidden', padding: 0 }}>
+    {user?.avatar_url
+      ? <img src={user.avatar_url} alt="avatar" style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '50%', display: 'block' }} />
+      : user?.name?.[0]?.toUpperCase()
+    }
+  </div>
+              </button>
+
+              {/* Dropdown menu */}
+              {profileDropdownOpen && (
+                <div style={{
+                  position: 'absolute', top: 'calc(100% + 8px)', right: 0,
+                  background: 'var(--bg-2)', borderRadius: '12px',
+                  border: '1px solid var(--border)',
+                  boxShadow: '0 8px 32px rgba(0,0,0,0.14)',
+                  minWidth: '200px', overflow: 'hidden', zIndex: 2000,
+                }}>
+                  {/* User info header in dropdown */}
+                  <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <div className="user-avatar" style={{ width: '36px', height: '36px', fontSize: '14px', fontWeight: 700, flexShrink: 0, overflow: 'hidden', padding: 0 }}>
+    {user?.avatar_url
+      ? <img src={user.avatar_url} alt="avatar" style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '50%', display: 'block' }} />
+      : user?.name?.[0]?.toUpperCase()
+    }
+  </div>
+                    <div>
+                      <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text)', lineHeight: 1.3 }}>{user?.name}</div>
+                      <div style={{ fontSize: '11px', color: 'var(--text-3)', lineHeight: 1.3, textTransform: 'capitalize' }}>{user?.role}</div>
+                    </div>
+                  </div>
+
+                  {/* Menu items */}
+                  <div style={{ padding: '6px' }}>
+                    {/* View Profile → Account Settings (same page, top section) */}
+                    <button
+                      onClick={() => navigate('/account-settings')}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: '10px',
+                        width: '100%', padding: '9px 10px', borderRadius: '8px',
+                        background: 'none', border: 'none', cursor: 'pointer',
+                        fontSize: '13px', color: 'var(--text)', textAlign: 'left',
+                        transition: 'background 0.1s',
+                      }}
+                      onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-3)'}
+                      onMouseLeave={e => e.currentTarget.style.background = 'none'}
+                    >
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2M12 11a4 4 0 100-8 4 4 0 000 8z" />
+                      </svg>
+                      View Profile
+                    </button>
+
+                    {/* My Task — static for now */}
+                    <button
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: '10px',
+                        width: '100%', padding: '9px 10px', borderRadius: '8px',
+                        background: 'none', border: 'none', cursor: 'pointer',
+                        fontSize: '13px', color: 'var(--text)', textAlign: 'left',
+                        transition: 'background 0.1s',
+                      }}
+                      onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-3)'}
+                      onMouseLeave={e => e.currentTarget.style.background = 'none'}
+                    >
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M9 11l3 3L22 4M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11" />
+                      </svg>
+                      My Task
+                    </button>
+
+                    {/* Account Settings → navigates to /account-settings */}
+                    <button
+                      onClick={() => navigate('/account-settings')}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: '10px',
+                        width: '100%', padding: '9px 10px', borderRadius: '8px',
+                        background: 'none', border: 'none', cursor: 'pointer',
+                        fontSize: '13px', color: 'var(--text)', textAlign: 'left',
+                        transition: 'background 0.1s',
+                      }}
+                      onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-3)'}
+                      onMouseLeave={e => e.currentTarget.style.background = 'none'}
+                    >
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <circle cx="12" cy="12" r="3" />
+                        <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z" />
+                      </svg>
+                      Account Settings
+                    </button>
+
+                    <div style={{ height: '1px', background: 'var(--border)', margin: '6px 0' }} />
+
+                    {/* Logout — functional */}
+                    <button
+                      onClick={handleLogoutClick}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: '10px',
+                        width: '100%', padding: '9px 10px', borderRadius: '8px',
+                        background: 'none', border: 'none', cursor: 'pointer',
+                        fontSize: '13px', color: 'var(--danger, #ef4444)', textAlign: 'left',
+                        transition: 'background 0.1s',
+                      }}
+                      onMouseEnter={e => e.currentTarget.style.background = 'rgba(239,68,68,0.08)'}
+                      onMouseLeave={e => e.currentTarget.style.background = 'none'}
+                    >
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9" />
+                      </svg>
+                      Log Out
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </header>

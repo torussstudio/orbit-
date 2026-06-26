@@ -1,6 +1,6 @@
-import { createContext, useContext, useState, useEffect } from 'react';
-import api, { clearClientAuthState, setLogoutInProgress } from '../api/client';
-import { setAccessToken } from '../api/tokenStore';
+import { createContext, useContext, useState, useEffect } from "react";
+import api, { clearClientAuthState, setLogoutInProgress } from "../api/client";
+import { setAccessToken } from "../api/tokenStore";
 
 const AuthContext = createContext(null);
 
@@ -16,15 +16,19 @@ export function AuthProvider({ children }) {
   const [error, setError] = useState(null);
   const [accessToken, setAccessTokenState] = useState(null);
 
+  const updateUser = (updatedData) => {
+    setUser((prev) => (prev ? { ...prev, ...updatedData } : updatedData));
+  };
+
   const clearClientSideAuth = () => {
-    localStorage.removeItem('orbit_token');
-    localStorage.removeItem('token');
-    localStorage.removeItem('refreshToken');
-    localStorage.removeItem('adminToken');
-    sessionStorage.removeItem('orbit_token');
-    sessionStorage.removeItem('token');
-    sessionStorage.removeItem('refreshToken');
-    sessionStorage.removeItem('adminToken');
+    localStorage.removeItem("orbit_token");
+    localStorage.removeItem("token");
+    localStorage.removeItem("refreshToken");
+    localStorage.removeItem("adminToken");
+    sessionStorage.removeItem("orbit_token");
+    sessionStorage.removeItem("token");
+    sessionStorage.removeItem("refreshToken");
+    sessionStorage.removeItem("adminToken");
 
     clearClientAuthState();
     setAccessTokenState(null);
@@ -34,22 +38,23 @@ export function AuthProvider({ children }) {
 
   useEffect(() => {
     // Proactively clean up any legacy browser token storage.
-    localStorage.removeItem('orbit_token');
-    localStorage.removeItem('token');
-    localStorage.removeItem('refreshToken');
-    localStorage.removeItem('adminToken');
-    sessionStorage.removeItem('orbit_token');
-    sessionStorage.removeItem('token');
-    sessionStorage.removeItem('refreshToken');
-    sessionStorage.removeItem('adminToken');
+    localStorage.removeItem("orbit_token");
+    localStorage.removeItem("token");
+    localStorage.removeItem("refreshToken");
+    localStorage.removeItem("adminToken");
+    sessionStorage.removeItem("orbit_token");
+    sessionStorage.removeItem("token");
+    sessionStorage.removeItem("refreshToken");
+    sessionStorage.removeItem("adminToken");
 
     const onLogout = () => {
       clearClientSideAuth();
     };
-    window.addEventListener('orbit:logout', onLogout);
+    window.addEventListener("orbit:logout", onLogout);
 
-    api.post('/auth/refresh')
-      .then(r => {
+    api
+      .post("/auth/refresh")
+      .then((r) => {
         const token = r.data?.accessToken;
         const u = r.data?.user;
         if (token) {
@@ -61,16 +66,16 @@ export function AuthProvider({ children }) {
         }
         setError(null);
       })
-      .catch(err => {
+      .catch((err) => {
         if (err.response?.status !== 401) {
-          console.error('Auth restore failed:', err.message);
+          console.error("Auth restore failed:", err.message);
           setError(err.message);
         }
         clearClientSideAuth();
       })
       .finally(() => setLoading(false));
 
-    return () => window.removeEventListener('orbit:logout', onLogout);
+    return () => window.removeEventListener("orbit:logout", onLogout);
   }, []);
 
   // =========================
@@ -80,7 +85,7 @@ export function AuthProvider({ children }) {
   // =========================
   const login = async (email, password) => {
     try {
-      const { data } = await api.post('/auth/login', { email, password });
+      const { data } = await api.post("/auth/login", { email, password });
       setUser(data.user);
       if (data.accessToken) {
         setAccessToken(data.accessToken);
@@ -89,7 +94,7 @@ export function AuthProvider({ children }) {
       setError(null);
       return data.user;
     } catch (err) {
-      const message = err.response?.data?.error || 'Login failed';
+      const message = err.response?.data?.error || "Login failed";
       setError(message);
       throw err;
     }
@@ -103,18 +108,18 @@ export function AuthProvider({ children }) {
   const logout = async () => {
     setLogoutInProgress(true);
     try {
-      await api.post('/auth/logout');
+      await api.post("/auth/logout");
     } catch (err) {
-      console.error('Logout request failed:', err.message);
+      console.error("Logout request failed:", err.message);
     } finally {
       clearClientSideAuth();
       setLogoutInProgress(false);
-      window.dispatchEvent(new Event('orbit:logout'));
+      window.dispatchEvent(new Event("orbit:logout"));
     }
   };
 
   return (
-    <AuthContext.Provider value={{ user, accessToken, login, logout, loading, error, isManager: user?.role === 'manager' }}>
+    <AuthContext.Provider value={{ user, updateUser, accessToken, login, logout, loading, error, isManager: user?.role === 'manager' }}>
       {children}
     </AuthContext.Provider>
   );

@@ -15,6 +15,7 @@ import Knowledge from './pages/Knowledge';
 import Members from './pages/Members';
 import Calendar from './pages/Calendar';
 import InReview from './pages/InReview';
+import AccountSettings from './pages/AccountSettings';
 
 export default function App() {
   return (
@@ -35,6 +36,7 @@ export default function App() {
             <Route path="members" element={<RequireManager><Members /></RequireManager>} />
             <Route path="calendar" element={<Calendar />} />
             <Route path="in-review" element={<RequireManager><InReview /></RequireManager>} />
+            <Route path="account-settings" element={<AccountSettings />} />
           </Route>
         </Routes>
       </BrowserRouter>
