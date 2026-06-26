@@ -7,7 +7,7 @@ const { auth, managerOnly } = require("../middleware/auth");
 router.get("/", auth, async (req, res) => {
   try {
     const { rows } = await db.query(
-      "SELECT id,name,email,role,birthday,skills,active,created_at FROM members ORDER BY created_at",
+      "SELECT id,name,email,role,birthday,skills,active,created_at,avatar_url FROM members ORDER BY created_at",
     );
     res.json(rows);
   } catch (e) {

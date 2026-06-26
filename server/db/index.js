@@ -101,6 +101,12 @@ const initDB = async () => {
     )
   `);
 
+  // Profile columns — added progressively, safe to re-run
+  await ensureColumn("members", "phone VARCHAR(50)");
+  await ensureColumn("members", "location VARCHAR(255)");
+  await ensureColumn("members", "bio TEXT");
+  await ensureColumn("members", "avatar_url TEXT");
+
   await pool.query(`
     CREATE TABLE IF NOT EXISTS refresh_tokens (
       id ${idDefinition(defaultIdType)},

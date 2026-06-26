@@ -10,7 +10,10 @@ const {
   verifyRefreshToken,
   computeRefreshExpiry,
 } = require("../utils/jwt");
-const { getRefreshCookieOptions, clearAuthCookies } = require("../utils/cookies");
+const {
+  getRefreshCookieOptions,
+  clearAuthCookies,
+} = require("../utils/cookies");
 const {
   createRefreshToken,
   findValidRefreshToken,
@@ -40,6 +43,11 @@ router.post("/login", async (req, res) => {
       name: rows[0].name,
       email: rows[0].email,
       role: rows[0].role,
+      phone: rows[0].phone || null,
+      location: rows[0].location || null,
+      bio: rows[0].bio || null,
+      birthday: rows[0].birthday || null,
+      avatar_url: rows[0].avatar_url || null,
     };
 
     const accessToken = signAccessToken(user);
@@ -48,7 +56,9 @@ router.post("/login", async (req, res) => {
     const refreshToken = signRefreshToken(user, refreshJti);
     const refreshExpiresAt = computeRefreshExpiry();
     if (!refreshExpiresAt) {
-      return res.status(500).json({ error: "Server refresh expiry misconfigured" });
+      return res
+        .status(500)
+        .json({ error: "Server refresh expiry misconfigured" });
     }
 
     await createRefreshToken({
@@ -61,7 +71,6 @@ router.post("/login", async (req, res) => {
 
     // Store refresh token as httpOnly cookie; JS never sees it.
     res.cookie("orbit_refresh", refreshToken, getRefreshCookieOptions());
-
 
     res.json({
       user,
@@ -83,28 +92,25 @@ router.post("/login", async (req, res) => {
 //     return res.status(401).json({ error: "Not authenticated" });
 //   }
 router.post("/refresh", async (req, res) => {
-  const allowedOrigins = [
-    "http://localhost:3000",
-    "https://orbit.torusdxn.in",
-  ];
+  const allowedOrigins = ["http://localhost:3000", "https://orbit.torusdxn.in"];
 
   const origin = req.get("origin");
 
-if (origin && !allowedOrigins.includes(origin)) {
-  return res.status(403).json({
-    error: "INVALID_ORIGIN",
-  });
-}
+  if (origin && !allowedOrigins.includes(origin)) {
+    return res.status(403).json({
+      error: "INVALID_ORIGIN",
+    });
+  }
 
-const refreshToken = req.cookies?.orbit_refresh;
+  const refreshToken = req.cookies?.orbit_refresh;
 
-if (!refreshToken) {
-  clearAuthCookies(res);
+  if (!refreshToken) {
+    clearAuthCookies(res);
 
-  return res.status(401).json({
-    error: "Not authenticated",
-  });
-}
+    return res.status(401).json({
+      error: "Not authenticated",
+    });
+  }
   let payload;
   try {
     payload = verifyRefreshToken(refreshToken);
@@ -120,26 +126,23 @@ if (!refreshToken) {
     return res.status(401).json({ error: "Invalid refresh token" });
   }
 
-const stored = await findValidRefreshToken(jti);
+  const stored = await findValidRefreshToken(jti);
 
-if (!stored) {
-  // possible token reuse attack
-  if (memberId) {
-    await revokeAllRefreshTokensForMember(
-      memberId,
-      "token_reuse_detected"
-    );
+  if (!stored) {
+    // possible token reuse attack
+    if (memberId) {
+      await revokeAllRefreshTokensForMember(memberId, "token_reuse_detected");
+    }
+
+    clearAuthCookies(res);
+
+    return res.status(401).json({
+      error: "Refresh token revoked or expired",
+    });
   }
 
-  clearAuthCookies(res);
-
-  return res.status(401).json({
-    error: "Refresh token revoked or expired",
-  });
-}
-
   const { rows } = await db.query(
-    "SELECT id, name, email, role, skills, active FROM members WHERE id=$1",
+    "SELECT id, name, email, role, skills, active, phone, location, bio, birthday, avatar_url FROM members WHERE id=$1",
     [memberId],
   );
   if (!rows[0] || !rows[0].active) {
@@ -154,6 +157,11 @@ if (!stored) {
     email: rows[0].email,
     role: rows[0].role,
     skills: rows[0].skills,
+    phone: rows[0].phone || null,
+    location: rows[0].location || null,
+    bio: rows[0].bio || null,
+    birthday: rows[0].birthday || null,
+    avatar_url: rows[0].avatar_url || null,
   };
 
   const newAccessToken = signAccessToken(user);
@@ -161,7 +169,9 @@ if (!stored) {
   const newRefreshToken = signRefreshToken(user, newJti);
   const newRefreshExpiresAt = computeRefreshExpiry();
   if (!newRefreshExpiresAt) {
-    return res.status(500).json({ error: "Server refresh expiry misconfigured" });
+    return res
+      .status(500)
+      .json({ error: "Server refresh expiry misconfigured" });
   }
 
   await rotateRefreshToken(jti, { newJti, newExpiresAt: newRefreshExpiresAt });
@@ -175,10 +185,7 @@ if (!stored) {
 // Clears the auth cookie to invalidate the session.
 // =========================
 router.post("/logout", async (req, res) => {
-const allowedOrigins = [
-  "http://localhost:3000",
-  "https://orbit.torusdxn.in",
-];
+  const allowedOrigins = ["http://localhost:3000", "https://orbit.torusdxn.in"];
 
   const origin = req.get("origin");
 
@@ -245,11 +252,98 @@ const allowedOrigins = [
 router.get("/me", auth, async (req, res) => {
   try {
     const { rows } = await db.query(
-      "SELECT id, name, email, role, skills FROM members WHERE id=$1",
+      "SELECT id, name, email, role, skills, phone, location, bio, birthday, avatar_url FROM members WHERE id=$1",
       [req.user.id],
     );
     if (!rows[0]) return res.status(404).json({ error: "User not found" });
     res.json(rows[0]);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// =========================
+// PUT /api/auth/profile
+// Authenticated user updates their own profile info + optional password.
+// =========================
+router.put("/profile", auth, async (req, res) => {
+  try {
+    const { name, email, phone, location, bio, password, avatar_base64 } =
+      req.body;
+    const memberId = req.user.id;
+
+    // Fetch current row
+    const { rows: current } = await db.query(
+      "SELECT * FROM members WHERE id=$1",
+      [memberId],
+    );
+    if (!current[0]) return res.status(404).json({ error: "User not found" });
+
+    // Build update fields dynamically
+    const updates = [];
+    const values = [];
+    let idx = 1;
+
+    if (name !== undefined) {
+      updates.push(`name=$${idx++}`);
+      values.push(name);
+    }
+    if (email !== undefined) {
+      updates.push(`email=$${idx++}`);
+      values.push(email);
+    }
+    if (phone !== undefined) {
+      updates.push(`phone=$${idx++}`);
+      values.push(phone || null);
+    }
+    if (location !== undefined) {
+      updates.push(`location=$${idx++}`);
+      values.push(location || null);
+    }
+    if (bio !== undefined) {
+      updates.push(`bio=$${idx++}`);
+      values.push(bio || null);
+    }
+
+    // Avatar: store base64 string in avatar_url column (or you can write to disk later)
+    if (avatar_base64) {
+      updates.push(`avatar_url=$${idx++}`);
+      values.push(avatar_base64);
+    }
+
+    if (password) {
+      const hash = await bcrypt.hash(password, 10);
+      updates.push(`password_hash=$${idx++}`);
+      values.push(hash);
+    }
+
+    if (updates.length === 0) {
+      return res.json({ success: true, user: current[0] });
+    }
+
+    values.push(memberId);
+    const { rows } = await db.query(
+      `UPDATE members SET ${updates.join(", ")} WHERE id=$${idx} RETURNING id,name,email,role,phone,location,bio,avatar_url`,
+      values,
+    );
+
+    res.json({ success: true, user: rows[0] });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// =========================
+// DELETE /api/auth/account
+// Authenticated user deletes their own account.
+// =========================
+router.delete("/account", auth, async (req, res) => {
+  try {
+    const memberId = req.user.id;
+    await revokeAllRefreshTokensForMember(memberId, "account_deleted");
+    await db.query("DELETE FROM members WHERE id=$1", [memberId]);
+    clearAuthCookies(res);
+    res.json({ success: true });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }

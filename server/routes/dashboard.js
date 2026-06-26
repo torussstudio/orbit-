@@ -23,9 +23,9 @@ router.get("/", auth, async (req, res) => {
            WHERE t.rework_count > 0 AND t.parent_task_id IS NOT NULL
            ORDER BY rework_count DESC LIMIT 5`,
         ),
-        db.query(`SELECT m.id,m.name,COUNT(t.id) as task_count FROM members m
+        db.query(`SELECT m.id,m.name,m.avatar_url,COUNT(t.id) as task_count FROM members m
         LEFT JOIN tasks t ON t.assignee_id=m.id AND t.stage NOT IN ('Done')
-        WHERE m.role='member' AND m.active=true GROUP BY m.id,m.name`),
+        WHERE m.role='member' AND m.active=true GROUP BY m.id,m.name,m.avatar_url`),
       ]);
     return res.json({
       projects: projects.rows,
