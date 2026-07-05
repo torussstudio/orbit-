@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import api from '../api/client';
+import DatePicker from '../components/ui/DatePicker';
 
 // Reusable avatar renderer — shows image if url exists, else initial letter
 export function UserAvatar({ avatarUrl, name, size = 34, fontSize = 13 }) {
@@ -163,7 +164,7 @@ export default function AccountSettings() {
   };
 
   return (
-    <div style={{ padding: '32px', maxWidth: '1140px', margin: '0 auto' }}>
+    <div style={{ padding: '32px'}}>
       {/* Page title */}
       <div style={{ marginBottom: '28px' }}>
         <h1 style={{ fontSize: '22px', fontWeight: 700, color: 'var(--text)', letterSpacing: '-0.4px' }}>
@@ -174,7 +175,7 @@ export default function AccountSettings() {
         </p>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '280px 1fr', gap: '24px', alignItems: 'start' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '350px 1fr', gap: '24px', alignItems: 'start' }}>
 
         {/* ══ LEFT PANEL ══════════════════════════════════════ */}
         <div style={{
@@ -324,9 +325,7 @@ export default function AccountSettings() {
               </div>
               <div>
                 <label style={labelStyle}>Date of Birth</label>
-                <input style={inputStyle} value={form.dob} type="date" onChange={handleChange('dob')}
-                  onFocus={e => e.target.style.borderColor = 'var(--accent)'}
-                  onBlur={e => e.target.style.borderColor = 'var(--border)'} />
+                <DatePicker value={form.dob} onChange={val => setForm(prev => ({ ...prev, dob: val }))} placeholder="dd-mm-yyyy" />
               </div>
             </div>
 

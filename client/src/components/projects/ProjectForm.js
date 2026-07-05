@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react';
 import api from '../../api/client';
+import DatePicker from '../ui/DatePicker';
+import Select from '../ui/Select';
 
 const DEFAULT_STAGES = ["Todo","In Progress","In Review","Done"];
 
@@ -51,15 +53,15 @@ export default function ProjectForm({ initial, onSave, onCancel, saving = false 
       <div className="form-row">
         <div className="form-group">
           <label className="form-label">Status</label>
-          <select className="form-select" value={form.status} onChange={e => setForm(f => ({ ...f, status: e.target.value }))}>
+          <Select value={form.status} onChange={val => setForm(f => ({ ...f, status: val }))}>
             <option value="active">Active</option>
             <option value="on_hold">On Hold</option>
             <option value="completed">Completed</option>
-          </select>
+          </Select>
         </div>
         <div className="form-group">
           <label className="form-label">End Date</label>
-          <input className="form-input" type="date" value={form.end_date || ''} onChange={e => setForm(f => ({ ...f, end_date: e.target.value }))} />
+          <DatePicker value={form.end_date || ''} onChange={val => setForm(f => ({ ...f, end_date: val }))} placeholder="dd-mm-yyyy" />
         </div>
       </div>
 

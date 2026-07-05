@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useLayoutEffect } from "react";
 import { useParams, Link } from "react-router-dom";
 import api from "../api/client";
 import { useAuth } from "../context/AuthContext";
@@ -27,6 +27,7 @@ export default function Tasks({ project: propProject }) {
   const [clusters, setClusters] = useState([]);
   const [showSubTaskModal, setShowSubTaskModal] = useState(false);
   const [subTaskParent, setSubTaskParent] = useState(null);
+  const [savingTask, setSavingTask] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState({
     show: false,
     id: null,
@@ -63,22 +64,32 @@ export default function Tasks({ project: propProject }) {
   }, [projectId]);
 
   const handleSave = async (data) => {
-    if (editing) await api.put(`/tasks/${editing.id}`, data);
-    else await api.post("/tasks", { ...data, project_id: projectId });
-    setShowModal(false);
-    setEditing(null);
-    load();
+    setSavingTask(true);
+    try {
+      if (editing) await api.put(`/tasks/${editing.id}`, data);
+      else await api.post("/tasks", { ...data, project_id: projectId });
+      setShowModal(false);
+      setEditing(null);
+      load();
+    } finally {
+      setSavingTask(false);
+    }
   };
 
   const handleSubTaskSave = async (data) => {
-    await api.post("/tasks", {
-      ...data,
-      project_id: projectId,
-      parent_task_id: subTaskParent.id,
-    });
-    setShowSubTaskModal(false);
-    setSubTaskParent(null);
-    load();
+    setSavingTask(true);
+    try {
+      await api.post("/tasks", {
+        ...data,
+        project_id: projectId,
+        parent_task_id: subTaskParent.id,
+      });
+      setShowSubTaskModal(false);
+      setSubTaskParent(null);
+      load();
+    } finally {
+      setSavingTask(false);
+    }
   };
 
   const handleDelete = (id) => {
@@ -134,7 +145,12 @@ export default function Tasks({ project: propProject }) {
           display: "flex",
           justifyContent: "space-between",
           alignItems: "center",
-          marginBottom: "20px",
+          position: "sticky",
+          top: 0,
+          zIndex: 30,
+          background: "var(--bg)",
+          padding: "24px 32px 20px",
+          margin: "-24px -32px 0",
         }}
       >
         {/* Left: Board / List toggle */}
@@ -348,6 +364,7 @@ export default function Tasks({ project: propProject }) {
             clusters={clusters}
             stages={stages}
             onSave={handleSave}
+            saving={savingTask}
             onCancel={() => {
               setShowModal(false);
               setEditing(null);
@@ -369,6 +386,7 @@ export default function Tasks({ project: propProject }) {
             clusters={clusters}
             stages={stages}
             onSave={handleSubTaskSave}
+            saving={savingTask}
             onCancel={() => {
               setShowSubTaskModal(false);
               setSubTaskParent(null);
@@ -406,6 +424,25 @@ function BoardView({
   const { user } = useAuth();
   const [dragOver, setDragOver] = useState(null);
 
+  const boardWrapRef = useRef(null);
+  const [boardMaxHeight, setBoardMaxHeight] = useState(null);
+
+  useLayoutEffect(() => {
+    const calc = () => {
+      const el = boardWrapRef.current;
+      if (!el) return;
+      const scrollParent = el.closest(".main-content") || document.scrollingElement;
+      if (!scrollParent) return;
+      const rect = el.getBoundingClientRect();
+      const parentRect = scrollParent.getBoundingClientRect();
+      const offset = rect.top - parentRect.top + scrollParent.scrollTop;
+      setBoardMaxHeight(scrollParent.clientHeight - offset - 16);
+    };
+    calc();
+    window.addEventListener("resize", calc);
+    return () => window.removeEventListener("resize", calc);
+  }, []);
+
   const handleDrop = async (taskId, newStage) => {
     const task = tasks.find((t) => String(t.id) === String(taskId));
     if (!task) return;
@@ -422,43 +459,40 @@ function BoardView({
 
   return (
     <div
+      ref={boardWrapRef}
       style={{
-        display: "flex",
-        gap: "20px",
-        overflowX: "auto",
-        paddingBottom: "12px",
+        overflow: "auto",
+        maxHeight: boardMaxHeight ? `${boardMaxHeight}px` : undefined,
       }}
     >
-      {stages.map((stage) => {
-        const stageTasks = tasks.filter((t) => t.stage === stage);
-        return (
-          <div
-            key={stage}
-            style={{
-              minWidth: "290px",
-              width: "290px",
-              borderRadius: "10px",
-              padding: "8px",
-              transition: "background 0.2s",
-              background: dragOver === stage ? "var(--bg-3)" : "transparent",
-            }}
-            onDragOver={(e) => {
-              e.preventDefault();
-              setDragOver(stage);
-            }}
-            onDragLeave={() => setDragOver(null)}
-            onDrop={(e) => {
-              e.preventDefault();
-              setDragOver(null);
-              handleDrop(e.dataTransfer.getData("taskId"), stage);
-            }}
-          >
+      {/* Sticky stage-header row — pinned below the toolbar so TODO / IN
+          PROGRESS / IN REVIEW / DONE stay visible while cards scroll under
+          it. Shares this same overflowX container with the cards row below
+          so both scroll horizontally in sync. */}
+      <div
+        style={{
+          display: "flex",
+          gap: "20px",
+          position: "sticky",
+          top: 0,
+          zIndex: 20,
+          background: "var(--bg)",
+          padding: "12px 0 8px",
+          width: "fit-content",
+          minWidth: "100%",
+        }}
+      >
+        {stages.map((stage) => {
+          const stageTasks = tasks.filter((t) => t.stage === stage);
+          return (
             <div
+              key={stage}
               style={{
+                minWidth: "290px",
+                width: "290px",
                 display: "flex",
                 justifyContent: "start",
                 alignItems: "center",
-                marginBottom: "8px",
                 flexDirection: "row-reverse",
                 gap: "15px",
               }}
@@ -486,29 +520,69 @@ function BoardView({
                 {stageTasks.length}
               </span>
             </div>
+          );
+        })}
+      </div>
+
+      {/* Scrolling cards row */}
+      <div
+        style={{
+          display: "flex",
+          gap: "20px",
+          paddingTop: "8px",
+          paddingBottom: "12px",
+          width: "fit-content",
+          minWidth: "100%",
+        }}
+      >
+        {stages.map((stage) => {
+          const stageTasks = tasks.filter((t) => t.stage === stage);
+          return (
             <div
+              key={stage}
               style={{
-                display: "flex",
-                flexDirection: "column",
-                gap: "8px",
-                minHeight: "80px",
+                minWidth: "290px",
+                width: "290px",
+                borderRadius: "10px",
+                padding: "8px",
+                transition: "background 0.2s",
+                background: dragOver === stage ? "var(--bg-3)" : "transparent",
+              }}
+              onDragOver={(e) => {
+                e.preventDefault();
+                setDragOver(stage);
+              }}
+              onDragLeave={() => setDragOver(null)}
+              onDrop={(e) => {
+                e.preventDefault();
+                setDragOver(null);
+                handleDrop(e.dataTransfer.getData("taskId"), stage);
               }}
             >
-              {stageTasks.map((t) => (
-                <TaskCard
-                  key={t.id}
-                  task={t}
-                  projectId={projectId}
-                  onEdit={onEdit}
-                  onDelete={onDelete}
-                  isManager={isManager}
-                  onAddSubTask={onAddSubTask}
-                />
-              ))}
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "8px",
+                  minHeight: "80px",
+                }}
+              >
+                {stageTasks.map((t) => (
+                  <TaskCard
+                    key={t.id}
+                    task={t}
+                    projectId={projectId}
+                    onEdit={onEdit}
+                    onDelete={onDelete}
+                    isManager={isManager}
+                    onAddSubTask={onAddSubTask}
+                  />
+                ))}
+              </div>
             </div>
-          </div>
-        );
-      })}
+          );
+        })}
+      </div>
     </div>
   );
 }

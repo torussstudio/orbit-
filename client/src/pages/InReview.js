@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import api from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import Modal from '../components/ui/Modal';
+import DatePicker from '../components/ui/DatePicker';
 
 export default function InReview() {
   const { isManager } = useAuth();
@@ -207,7 +208,7 @@ export default function InReview() {
           </div>
           <div className="form-group" style={{ background: 'var(--bg-3)', padding: '14px', borderRadius: '8px', border: '1px solid var(--border)', marginBottom: '4px' }}>
             <label className="form-label">New Deadline (optional)</label>
-            <input className="form-input" type="date" value={reworkDeadline} onChange={e => setReworkDeadline(e.target.value)} />
+            <DatePicker value={reworkDeadline} onChange={val => setReworkDeadline(val)} placeholder="dd-mm-yyyy" />
             <div style={{ fontSize: '11px', color: 'var(--text-3)', marginTop: '6px' }}>Set a new due date for the rework cycle</div>
           </div>
           <div className="modal-actions">

@@ -4,6 +4,7 @@ import { useAuth } from "../context/AuthContext";
 import { formatDate } from "../utils/helpers";
 import Modal from "../components/ui/Modal";
 import ConfirmModal from "../components/ui/ConfirmModal";
+import Select from "../components/ui/Select";
 
 export default function Members() {
   const { isManager } = useAuth();
@@ -315,16 +316,15 @@ export default function Members() {
             </div>
             <div className="form-group">
               <label className="form-label">Role</label>
-              <select
-                className="form-select"
+              <Select
                 value={form.role}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, role: e.target.value }))
+                onChange={(val) =>
+                  setForm((f) => ({ ...f, role: val }))
                 }
               >
                 <option value="member">Member</option>
                 <option value="manager">Manager</option>
-              </select>
+              </Select>
             </div>
           </div>
           <div className="form-group">

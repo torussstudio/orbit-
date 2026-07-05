@@ -4,6 +4,7 @@ import api from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import Modal from '../components/ui/Modal';
 import ConfirmModal from '../components/ui/ConfirmModal';
+import Select from '../components/ui/Select';
 
 export default function Credentials({ project: propProject }) {
   const params = useParams();
@@ -161,10 +162,10 @@ export default function Credentials({ project: propProject }) {
           </div>
           <div className="form-group">
             <label className="form-label">Visibility</label>
-            <select className="form-select" value={clusterForm.visibility} onChange={e => setClusterForm(f => ({ ...f, visibility: e.target.value }))}>
+            <Select value={clusterForm.visibility} onChange={val => setClusterForm(f => ({ ...f, visibility: val }))}>
               <option value="private">🔒 Private — Manager only</option>
               <option value="public">👁 Public — Visible to members (values masked)</option>
-            </select>
+            </Select>
           </div>
           <div className="modal-actions">
             <button className="btn btn-ghost" onClick={() => setShowClusterModal(false)}>Cancel</button>

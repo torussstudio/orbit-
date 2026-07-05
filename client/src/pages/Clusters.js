@@ -3,6 +3,7 @@ import { useParams, Link } from 'react-router-dom';
 import api from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { formatDate } from '../utils/helpers';
+import DatePicker from '../components/ui/DatePicker';
 import Modal from '../components/ui/Modal';
 import ConfirmModal from '../components/ui/ConfirmModal';
 
@@ -127,7 +128,7 @@ export default function Clusters({ project: propProject }) {
           </div>
           <div className="form-group">
             <label className="form-label">Target Date</label>
-            <input className="form-input" type="date" value={form.target_date} onChange={e => setForm(f => ({ ...f, target_date: e.target.value }))} />
+            <DatePicker value={form.target_date} onChange={val => setForm(f => ({ ...f, target_date: val }))} placeholder="dd-mm-yyyy" />
           </div>
           <div className="modal-actions">
             <button className="btn btn-ghost" onClick={() => setShowModal(false)}>Cancel</button>

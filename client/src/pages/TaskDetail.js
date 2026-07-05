@@ -3,6 +3,7 @@ import { useParams, Link } from 'react-router-dom';
 import api from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { formatDate } from '../utils/helpers';
+import DatePicker from '../components/ui/DatePicker';
 import Modal from '../components/ui/Modal';
 import ConfirmModal from '../components/ui/ConfirmModal';
 import TaskForm from '../components/tasks/TaskForm';
@@ -573,11 +574,10 @@ if (nextStage === 'Done') {
           {reviewAction === 'rework' && (
             <div className="form-group" style={{ background: 'var(--bg-3)', padding: '14px', borderRadius: '8px', border: '1px solid var(--border)', marginBottom: '16px' }}>
               <label className="form-label">New Deadline (optional)</label>
-              <input
-                className="form-input"
-                type="date"
+              <DatePicker
                 value={reworkDeadline}
-                onChange={e => setReworkDeadline(e.target.value)}
+                onChange={val => setReworkDeadline(val)}
+                placeholder="dd-mm-yyyy"
               />
               <div style={{ fontSize: '11px', color: 'var(--text-3)', marginTop: '6px' }}>Set a new due date for the rework cycle</div>
             </div>

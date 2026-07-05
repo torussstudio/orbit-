@@ -4,6 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import Modal from '../components/ui/Modal';
 import ConfirmModal from '../components/ui/ConfirmModal';
 import MemberFilterBar from '../components/ui/MemberFilterBar';
+import Select from '../components/ui/Select';
 
 const COLORS = {
   event: '#6366f1',
@@ -898,10 +899,10 @@ function EventForm({ initial, members, onSave, onCancel, saving = false }) {
 
       <div className="form-group">
         <label className="form-label">Type</label>
-        <select className="form-select" value={form.type} onChange={(event) => setField('type', event.target.value)}>
+        <Select value={form.type} onChange={(val) => setField('type', val)}>
           <option value="event">Custom Event</option>
           <option value="birthday">Birthday</option>
-        </select>
+        </Select>
       </div>
 
       <div className="form-row">
@@ -994,3 +995,4 @@ function EventForm({ initial, members, onSave, onCancel, saving = false }) {
     </div>
   );
 }
+  

@@ -1,4 +1,6 @@
 import { useState } from 'react';
+import DatePicker from '../ui/DatePicker';
+import Select from '../ui/Select';
 
 export default function TaskForm({ initial, members, clusters, stages, onSave, onCancel, hideCluster, saving = false, userRole }) {
   const [form, setForm] = useState({
@@ -44,31 +46,31 @@ export default function TaskForm({ initial, members, clusters, stages, onSave, o
       <div className="form-row">
         <div className="form-group">
           <label className="form-label">Assignee</label>
-          <select className="form-select" value={form.assignee_id} onChange={e => setForm(f => ({ ...f, assignee_id: e.target.value }))}>
+          <Select value={form.assignee_id} onChange={val => setForm(f => ({ ...f, assignee_id: val }))} placeholder="Unassigned">
             <option value="">Unassigned</option>
             {members?.filter(m => m.active).map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
-          </select>
+          </Select>
         </div>
         <div className="form-group">
           <label className="form-label">Priority</label>
-          <select className="form-select" value={form.priority} onChange={e => setForm(f => ({ ...f, priority: e.target.value }))}>
+          <Select value={form.priority} onChange={val => setForm(f => ({ ...f, priority: val }))}>
             <option value="low">Low</option>
             <option value="medium">Medium</option>
             <option value="high">High</option>
             <option value="critical">Critical</option>
-          </select>
+          </Select>
         </div>
       </div>
       <div className="form-row">
         <div className="form-group">
           <label className="form-label">Stage</label>
-          <select className="form-select" value={form.stage} onChange={e => setForm(f => ({ ...f, stage: e.target.value }))}>
+          <Select value={form.stage} onChange={val => setForm(f => ({ ...f, stage: val }))}>
            {allowedStages.map(s => <option key={s} value={s}>{s}</option>)}
-          </select>
+          </Select>
         </div>
         <div className="form-group">
           <label className="form-label">Due Date <span style={{ color: 'var(--danger)' }}>*</span></label>
-          <input className="form-input" type="date" value={form.due_date || ''} onChange={e => setForm(f => ({ ...f, due_date: e.target.value }))} required />
+          <DatePicker value={form.due_date || ''} onChange={val => setForm(f => ({ ...f, due_date: val }))} placeholder="dd-mm-yyyy" />
         </div>
       </div>
       {userRole === 'member' && (form.stage === 'In Review' && (initial?.stage === 'In Progress' || (initial?.stage === 'In Review' && !initial?.time_taken))) && (
@@ -106,15 +108,16 @@ export default function TaskForm({ initial, members, clusters, stages, onSave, o
       {!hideCluster && (
         <div className="form-group">
           <label className="form-label">Cluster (optional)</label>
-          <select className="form-select" value={form.cluster_id} onChange={e => setForm(f => ({ ...f, cluster_id: e.target.value }))}>
+          <Select value={form.cluster_id} onChange={val => setForm(f => ({ ...f, cluster_id: val }))} placeholder="No cluster">
             <option value="">No cluster</option>
             {clusters?.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </select>
+          </Select>
         </div>
       )}
       <div className="modal-actions">
-        <button className="btn btn-ghost" onClick={onCancel}>Cancel</button>
+        <button className="btn btn-ghost" onClick={onCancel} disabled={saving}>Cancel</button>
         <button className="btn btn-primary" onClick={handleSave} disabled={saving}>
+          {saving && <span className="btn-spinner" />}
           {saving ? 'Saving...' : 'Save Task'}
         </button>
       </div>

@@ -10,10 +10,17 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    api
-      .get("/dashboard")
-      .then((r) => setData(r.data))
-      .finally(() => setLoading(false));
+    const fetchData = () =>
+      api
+        .get("/dashboard")
+        .then((r) => setData(r.data))
+        .finally(() => setLoading(false));
+
+    fetchData();
+    // Re-fetch periodically so date-dependent numbers (like Overdue Tasks)
+    // stay correct if the dashboard is left open for a long time.
+    const interval = setInterval(fetchData, 15 * 60 * 1000); // every 15 min
+    return () => clearInterval(interval);
   }, []);
 
   if (loading)
@@ -56,16 +63,20 @@ function getGreeting() {
 
 function ManagerDash({ data }) {
   if (!data) return null;
+  const totalProjects = data.total_projects ?? data.projects?.length ?? 0;
   const totalTasks =
-    data.tasks_by_stage?.reduce((s, r) => s + parseInt(r.count), 0) || 0;
+    data.total_main_tasks ??
+    data.tasks_by_stage?.reduce((s, r) => s + parseInt(r.count), 0) ??
+    0;
   const doneTasks =
     data.tasks_by_stage?.find((r) => r.stage === "Done")?.count || 0;
+  const overdueCount = data.overdue_count ?? data.overdue_tasks?.length ?? 0;
 
   return (
     <>
       <div className="stats-grid">
         <div className="stat-card">
-          <div className="stat-value">{data.projects?.length || 0}</div>
+          <div className="stat-value">{totalProjects}</div>
           <div className="stat-label">Active Projects</div>
         </div>
         <div className="stat-card">
@@ -80,7 +91,7 @@ function ManagerDash({ data }) {
         </div>
         <div className="stat-card">
           <div className="stat-value" style={{ color: "var(--danger)" }}>
-            {data.overdue_tasks?.length || 0}
+            {overdueCount}
           </div>
           <div className="stat-label">Overdue Tasks</div>
         </div>
