@@ -6,6 +6,7 @@ import { formatDate, isOverdue } from "../utils/helpers";
 import Modal from "../components/ui/Modal";
 import ConfirmModal from "../components/ui/ConfirmModal";
 import TaskForm from "../components/tasks/TaskForm";
+import Select from "../components/ui/Select";
 
 const PRIORITY_COLORS = {
   low: "var(--accent)",
@@ -209,42 +210,27 @@ export default function Tasks({ project: propProject }) {
           </button>
 
           {/* Dropdown */}
-          {/* Dropdown */}
-<div style={{ position: "relative", display: "inline-flex", alignItems: "center" }}>
-  <select
-    value={selectedMonth}
-    onChange={(e) => setSelectedMonth(e.target.value)}
-    style={{
-      padding: "5px 32px 5px 12px",
-      borderRadius: "8px",
-      border: "none",
-      background: "linear-gradient(135deg, var(--accent), var(--accent-2))",
-      color: "#fff",
-      fontSize: "12px",
-      fontWeight: 600,
-      cursor: "pointer",
-      outline: "none",
-      minWidth: "140px",
-      appearance: "none",
-      fontFamily: "var(--font-body)",
-      WebkitAppearance: "none",
-    }}
-  >
-    {allMonthKeys.map((key) => (
-      <option key={key} value={key} style={{ background: "var(--bg-2)", color: "var(--text)" }}>
-        {formatMonthLabel(key)}
-      </option>
-    ))}
-  </select>
-  <span style={{
-    position: "absolute",
-    right: "10px",
-    pointerEvents: "none",
-    color: "#fff",
-    fontSize: "18px",
-    lineHeight: 1,
-  }}>▾</span>
-</div>
+          <Select
+            value={selectedMonth}
+            onChange={(val) => setSelectedMonth(val)}
+            arrowColor="#fff"
+            labelColor="#fff"
+            style={{
+              padding: "5px 12px",
+              borderRadius: "8px",
+              border: "none",
+              background: "linear-gradient(135deg, var(--accent), var(--accent-2))",
+              fontSize: "12px",
+              fontWeight: 600,
+              minWidth: "140px",
+            }}
+          >
+            {allMonthKeys.map((key) => (
+              <option key={key} value={key}>
+                {formatMonthLabel(key)}
+              </option>
+            ))}
+          </Select>
 
           {/* › Next */}
           <button
@@ -285,6 +271,7 @@ export default function Tasks({ project: propProject }) {
               borderRadius: "10px",
               padding: "2px 8px",
               color: "var(--text-3)",
+              textWrap: "nowrap"
             }}
           >
             {filteredTasks.length} task{filteredTasks.length !== 1 ? "s" : ""}
@@ -305,6 +292,7 @@ export default function Tasks({ project: propProject }) {
           {isManager && (
             <button
               className="btn btn-primary btn-sm"
+              style={{ textWrap: "nowrap"}}
               onClick={() => {
                 setEditing(null);
                 setShowModal(true);

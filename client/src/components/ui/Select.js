@@ -32,6 +32,8 @@ export default function Select({
   placeholder = 'Select...',
   disabled,
   style,
+  arrowColor = 'var(--text-3)', 
+  labelColor,
 }) {
   const [open, setOpen] = useState(false);
   const [coords, setCoords] = useState(null);
@@ -129,12 +131,12 @@ export default function Select({
       >
         <span
           className="select-trigger-label"
-          style={{ color: selected ? 'var(--text)' : 'var(--text-3)' }}
+          style={{ color: labelColor || (selected ? 'var(--text)' : 'var(--text-3)') }}
         >
           {selected ? selected.label : placeholder}
         </span>
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" style={{ flexShrink: 0 }}>
-          <path d="M6 9l6 6 6-6" stroke="var(--text-3)" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+          <path d="M6 9l6 6 6-6" stroke={arrowColor} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
       </button>
 
