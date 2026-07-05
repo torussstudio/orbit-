@@ -68,7 +68,7 @@ export default function ProjectForm({ initial, onSave, onCancel, saving = false 
       <div className="form-group">
         <label className="form-label">Assign Members</label>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-          {members.map(m => (
+          {[...members].sort((a, b) => a.name.localeCompare(b.name)).map(m => (
             <label key={m.id} style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '6px 10px', borderRadius: '6px', cursor: 'pointer', border: '1px solid', borderColor: form.member_ids.includes(m.id) ? 'var(--accent)' : 'var(--border)', background: form.member_ids.includes(m.id) ? 'var(--accent-glow)' : 'transparent', fontSize: '13px' }}>
               <input type="checkbox" checked={form.member_ids.includes(m.id)} onChange={() => toggleMember(m.id)} style={{ display: 'none' }} />
               {m.name}
@@ -90,7 +90,7 @@ export default function ProjectForm({ initial, onSave, onCancel, saving = false 
         <div style={{ display: 'flex', gap: '8px' }}>
           <input className="form-input" value={newStage} onChange={e => setNewStage(e.target.value)} placeholder="Add custom stage..." onKeyDown={e => e.key === 'Enter' && addStage()} style={{ flex: 1 }} />
           <button className="btn btn-ghost btn-sm" onClick={addStage}>Add</button>
-        </div>
+        </div>  
       </div>
 
       <div className="modal-actions">

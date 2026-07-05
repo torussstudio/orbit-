@@ -357,17 +357,32 @@ body {
 .modal {
   background: var(--bg-2);
   border: 1px solid var(--border);
-  border-radius: 16px; padding: 28px;
+  border-radius: 16px;
   width: 100%; max-width: 520px;
-  max-height: 85vh; overflow-y: auto;
+  max-height: 85vh;
+  overflow: hidden;
+  display: flex; flex-direction: column;
   animation: slideUp 0.2s ease;
   box-shadow: 0 20px 60px rgba(99,102,241,0.15);
 }
 @keyframes slideUp { from { transform: translateY(20px); opacity: 0; } }
 .modal-header {
   display: flex; align-items: center;
-  justify-content: space-between; margin-bottom: 24px;
+  justify-content: space-between;
+  padding: 28px 28px 0;
+  margin-bottom: 24px;
+  flex-shrink: 0;
 }
+.modal-body {
+  padding: 0 28px 28px;
+  overflow-y: auto;
+}
+.modal-body::-webkit-scrollbar { width: 6px; }
+.modal-body::-webkit-scrollbar-track { background: transparent; }
+.modal-body::-webkit-scrollbar-thumb {
+  background: var(--border); border-radius: 10px;
+}
+.modal-body::-webkit-scrollbar-thumb:hover { background: var(--accent); }
 .modal-title { font-size: 16px; font-weight: 700; color: var(--text); }
 .modal-close {
   background: var(--bg-3); border: none; color: var(--text-3);

@@ -16,7 +16,7 @@ export default function Modal({ title, onClose, children }) {
           <span className="modal-title">{title}</span>
           <button className="modal-close" onClick={onClose}>×</button>
         </div>
-        {children}
+        <div className="modal-body">{children}</div>
       </div>
     </div>
   );

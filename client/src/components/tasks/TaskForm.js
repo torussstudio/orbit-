@@ -48,7 +48,7 @@ export default function TaskForm({ initial, members, clusters, stages, onSave, o
           <label className="form-label">Assignee</label>
           <Select value={form.assignee_id} onChange={val => setForm(f => ({ ...f, assignee_id: val }))} placeholder="Unassigned">
             <option value="">Unassigned</option>
-            {members?.filter(m => m.active).map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+            {members?.filter(m => m.active).sort((a, b) => a.name.localeCompare(b.name)).map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
           </Select>
         </div>
         <div className="form-group">
