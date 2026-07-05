@@ -4,35 +4,52 @@ const { auth } = require("../middleware/auth");
 
 router.get("/", auth, async (req, res) => {
   if (req.user.role === "manager") {
-    const [projects, tasksByStage, overdue, clusterRework, workload] =
-      await Promise.all([
-        db.query(`SELECT id,name,status,
+    const [
+      projects,
+      tasksByStage,
+      overdue,
+      clusterRework,
+      workload,
+      totalProjectsCount,
+      totalMainTasksCount,
+      overdueCount,
+    ] = await Promise.all([
+      db.query(`SELECT id,name,status,
         (SELECT COUNT(*) FROM tasks WHERE project_id=p.id) as total_tasks,
         (SELECT COUNT(*) FROM tasks WHERE project_id=p.id AND stage='Done') as done_tasks
         FROM projects p WHERE status!='archived' ORDER BY created_at DESC LIMIT 10`),
-        db.query(
-          `SELECT stage, COUNT(*) as count FROM tasks GROUP BY stage ORDER BY count DESC`,
-        ),
-        db.query(`SELECT t.id,t.title,t.due_date,t.stage,p.name as project_name,m.name as assignee_name
+      db.query(
+        `SELECT stage, COUNT(*) as count FROM tasks WHERE parent_task_id IS NULL GROUP BY stage ORDER BY count DESC`,
+      ),
+      db.query(`SELECT t.id,t.title,t.due_date,t.stage,p.name as project_name,m.name as assignee_name
         FROM tasks t JOIN projects p ON t.project_id=p.id LEFT JOIN members m ON t.assignee_id=m.id
         WHERE t.due_date < NOW() AND t.stage NOT IN ('Done') ORDER BY t.due_date LIMIT 10`),
-        db.query(
-          `SELECT id,name,rework_count,status FROM clusters WHERE rework_count > 0
+      db.query(
+        `SELECT id,name,rework_count,status FROM clusters WHERE rework_count > 0
            UNION ALL
            SELECT t.id, t.title as name, t.rework_count, t.stage as status FROM tasks t
            WHERE t.rework_count > 0 AND t.parent_task_id IS NOT NULL
            ORDER BY rework_count DESC LIMIT 5`,
-        ),
-        db.query(`SELECT m.id,m.name,m.avatar_url,COUNT(t.id) as task_count FROM members m
+      ),
+      db.query(`SELECT m.id,m.name,m.avatar_url,COUNT(t.id) as task_count FROM members m
         LEFT JOIN tasks t ON t.assignee_id=m.id AND t.stage NOT IN ('Done')
         WHERE m.role='member' AND m.active=true GROUP BY m.id,m.name,m.avatar_url`),
-      ]);
+      // Exact counts for the overview stat cards — never limited, always live.
+      db.query(`SELECT COUNT(*) as count FROM projects WHERE status!='archived'`),
+      db.query(`SELECT COUNT(*) as count FROM tasks WHERE parent_task_id IS NULL`),
+      db.query(
+        `SELECT COUNT(*) as count FROM tasks WHERE due_date < NOW() AND stage NOT IN ('Done')`,
+      ),
+    ]);
     return res.json({
       projects: projects.rows,
       tasks_by_stage: tasksByStage.rows,
       overdue_tasks: overdue.rows,
       cluster_rework: clusterRework.rows,
       workload: workload.rows,
+      total_projects: parseInt(totalProjectsCount.rows[0].count),
+      total_main_tasks: parseInt(totalMainTasksCount.rows[0].count),
+      overdue_count: parseInt(overdueCount.rows[0].count),
     });
   } else {
     const [myTasks, overdue, recentComments] = await Promise.all([
