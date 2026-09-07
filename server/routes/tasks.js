@@ -1,10 +1,7 @@
 const router = require("express").Router();
 const db = require("../db");
 const { auth, managerOnly } = require("../middleware/auth");
-// pushNotify's createNotification import removed along with the alerts
-// below — see chat notes. Pipeline (pushNotify.js, notifications table,
-// service worker) is untouched; import it again here when re-adding
-// task-related alerts.
+const { createNotification } = require("../utils/pushNotify");
 
 const MANAGER_STAGES = ["Done"];
 
@@ -165,9 +162,16 @@ router.post("/", auth, async (req, res) => {
 
     await client.query("COMMIT");
 
-    // NOTIFICATION REMOVED (see chat) — was: "📌 New Task Assigned" to
-    // each assignee on task creation. Task creation/assignment logic
-    // above is untouched; only this alert was pulled out.
+    // Feature 1/N (see chat): notify every assignee when a task is
+    // created and assigned to them.
+    assigneeIds.forEach((mid) => {
+      createNotification(
+        mid,
+        "📌 New Task Assigned",
+        `You have been assigned: ${title}`,
+        { url: "/tasks" },
+      ).catch(() => {});
+    });
 
     res.status(201).json(task);
   } catch (e) {
