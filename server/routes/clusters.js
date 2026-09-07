@@ -21,7 +21,11 @@ router.get("/:id", auth, async (req, res) => {
   );
   if (!rows[0]) return res.status(404).json({ error: "Not found" });
   const tasks = await db.query(
-    `SELECT t.*, m.name as assignee_name FROM tasks t LEFT JOIN members m ON t.assignee_id=m.id
+    `SELECT t.*, assignee_agg.assignee_name FROM tasks t
+     LEFT JOIN LATERAL (
+       SELECT STRING_AGG(m.name, ', ' ORDER BY m.name) AS assignee_name
+       FROM task_assignees ta JOIN members m ON m.id=ta.member_id WHERE ta.task_id=t.id
+     ) assignee_agg ON true
      WHERE t.cluster_id=$1`,
     [req.params.id],
   );

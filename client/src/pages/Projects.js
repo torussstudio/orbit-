@@ -13,12 +13,27 @@ export default function Projects() {
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState(null);
+  const [editLoadingId, setEditLoadingId] = useState(null);
   const [showArchived, setShowArchived] = useState(false);
   const [saving, setSaving] = useState(false);
   const [confirmModal, setConfirmModal] = useState({ show: false, title: '', message: '', action: null, loading: false, isDangerous: false });
 
   const load = () => api.get('/projects').then(r => setProjects(r.data)).finally(() => setLoading(false));
   useEffect(() => { load(); }, []);
+
+  // The projects LIST endpoint doesn't include assigned members (only
+  // GET /projects/:id does) — fetch the full project before opening the
+  // edit modal so "Assign Members" starts pre-highlighted correctly.
+  const handleEdit = async (p) => {
+    setEditLoadingId(p.id);
+    try {
+      const { data } = await api.get(`/projects/${p.id}`);
+      setEditing(data);
+      setShowModal(true);
+    } finally {
+      setEditLoadingId(null);
+    }
+  };
 
   const handleSave = async (data) => {
     setSaving(true);
@@ -128,7 +143,8 @@ export default function Projects() {
                 key={p.id}
                 project={p}
                 isManager={isManager}
-                onEdit={() => { setEditing(p); setShowModal(true); }}
+                onEdit={() => handleEdit(p)}
+                editLoading={editLoadingId === p.id}
                 onArchive={() => handleArchive(p.id)}
               />
             ))}
@@ -198,7 +214,7 @@ export default function Projects() {
   );
 }
 
-function ProjectCard({ project: p, isManager, onEdit, onArchive, onUnarchive, onDelete, archived }) {
+function ProjectCard({ project: p, isManager, onEdit, editLoading, onArchive, onUnarchive, onDelete, archived }) {
   return (
     <div className="card" style={{ opacity: archived ? 0.75 : 1 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '12px' }}>
@@ -225,7 +241,9 @@ function ProjectCard({ project: p, isManager, onEdit, onArchive, onUnarchive, on
               <Link to={`/projects/${p.id}`} className="btn btn-ghost btn-sm">Open</Link>
               {isManager && (
                 <>
-                  <button className="btn btn-ghost btn-sm" onClick={onEdit}>Edit</button>
+                  <button className="btn btn-ghost btn-sm" onClick={onEdit} disabled={editLoading}>
+                    {editLoading ? 'Loading…' : 'Edit'}
+                  </button>
                   <button
                     className="btn btn-ghost btn-sm"
                     style={{ color: 'var(--text-3)' }}

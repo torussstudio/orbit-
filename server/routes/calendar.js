@@ -82,21 +82,29 @@ router.get("/", auth, async (req, res) => {
     if (isManager) {
       if (memberEmailList.length > 0) {
         taskVisibilityClause = `
-          AND LOWER(assignee.email) = ANY($1)
+          AND EXISTS (
+            SELECT 1 FROM task_assignees vta
+            JOIN members vam ON vam.id = vta.member_id
+            WHERE vta.task_id = t.id AND LOWER(vam.email) = ANY($1)
+          )
         `;
         taskParams = [memberEmailList];
       }
     } else if (memberEmailList.length > 0) {
       taskVisibilityClause = `
         AND (
-          t.assignee_id = $1
-          OR LOWER(assignee.email) = ANY($2)
+          EXISTS (SELECT 1 FROM task_assignees vta WHERE vta.task_id = t.id AND vta.member_id = $1)
+          OR EXISTS (
+            SELECT 1 FROM task_assignees vta
+            JOIN members vam ON vam.id = vta.member_id
+            WHERE vta.task_id = t.id AND LOWER(vam.email) = ANY($2)
+          )
         )
       `;
       taskParams = [userId, memberEmailList];
     } else {
       taskVisibilityClause = `
-        AND t.assignee_id = $1
+        AND EXISTS (SELECT 1 FROM task_assignees vta WHERE vta.task_id = t.id AND vta.member_id = $1)
       `;
       taskParams = [userId];
     }
@@ -110,27 +118,26 @@ router.get("/", auth, async (req, res) => {
         t.due_date,
         t.stage,
         t.priority,
-        t.assignee_id,
         t.created_by,
         p.name AS project_name,
-        assignee.name AS assignee_name,
-        assignee.email AS assignee_email,
+        assignee_agg.assignee_name,
         creator.name AS created_by_name,
         creator.email AS created_by_email,
-        CASE
-          WHEN assignee.id IS NULL THEN '[]'::jsonb
-          ELSE jsonb_build_array(
-            jsonb_build_object(
-              'id', assignee.id,
-              'name', assignee.name,
-              'email', assignee.email
-            )
-          )
-        END AS assigned_members
+        COALESCE(assignee_agg.assigned_members, '[]'::jsonb) AS assigned_members
       FROM tasks t
       JOIN projects p ON p.id = t.project_id
-      LEFT JOIN members assignee ON assignee.id = t.assignee_id
       LEFT JOIN members creator ON creator.id = t.created_by
+      LEFT JOIN LATERAL (
+        SELECT
+          STRING_AGG(m.name, ', ' ORDER BY m.name) AS assignee_name,
+          jsonb_agg(
+            jsonb_build_object('id', m.id, 'name', m.name, 'email', m.email)
+            ORDER BY m.name
+          ) AS assigned_members
+        FROM task_assignees ta
+        JOIN members m ON m.id = ta.member_id
+        WHERE ta.task_id = t.id
+      ) assignee_agg ON true
       WHERE t.due_date IS NOT NULL
         AND t.stage != ALL($${taskParams.length + 1})
         ${taskVisibilityClause}

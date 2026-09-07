@@ -1,3 +1,25 @@
+/* ══════════════════════════════════════════════════════════════════
+   ⚠️ SECURITY TODO — SIMPLE MODE (small-scale use only, fix later)
+   ══════════════════════════════════════════════════════════════════
+   As of this rewrite, Orbit's auth mirrors Pulse Pariraksha admin's
+   approach on purpose, to kill the random-logout bug:
+     - Refresh token is now ALSO returned in the JSON response body
+       (not just an httpOnly cookie) so the client can store it in
+       localStorage and restore sessions instantly on load, like
+       Supabase's persistSession does for Pulse.
+     - Refresh token rotation + "reuse = revoke everything" logic has
+       been REMOVED. That logic was the actual root cause of users
+       getting logged out (multi-tab / double-mount refresh calls were
+       being misread as token-theft and wiping all sessions). Now a
+       refresh token stays valid until it naturally expires (180 days,
+       see utils/jwt.js) or the user explicitly logs out.
+   Trade-off accepted intentionally for now: the refresh token living
+   in localStorage is readable by JS (XSS risk), and there's no more
+   automatic "stolen token" defense. Revisit this whole file when it's
+   time to harden security — bring back rotation with a grace period
+   instead of a hard cutover, and consider moving the token back to
+   httpOnly-cookie-only storage.
+   ══════════════════════════════════════════════════════════════════ */
 const router = require("express").Router();
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
@@ -19,7 +41,6 @@ const {
   findValidRefreshToken,
   revokeRefreshToken,
   revokeAllRefreshTokensForMember,
-  rotateRefreshToken,
 } = require("../models/refreshTokens");
 const { verifyAccessToken } = require("../utils/jwt");
 
@@ -69,12 +90,15 @@ router.post("/login", async (req, res) => {
       ipAddress: req.ip || null,
     });
 
-    // Store refresh token as httpOnly cookie; JS never sees it.
+    // Keep setting the cookie too (harmless, works for same-site fallback)
     res.cookie("orbit_refresh", refreshToken, getRefreshCookieOptions());
 
+    // SIMPLE MODE: also hand the refresh token to the client directly so
+    // it can be stored in localStorage (mirrors Pulse admin's approach).
     res.json({
       user,
       accessToken,
+      refreshToken,
     });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -83,14 +107,9 @@ router.post("/login", async (req, res) => {
 
 // =========================
 // POST /api/auth/refresh
-// Rotates refresh token and returns a new access token.
+// Verifies the refresh token (body or cookie) and issues a new access
+// token. SIMPLE MODE: no rotation — see the file-top comment.
 // =========================
-// router.post("/refresh", async (req, res) => {
-//   const refreshToken = req.cookies?.orbit_refresh;
-//   if (!refreshToken) {
-//     clearAuthCookies(res);
-//     return res.status(401).json({ error: "Not authenticated" });
-//   }
 router.post("/refresh", async (req, res) => {
   const allowedOrigins = ["http://localhost:3000", "https://orbit.torusdxn.in"];
 
@@ -102,7 +121,10 @@ router.post("/refresh", async (req, res) => {
     });
   }
 
-  const refreshToken = req.cookies?.orbit_refresh;
+  // SIMPLE MODE: prefer the token the client sends explicitly (from
+  // localStorage), fall back to the cookie for older sessions that
+  // logged in before this rewrite.
+  const refreshToken = req.body?.refreshToken || req.cookies?.orbit_refresh;
 
   if (!refreshToken) {
     clearAuthCookies(res);
@@ -129,11 +151,11 @@ router.post("/refresh", async (req, res) => {
   const stored = await findValidRefreshToken(jti);
 
   if (!stored) {
-    // possible token reuse attack
-    if (memberId) {
-      await revokeAllRefreshTokensForMember(memberId, "token_reuse_detected");
-    }
-
+    // SIMPLE MODE: previously this treated a not-found/rotated token as a
+    // theft attempt and revoked EVERY session for the member — that was
+    // the actual cause of random logouts (two tabs / a double-fired
+    // refresh both trip this). Now we just ask for a fresh login instead
+    // of nuking other valid sessions.
     clearAuthCookies(res);
 
     return res.status(401).json({
@@ -164,20 +186,14 @@ router.post("/refresh", async (req, res) => {
     avatar_url: rows[0].avatar_url || null,
   };
 
+  // SIMPLE MODE: no rotation. Same refresh token stays valid until it
+  // naturally expires (180d) or the user explicitly logs out — this is
+  // what makes multi-tab / repeated silent refreshes harmless, same as
+  // how Pulse admin's Supabase session behaves.
   const newAccessToken = signAccessToken(user);
-  const newJti = crypto.randomUUID();
-  const newRefreshToken = signRefreshToken(user, newJti);
-  const newRefreshExpiresAt = computeRefreshExpiry();
-  if (!newRefreshExpiresAt) {
-    return res
-      .status(500)
-      .json({ error: "Server refresh expiry misconfigured" });
-  }
+  res.cookie("orbit_refresh", refreshToken, getRefreshCookieOptions());
 
-  await rotateRefreshToken(jti, { newJti, newExpiresAt: newRefreshExpiresAt });
-  res.cookie("orbit_refresh", newRefreshToken, getRefreshCookieOptions());
-
-  return res.json({ user, accessToken: newAccessToken });
+  return res.json({ user, accessToken: newAccessToken, refreshToken });
 });
 
 // =========================
@@ -195,7 +211,7 @@ router.post("/logout", async (req, res) => {
     });
   }
   try {
-    const refreshToken = req.cookies?.orbit_refresh;
+    const refreshToken = req.body?.refreshToken || req.cookies?.orbit_refresh;
 
     const authHeader = req.get("authorization") || req.get("Authorization");
     const bearerToken =

@@ -1,23 +1,27 @@
 'use strict';
 
 const db = require('../db');
-const { createNotification, sendToMany } = require('./pushNotify');
+// createNotification/sendToMany import removed with the sends below
+// (see chat). Runner + cron schedule + queries still run — re-import
+// from './pushNotify' when re-adding a digest send here.
 
 // ─── Members: one digest notification per member ──────────────────
 async function remindMembers() {
+  // Multi-assignee: fan out one row per (task, assignee) pair here on
+  // purpose — each assigned member gets counted for their own digest.
   const { rows } = await db.query(`
     SELECT
-      t.assignee_id                                        AS user_id,
+      ta.member_id                                        AS user_id,
       COUNT(*)                                             AS total_pending,
       COUNT(*) FILTER (WHERE t.due_date < CURRENT_DATE)   AS overdue,
       COUNT(*) FILTER (WHERE t.due_date = CURRENT_DATE)   AS due_today
     FROM tasks t
-    JOIN members m ON m.id = t.assignee_id
+    JOIN task_assignees ta ON ta.task_id = t.id
+    JOIN members m ON m.id = ta.member_id
     WHERE
       m.role = 'member'
       AND t.stage NOT IN ('Done')
-      AND t.assignee_id IS NOT NULL
-    GROUP BY t.assignee_id
+    GROUP BY ta.member_id
     HAVING COUNT(*) > 0
   `);
 
@@ -41,7 +45,11 @@ async function remindMembers() {
         body = `You have ${total} pending task${total > 1 ? 's' : ''}. Keep pushing forward!`;
       }
 
-      await createNotification(row.user_id, title, body, { url: '/tasks' });
+      // NOTIFICATION REMOVED (see chat) — was: createNotification(...)
+      // sending the digest below. Query + message-building logic above
+      // is untouched; logging instead of sending so pipeline health is
+      // still visible while this is disconnected.
+      console.log(`[dailyReminder] (send disabled) member ${row.user_id}: ${title} — ${body}`);
       notified++;
     } catch (err) {
       console.error(`[dailyReminder] Member notify failed userId=${row.user_id}:`, err.message);
@@ -52,13 +60,21 @@ async function remindMembers() {
 
 // ─── Managers: one summary notification per manager ───────────────
 async function remindManagers() {
+  // Task counts (total/overdue/due_today) must stay scoped to DISTINCT
+  // tasks — no task_assignees join in this main query, or a task with
+  // 2+ assignees would get counted twice. members_with_tasks is pulled
+  // from a separate subquery for exactly that reason.
   const { rows: stats } = await db.query(`
     SELECT
       COUNT(*)                                            AS total_pending,
       COUNT(*) FILTER (WHERE t.due_date < CURRENT_DATE)  AS overdue,
       COUNT(*) FILTER (WHERE t.due_date = CURRENT_DATE)  AS due_today,
-      COUNT(DISTINCT t.assignee_id)
-        FILTER (WHERE t.assignee_id IS NOT NULL)          AS members_with_tasks
+      (
+        SELECT COUNT(DISTINCT ta.member_id)
+        FROM task_assignees ta
+        JOIN tasks t2 ON t2.id = ta.task_id
+        WHERE t2.stage NOT IN ('Done')
+      ) AS members_with_tasks
     FROM tasks t
     WHERE t.stage NOT IN ('Done')
   `);
@@ -88,7 +104,10 @@ async function remindManagers() {
   }
 
   const managerIds = managers.map((m) => m.id);
-  await sendToMany(managerIds, title, body, { url: '/tasks' });
+  // NOTIFICATION REMOVED (see chat) — was: sendToMany(managerIds, title,
+  // body, ...). Stats/message-building above untouched; logging instead
+  // of sending so pipeline health is still visible while disconnected.
+  console.log(`[dailyReminder] (send disabled) ${managerIds.length} manager(s): ${title} — ${body}`);
   return managerIds.length;
 }
 

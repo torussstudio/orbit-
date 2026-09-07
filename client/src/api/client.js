@@ -1,15 +1,22 @@
 import axios from 'axios';
-import { getAccessToken, setAccessToken, clearAccessToken } from './tokenStore';
+import {
+  getAccessToken,
+  setAccessToken,
+  clearAccessToken,
+  getStoredRefreshToken,
+  clearSession,
+} from './tokenStore';
 
 // =========================
 // 🌐 AXIOS INSTANCE
-// withCredentials: true ensures the httpOnly auth cookie is
-// automatically sent with every request. No token handling in JS.
+// withCredentials kept for backward-compat with the httpOnly cookie
+// fallback, but the primary flow now sends the refresh token explicitly
+// from localStorage (see tokenStore.js SIMPLE MODE note).
 // =========================
 const api = axios.create({
   baseURL: process.env.REACT_APP_API_URL || 'http://localhost:4000/api',
   timeout: 30000,
-  withCredentials: true, // Send refresh cookie on refresh calls
+  withCredentials: true,
 });
 
 // =========================
@@ -28,6 +35,9 @@ api.interceptors.request.use((config) => {
 // =========================
 // 📡 RESPONSE INTERCEPTOR
 // Handles token expiry with one refresh attempt (no infinite loops).
+// SIMPLE MODE: a failed refresh only clears THIS session — the backend
+// no longer revokes other sessions on a rotated/stale token, so this
+// path is now only hit on a genuinely dead/expired refresh token.
 // =========================
 let refreshPromise = null;
 let isLoggingOut = false;
@@ -60,8 +70,9 @@ api.interceptors.response.use(
 
       try {
         if (!refreshPromise) {
+          const storedRefreshToken = getStoredRefreshToken();
           refreshPromise = api
-            .post('/auth/refresh')
+            .post('/auth/refresh', { refreshToken: storedRefreshToken })
             .then((res) => {
               const token = res.data?.accessToken;
               if (!token) {
@@ -81,6 +92,9 @@ api.interceptors.response.use(
         originalRequest.headers.Authorization = `Bearer ${newToken}`;
         return api.request(originalRequest);
       } catch (refreshErr) {
+        // Genuinely dead refresh token (expired / explicitly revoked) —
+        // this is the only case that should sign the user out now.
+        clearSession();
         clearClientAuthState();
         window.dispatchEvent(new Event('orbit:logout'));
         if (!window.location.pathname.includes('/login')) {
@@ -90,7 +104,7 @@ api.interceptors.response.use(
       }
     }
 
-    // Handle network errors
+    // Handle network errors — never treat these as a logout signal.
     if (!err.response) {
       console.error('Network Error:', err.message);
       err.message = 'Network error. Please check your connection.';

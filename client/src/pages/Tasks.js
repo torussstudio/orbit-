@@ -25,6 +25,7 @@ export default function Tasks({ project: propProject }) {
   const [editing, setEditing] = useState(null);
   const [view, setView] = useState("board");
   const [members, setMembers] = useState([]);
+  const [projectMemberIds, setProjectMemberIds] = useState(new Set());
   const [clusters, setClusters] = useState([]);
   const [showSubTaskModal, setShowSubTaskModal] = useState(false);
   const [subTaskParent, setSubTaskParent] = useState(null);
@@ -51,11 +52,18 @@ export default function Tasks({ project: propProject }) {
       api.get(`/tasks/project/${projectId}`),
       api.get("/members"),
       api.get(`/clusters/project/${projectId}`),
+      api.get(`/projects/${projectId}`),
     ])
-      .then(([t, m, c]) => {
+      .then(([t, m, c, proj]) => {
         setTasks(t.data);
         setMembers(m.data);
         setClusters(c.data);
+        // Fetched fresh regardless of whether this page has propProject
+        // (it doesn't when reached directly via /projects/:id/tasks), so
+        // "assign to task" always reflects who's actually on the project.
+        setProjectMemberIds(
+          new Set((proj.data?.members || []).map((x) => x.id)),
+        );
       })
       .finally(() => setLoading(false));
   };
@@ -348,11 +356,12 @@ export default function Tasks({ project: propProject }) {
         >
           <TaskForm
             initial={editing}
-            members={members}
+            members={members.filter((m) => projectMemberIds.has(m.id))}
             clusters={clusters}
             stages={stages}
             onSave={handleSave}
             saving={savingTask}
+            emptyMembersMessage="No members are assigned to this project yet — assign members on the project first."
             onCancel={() => {
               setShowModal(false);
               setEditing(null);
@@ -370,7 +379,9 @@ export default function Tasks({ project: propProject }) {
           }}
         >
           <TaskForm
-            members={members}
+            members={members.filter((m) =>
+              (subTaskParent.assignees || []).some((a) => a.id === m.id),
+            )}
             clusters={clusters}
             stages={stages}
             onSave={handleSubTaskSave}
@@ -380,6 +391,7 @@ export default function Tasks({ project: propProject }) {
               setSubTaskParent(null);
             }}
             hideCluster
+            isSubtaskForm
           />
         </Modal>
       )}

@@ -1,15 +1,28 @@
 import { createContext, useContext, useState, useEffect } from "react";
 import api, { clearClientAuthState, setLogoutInProgress } from "../api/client";
-import { setAccessToken } from "../api/tokenStore";
+import {
+  setAccessToken,
+  saveSession,
+  loadSession,
+  clearSession,
+} from "../api/tokenStore";
 
 const AuthContext = createContext(null);
 
-// =========================
-// 🔐 AUTH PROVIDER
-// Session is determined by the httpOnly cookie, not localStorage.
-// On mount, we always call /auth/me — if the cookie is present and valid,
-// it succeeds and restores the session. If not, we stay logged out.
-// =========================
+/* ══════════════════════════════════════════════════════════════════
+   ⚠️ SECURITY TODO — SIMPLE MODE (small-scale use only, fix later)
+   Session restore now mirrors the Pulse Pariraksha admin panel:
+     1. On mount, read {user, refreshToken} straight from localStorage
+        and show the app immediately — no waiting on a network call,
+        no login-screen flash.
+     2. In the background, silently call /auth/refresh with the stored
+        refresh token to get a fresh access token. If that succeeds,
+        nothing visible happens. If it genuinely fails (refresh token
+        expired/invalid), THEN we sign the user out.
+   This is intentionally simple/insecure (token sits in localStorage,
+   readable by page JS) — accepted for now per explicit request to
+   prioritize "never randomly logs out" over hardening. Revisit later.
+   ══════════════════════════════════════════════════════════════════ */
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -21,6 +34,8 @@ export function AuthProvider({ children }) {
   };
 
   const clearClientSideAuth = () => {
+    // One-time cleanup of legacy/other-app storage keys, kept from the
+    // previous implementation.
     localStorage.removeItem("orbit_token");
     localStorage.removeItem("token");
     localStorage.removeItem("refreshToken");
@@ -30,6 +45,7 @@ export function AuthProvider({ children }) {
     sessionStorage.removeItem("refreshToken");
     sessionStorage.removeItem("adminToken");
 
+    clearSession();
     clearClientAuthState();
     setAccessTokenState(null);
     setUser(null);
@@ -37,25 +53,25 @@ export function AuthProvider({ children }) {
   };
 
   useEffect(() => {
-    // Proactively clean up any legacy browser token storage.
-    localStorage.removeItem("orbit_token");
-    localStorage.removeItem("token");
-    localStorage.removeItem("refreshToken");
-    localStorage.removeItem("adminToken");
-    sessionStorage.removeItem("orbit_token");
-    sessionStorage.removeItem("token");
-    sessionStorage.removeItem("refreshToken");
-    sessionStorage.removeItem("adminToken");
-
     const onLogout = () => {
       clearClientSideAuth();
     };
     window.addEventListener("orbit:logout", onLogout);
 
+    // 1. Instant restore from localStorage — like Pulse admin reading
+    //    its Supabase-persisted session before any network call.
+    const stored = loadSession();
+    if (stored?.user && stored?.refreshToken) {
+      setUser(stored.user);
+      setLoading(false); // show the app right away, no login-screen flash
+    }
+
+    // 2. Silent background verification / access-token refresh.
     api
-      .post("/auth/refresh")
+      .post("/auth/refresh", { refreshToken: stored?.refreshToken })
       .then((r) => {
         const token = r.data?.accessToken;
+        const refreshToken = r.data?.refreshToken || stored?.refreshToken;
         const u = r.data?.user;
         if (token) {
           setAccessToken(token);
@@ -63,11 +79,15 @@ export function AuthProvider({ children }) {
         }
         if (u) {
           setUser(u);
+          saveSession({ accessToken: token, refreshToken, user: u });
         }
         setError(null);
       })
       .catch((err) => {
-        if (err.response?.status !== 401) {
+        // Only a genuinely dead/invalid refresh token should sign the
+        // user out — anything else (e.g. no stored session at all,
+        // which also 401s) just leaves them at the login screen.
+        if (stored?.refreshToken && err.response?.status !== 401) {
           console.error("Auth restore failed:", err.message);
           setError(err.message);
         }
@@ -80,8 +100,8 @@ export function AuthProvider({ children }) {
 
   // =========================
   // LOGIN
-  // Posts credentials; server sets httpOnly cookie in response.
-  // No token is returned to or stored by JS.
+  // Server returns accessToken + refreshToken; both get persisted to
+  // localStorage so the session survives closing the browser entirely.
   // =========================
   const login = async (email, password) => {
     try {
@@ -90,6 +110,13 @@ export function AuthProvider({ children }) {
       if (data.accessToken) {
         setAccessToken(data.accessToken);
         setAccessTokenState(data.accessToken);
+      }
+      if (data.refreshToken) {
+        saveSession({
+          accessToken: data.accessToken,
+          refreshToken: data.refreshToken,
+          user: data.user,
+        });
       }
       setError(null);
       return data.user;
@@ -102,13 +129,14 @@ export function AuthProvider({ children }) {
 
   // =========================
   // LOGOUT
-  // Calls the server logout endpoint which clears the httpOnly cookie.
-  // Then clears client-side user state.
+  // The ONLY thing that should ever end a session now. Calls the server
+  // to revoke the refresh token, then clears localStorage.
   // =========================
   const logout = async () => {
     setLogoutInProgress(true);
+    const stored = loadSession();
     try {
-      await api.post("/auth/logout");
+      await api.post("/auth/logout", { refreshToken: stored?.refreshToken });
     } catch (err) {
       console.error("Logout request failed:", err.message);
     } finally {

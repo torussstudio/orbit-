@@ -55,7 +55,10 @@ function accessExpiresIn() {
 }
 
 function refreshExpiresIn() {
-  return process.env.JWT_REFRESH_EXPIRES_IN || "30d";
+  // ⚠️ TEMP (simple/insecure mode — see server/routes/auth.js top comment):
+  // long-lived on purpose so sessions behave like WhatsApp/Telegram Web —
+  // stay logged in until the user explicitly logs out.
+  return process.env.JWT_REFRESH_EXPIRES_IN || "180d";
 }
 
 function signAccessToken(user) {

@@ -182,6 +182,26 @@ const initDB = async () => {
 
   await ensureColumn("tasks", `parent_task_id ${refType(taskIdType)} REFERENCES tasks(id) ON DELETE CASCADE`);
 
+  // Multi-assignee support: a task/subtask can now have several people
+  // assigned. tasks.assignee_id is kept around (unused going forward) so
+  // nothing that reads it directly breaks; this table is the source of
+  // truth from here on.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS task_assignees (
+      task_id ${refType(taskIdType)} REFERENCES tasks(id) ON DELETE CASCADE,
+      member_id ${refType(memberIdType)} REFERENCES members(id) ON DELETE CASCADE,
+      PRIMARY KEY (task_id, member_id)
+    )
+  `);
+
+  // One-time backfill: carry every existing single-assignee task over into
+  // the new table. Safe to re-run on every boot (ON CONFLICT DO NOTHING).
+  await pool.query(`
+    INSERT INTO task_assignees (task_id, member_id)
+    SELECT id, assignee_id FROM tasks WHERE assignee_id IS NOT NULL
+    ON CONFLICT DO NOTHING
+  `);
+
   await pool.query(`
     CREATE TABLE IF NOT EXISTS task_comments (
       id ${idDefinition(defaultIdType)},

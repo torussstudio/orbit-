@@ -501,13 +501,16 @@ if (nextStage === 'Done') {
         <Modal title={editingSubTask ? 'Edit Sub Task' : 'New Sub Task'} onClose={() => setShowSubTaskModal(false)}>
           <TaskForm
             initial={editingSubTask}
-            members={members}
+            members={members.filter((m) =>
+              (task.assignees || []).some((a) => a.id === m.id),
+            )}
             stages={stages}
             hideCluster={true}
             onSave={handleSaveSubTask}
             onCancel={() => setShowSubTaskModal(false)}
             saving={savingSubTask}
             userRole={user?.role}
+            isSubtaskForm
           />
         </Modal>
       )}

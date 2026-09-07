@@ -1,15 +1,50 @@
 const router = require("express").Router();
 const db = require("../db");
 const { auth, managerOnly } = require("../middleware/auth");
-const { createNotification } = require("../utils/pushNotify");
+// pushNotify's createNotification import removed along with the alerts
+// below — see chat notes. Pipeline (pushNotify.js, notifications table,
+// service worker) is untouched; import it again here when re-adding
+// task-related alerts.
 
 const MANAGER_STAGES = ["Done"];
 
+// Multi-assignee support: rolls a task's assignees (from task_assignees)
+// into two convenience fields on every task row:
+//  - assignee_name: comma-joined display string, so every existing
+//    single-name display spot in the UI ("assignee_name || 'Unassigned'")
+//    keeps working unchanged.
+//  - assignees: [{id, name, email}] array, used by the multi-select
+//    assignee picker and to restrict a subtask's assignee options to
+//    whoever is assigned on the parent task.
+// This is a LEFT JOIN LATERAL, not a plain JOIN, so it always contributes
+// exactly one row per task (no row-multiplication / no GROUP BY needed).
+const ASSIGNEE_JOIN = `
+  LEFT JOIN LATERAL (
+    SELECT
+      STRING_AGG(m.name, ', ' ORDER BY m.name) AS assignee_name,
+      COALESCE(
+        json_agg(json_build_object('id', m.id, 'name', m.name, 'email', m.email) ORDER BY m.name),
+        '[]'
+      ) AS assignees
+    FROM task_assignees ta
+    JOIN members m ON m.id = ta.member_id
+    WHERE ta.task_id = t.id
+  ) assignee_agg ON true
+`;
+
+function extractAssigneeIds(body) {
+  if (Array.isArray(body.assignee_ids)) {
+    return [...new Set(body.assignee_ids.filter(Boolean))];
+  }
+  // Backward-compat: anything still sending the old single assignee_id.
+  return body.assignee_id ? [body.assignee_id] : [];
+}
+
 router.get("/project/:projectId", auth, async (req, res) => {
   const { rows } = await db.query(
-    `SELECT t.*, m.name as assignee_name, c.name as cluster_name FROM tasks t
-     LEFT JOIN members m ON t.assignee_id=m.id
+    `SELECT t.*, assignee_agg.assignee_name, assignee_agg.assignees, c.name as cluster_name FROM tasks t
      LEFT JOIN clusters c ON t.cluster_id=c.id
+     ${ASSIGNEE_JOIN}
      WHERE t.project_id=$1 AND t.parent_task_id IS NULL ORDER BY t.created_at DESC`,
     [req.params.projectId],
   );
@@ -18,7 +53,7 @@ router.get("/project/:projectId", auth, async (req, res) => {
 
 router.get("/:id", auth, async (req, res) => {
   const { rows } = await db.query(
-    `SELECT t.*, m.name as assignee_name FROM tasks t LEFT JOIN members m ON t.assignee_id=m.id WHERE t.id=$1`,
+    `SELECT t.*, assignee_agg.assignee_name, assignee_agg.assignees FROM tasks t ${ASSIGNEE_JOIN} WHERE t.id=$1`,
     [req.params.id],
   );
   if (!rows[0]) return res.status(404).json({ error: "Not found" });
@@ -39,7 +74,7 @@ router.get("/:id", auth, async (req, res) => {
     [req.params.id],
   );
   const subtasks = await db.query(
-    `SELECT t.*, m.name as assignee_name FROM tasks t LEFT JOIN members m ON t.assignee_id=m.id WHERE t.parent_task_id=$1 ORDER BY t.created_at`,
+    `SELECT t.*, assignee_agg.assignee_name, assignee_agg.assignees FROM tasks t ${ASSIGNEE_JOIN} WHERE t.parent_task_id=$1 ORDER BY t.created_at`,
     [req.params.id],
   );
   res.json({
@@ -63,80 +98,93 @@ router.post("/", auth, async (req, res) => {
     parent_task_id,
     title,
     description,
-    assignee_id,
     priority,
     stage,
     due_date,
   } = req.body;
-  const { rows } = await db.query(
-    `INSERT INTO tasks(project_id,cluster_id,parent_task_id,title,description,assignee_id,priority,stage,due_date,created_by)
-     VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
-    [
-      project_id,
-      cluster_id || null,
-      parent_task_id || null,
-      title,
-      description,
-      assignee_id || null,
-      priority || "medium",
-      stage || "Todo",
-      due_date || null,
-      req.user.id,
-    ],
-  );
-  const actionLabel = parent_task_id
-    ? "[Sub Task] Created sub task"
-    : "Created task";
-  await db.query(
-    `INSERT INTO task_activity(task_id,actor_id,action) VALUES($1,$2,$3)`,
-    [rows[0].id, req.user.id, actionLabel],
-  );
+  const assigneeIds = extractAssigneeIds(req.body);
 
-  // If a new subtask is added to a Done parent task, reset parent back to In Progress
-  if (parent_task_id) {
-    const { rows: parentRows } = await db.query(
-      `SELECT stage FROM tasks WHERE id = $1`,
-      [parent_task_id],
+  const client = await db.connect();
+  try {
+    await client.query("BEGIN");
+
+    const { rows } = await client.query(
+      `INSERT INTO tasks(project_id,cluster_id,parent_task_id,title,description,priority,stage,due_date,created_by)
+       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
+      [
+        project_id,
+        cluster_id || null,
+        parent_task_id || null,
+        title,
+        description,
+        priority || "medium",
+        stage || "Todo",
+        due_date || null,
+        req.user.id,
+      ],
     );
-    if (parentRows[0]?.stage === "Done") {
-      await db.query(
-        `UPDATE tasks SET stage = 'In Progress', updated_at = NOW() WHERE id = $1`,
-        [parent_task_id],
-      );
-      await db.query(
-        `INSERT INTO task_activity(task_id,actor_id,action,meta) VALUES($1,$2,$3,$4)`,
-        [
-          parent_task_id,
-          req.user.id,
-          "Stage changed",
-          JSON.stringify({ from: "Done", to: "In Progress" }),
-        ],
+    const task = rows[0];
+
+    for (const mid of assigneeIds) {
+      await client.query(
+        "INSERT INTO task_assignees(task_id, member_id) VALUES($1,$2) ON CONFLICT DO NOTHING",
+        [task.id, mid],
       );
     }
-  }
 
-  if (assignee_id) {
-    createNotification(
-      assignee_id,
-      "📌 New Task Assigned",
-      `You have been assigned: ${title}`,
-      { url: "/tasks" },
-    ).catch(() => {});
-  }
+    const actionLabel = parent_task_id
+      ? "[Sub Task] Created sub task"
+      : "Created task";
+    await client.query(
+      `INSERT INTO task_activity(task_id,actor_id,action) VALUES($1,$2,$3)`,
+      [task.id, req.user.id, actionLabel],
+    );
 
-  res.status(201).json(rows[0]);
+    // If a new subtask is added to a Done parent task, reset parent back to In Progress
+    if (parent_task_id) {
+      const { rows: parentRows } = await client.query(
+        `SELECT stage FROM tasks WHERE id = $1`,
+        [parent_task_id],
+      );
+      if (parentRows[0]?.stage === "Done") {
+        await client.query(
+          `UPDATE tasks SET stage = 'In Progress', updated_at = NOW() WHERE id = $1`,
+          [parent_task_id],
+        );
+        await client.query(
+          `INSERT INTO task_activity(task_id,actor_id,action,meta) VALUES($1,$2,$3,$4)`,
+          [
+            parent_task_id,
+            req.user.id,
+            "Stage changed",
+            JSON.stringify({ from: "Done", to: "In Progress" }),
+          ],
+        );
+      }
+    }
+
+    await client.query("COMMIT");
+
+    // NOTIFICATION REMOVED (see chat) — was: "📌 New Task Assigned" to
+    // each assignee on task creation. Task creation/assignment logic
+    // above is untouched; only this alert was pulled out.
+
+    res.status(201).json(task);
+  } catch (e) {
+    await client.query("ROLLBACK");
+    res.status(400).json({ error: e.message });
+  } finally {
+    client.release();
+  }
 });
 
 router.put("/:id", auth, async (req, res) => {
-  const {
-    title,
-    description,
-    assignee_id,
-    priority,
-    stage,
-    due_date,
-    cluster_id,
-  } = req.body;
+  const { title, description, priority, stage, due_date, cluster_id } =
+    req.body;
+  const assigneeIdsProvided =
+    Array.isArray(req.body.assignee_ids) || req.body.assignee_id !== undefined;
+  const assigneeIds = extractAssigneeIds(req.body);
+
   const task = await db.query("SELECT * FROM tasks WHERE id=$1", [
     req.params.id,
   ]);
@@ -210,14 +258,9 @@ router.put("/:id", auth, async (req, res) => {
       }
     }
 
-    if (assignee_id) {
-      createNotification(
-        assignee_id,
-        "📌 Task Updated",
-        `A task has been assigned to you: ${title}`,
-        { url: "/tasks" },
-      ).catch(() => {});
-    }
+    // NOTIFICATION REMOVED (see chat) — was: "📌 Task Updated" alert
+    // here (member-triggered stage update path). Stage/assignee logic
+    // above is untouched; only this alert was pulled out.
 
     return res.json(rows[0]);
   }
@@ -239,60 +282,88 @@ router.put("/:id", auth, async (req, res) => {
   const finalDueDate = isRework
     ? req.body.new_due_date || due_date || null
     : due_date || null;
-  const { rows } = await db.query(
-    `UPDATE tasks SET title=$1,description=$2,assignee_id=$3,priority=$4,stage=$5,due_date=$6,cluster_id=$7,updated_at=NOW(),time_taken=$8,rework_count=rework_count+$9
-     WHERE id=$10 RETURNING *`,
-    [
-      title,
-      description,
-      assignee_id || null,
-      priority,
-      actualStage,
-      finalDueDate,
-      cluster_id || null,
-      time_taken,
-      isRework ? 1 : 0,
-      req.params.id,
-    ],
-  );
 
-  if (task.rows[0].stage !== stage) {
-    await db.query(
-      `INSERT INTO task_activity(task_id,actor_id,action,meta) VALUES($1,$2,$3,$4)`,
+  const client = await db.connect();
+  try {
+    await client.query("BEGIN");
+
+    const { rows } = await client.query(
+      `UPDATE tasks SET title=$1,description=$2,priority=$3,stage=$4,due_date=$5,cluster_id=$6,updated_at=NOW(),time_taken=$7,rework_count=rework_count+$8
+       WHERE id=$9 RETURNING *`,
       [
+        title,
+        description,
+        priority,
+        actualStage,
+        finalDueDate,
+        cluster_id || null,
+        time_taken,
+        isRework ? 1 : 0,
         req.params.id,
-        req.user.id,
-        isSubTask ? "[Sub Task] Stage changed" : "Stage changed",
-        JSON.stringify({ from: task.rows[0].stage, to: stage }),
       ],
     );
-  }
-  // AFTER
-  // Auto-complete parent task if all subtasks are Done
-  if (task.rows[0].parent_task_id) {
-    const { rows: siblings } = await db.query(
-      `SELECT stage FROM tasks WHERE parent_task_id = $1`,
-      [task.rows[0].parent_task_id],
-    );
-    const allDone = siblings.every((s) => s.stage === "Done");
-    const hasRework = siblings.some((s) => s.stage === "Rework");
-    const { rows: parentRows } = await db.query(
-      `SELECT stage FROM tasks WHERE id = $1`,
-      [task.rows[0].parent_task_id],
-    );
-    if (allDone && parentRows[0]?.stage !== "Done") {
-      await db.query(
-        `UPDATE tasks SET stage = 'Done', updated_at = NOW() WHERE id = $1`,
-        [task.rows[0].parent_task_id],
-      );
-    } else if (!allDone && parentRows[0]?.stage === "Done") {
-      await db.query(
-        `UPDATE tasks SET stage = 'In Progress', updated_at = NOW() WHERE id = $1`,
-        [task.rows[0].parent_task_id],
+
+    if (assigneeIdsProvided) {
+      await client.query("DELETE FROM task_assignees WHERE task_id=$1", [
+        req.params.id,
+      ]);
+      for (const mid of assigneeIds) {
+        await client.query(
+          "INSERT INTO task_assignees(task_id, member_id) VALUES($1,$2) ON CONFLICT DO NOTHING",
+          [req.params.id, mid],
+        );
+      }
+    }
+
+    if (task.rows[0].stage !== stage) {
+      await client.query(
+        `INSERT INTO task_activity(task_id,actor_id,action,meta) VALUES($1,$2,$3,$4)`,
+        [
+          req.params.id,
+          req.user.id,
+          isSubTask ? "[Sub Task] Stage changed" : "Stage changed",
+          JSON.stringify({ from: task.rows[0].stage, to: stage }),
+        ],
       );
     }
+
+    // Auto-complete parent task if all subtasks are Done
+    if (task.rows[0].parent_task_id) {
+      const { rows: siblings } = await client.query(
+        `SELECT stage FROM tasks WHERE parent_task_id = $1`,
+        [task.rows[0].parent_task_id],
+      );
+      const allDone = siblings.every((s) => s.stage === "Done");
+      const { rows: parentRows } = await client.query(
+        `SELECT stage FROM tasks WHERE id = $1`,
+        [task.rows[0].parent_task_id],
+      );
+      if (allDone && parentRows[0]?.stage !== "Done") {
+        await client.query(
+          `UPDATE tasks SET stage = 'Done', updated_at = NOW() WHERE id = $1`,
+          [task.rows[0].parent_task_id],
+        );
+      } else if (!allDone && parentRows[0]?.stage === "Done") {
+        await client.query(
+          `UPDATE tasks SET stage = 'In Progress', updated_at = NOW() WHERE id = $1`,
+          [task.rows[0].parent_task_id],
+        );
+      }
+    }
+
+    await client.query("COMMIT");
+
+    // NOTIFICATION REMOVED (see chat) — was: "📌 Task Updated" alert
+    // here (manager full-edit path). Update/assignee logic above is
+    // untouched; only this alert was pulled out.
+
+    res.json(rows[0]);
+  } catch (e) {
+    await client.query("ROLLBACK");
+    res.status(400).json({ error: e.message });
+  } finally {
+    client.release();
   }
-  res.json(rows[0]);
 });
 
 router.delete("/:id", auth, managerOnly, async (req, res) => {
@@ -355,11 +426,11 @@ router.get("/in-review/all", auth, async (req, res) => {
         t.parent_task_id,
         pt.title as parent_task_title,
         p.id as project_id, p.name as project_name,
-        m.name as assignee_name
+        assignee_agg.assignee_name
        FROM tasks t
        LEFT JOIN tasks pt ON t.parent_task_id = pt.id
        INNER JOIN projects p ON t.project_id = p.id
-       LEFT JOIN members m ON t.assignee_id = m.id
+       ${ASSIGNEE_JOIN}
        WHERE t.stage = 'In Review'
        ORDER BY t.updated_at DESC
        LIMIT 100`,
