@@ -1,9 +1,41 @@
 const { Pool } = require("pg");
 
+// Kept deliberately small: Supabase's session-mode pooler on this plan
+// caps total simultaneous connections at 15 — shared across this local
+// dev server, production, and anything else pointed at the same
+// DATABASE_URL. Leaving max low here means one crash-restart loop can't
+// eat the whole budget on its own.
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: { rejectUnauthorized: false },
+  max: 5,
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 5000,
 });
+
+pool.on("error", (err) => {
+  // A background/idle client erroring out (e.g. the pooler dropping a
+  // connection) would otherwise crash the whole process — log it and
+  // let the pool recover instead.
+  console.error("[db] Unexpected pg pool error:", err.message);
+});
+
+// Release every connection back to Supabase on shutdown — including
+// nodemon's restart signal — instead of leaving them dangling until the
+// pooler's own idle-timeout eventually reaps them.
+async function shutdownPool(signal) {
+  try {
+    await pool.end();
+    console.log(`[db] Pool closed cleanly on ${signal}.`);
+  } catch (err) {
+    console.error(`[db] Error closing pool on ${signal}:`, err.message);
+  } finally {
+    process.exit(0);
+  }
+}
+process.on("SIGINT", () => shutdownPool("SIGINT"));
+process.on("SIGTERM", () => shutdownPool("SIGTERM"));
+process.once("SIGUSR2", () => shutdownPool("SIGUSR2")); // nodemon restart
 
 async function getColumnType(tableName, columnName = "id") {
   const { rows } = await pool.query(
