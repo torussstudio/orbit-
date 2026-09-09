@@ -92,13 +92,23 @@ api.interceptors.response.use(
         originalRequest.headers.Authorization = `Bearer ${newToken}`;
         return api.request(originalRequest);
       } catch (refreshErr) {
-        // Genuinely dead refresh token (expired / explicitly revoked) —
-        // this is the only case that should sign the user out now.
-        clearSession();
-        clearClientAuthState();
-        window.dispatchEvent(new Event('orbit:logout'));
-        if (!window.location.pathname.includes('/login')) {
-          window.location.href = '/login';
+        const refreshStatus = refreshErr.response?.status;
+        if (refreshStatus === 401) {
+          // Genuinely dead refresh token (expired / explicitly revoked)
+          // — this is the only case that should sign the user out.
+          clearSession();
+          clearClientAuthState();
+          window.dispatchEvent(new Event('orbit:logout'));
+          if (!window.location.pathname.includes('/login')) {
+            window.location.href = '/login';
+          }
+        } else {
+          // Server hiccup (down/restarting/network blip) while trying
+          // to refresh — the stored refresh token itself is still
+          // fine, we just couldn't reach the server this time. Leave
+          // the session alone; the next request retries the refresh
+          // instead of forcing a re-login over a transient failure.
+          console.error('Refresh check failed (session kept):', refreshErr.message);
         }
         return Promise.reject(refreshErr);
       }

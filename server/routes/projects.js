@@ -7,17 +7,44 @@ router.get("/", auth, async (req, res) => {
   if (req.user.role === "manager") {
     q = `SELECT p.*, m.name as created_by_name FROM projects p
          LEFT JOIN members m ON p.created_by=m.id
-         ORDER BY p.created_at DESC`;
+         ORDER BY p.sort_order ASC NULLS LAST, p.created_at DESC`;
     params = [];
   } else {
     q = `SELECT p.*, m.name as created_by_name FROM projects p
          LEFT JOIN members m ON p.created_by=m.id
          JOIN project_members pm ON pm.project_id=p.id
-         WHERE pm.member_id=$1 AND p.status != 'archived' ORDER BY p.created_at DESC`;
+         WHERE pm.member_id=$1 AND p.status != 'archived'
+         ORDER BY p.sort_order ASC NULLS LAST, p.created_at DESC`;
     params = [req.user.id];
   }
   const { rows } = await db.query(q, params);
   res.json(rows);
+});
+
+// Drag-and-drop reordering. Registered before PUT /:id so Express
+// doesn't match "reorder" as an :id param.
+router.put("/reorder", auth, managerOnly, async (req, res) => {
+  const { project_ids } = req.body;
+  if (!Array.isArray(project_ids) || !project_ids.length) {
+    return res.status(400).json({ error: "project_ids array required" });
+  }
+  const client = await db.connect();
+  try {
+    await client.query("BEGIN");
+    for (let i = 0; i < project_ids.length; i++) {
+      await client.query("UPDATE projects SET sort_order=$1 WHERE id=$2", [
+        i,
+        project_ids[i],
+      ]);
+    }
+    await client.query("COMMIT");
+    res.json({ success: true });
+  } catch (e) {
+    await client.query("ROLLBACK");
+    res.status(400).json({ error: e.message });
+  } finally {
+    client.release();
+  }
 });
 
 router.get("/:id", auth, async (req, res) => {
@@ -50,8 +77,8 @@ router.post("/", auth, managerOnly, async (req, res) => {
   try {
     await client.query("BEGIN");
     const { rows } = await client.query(
-      `INSERT INTO projects(name,client_name,description,status,start_date,end_date,custom_stages,created_by)
-       VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
+      `INSERT INTO projects(name,client_name,description,status,start_date,end_date,custom_stages,created_by,sort_order)
+       VALUES($1,$2,$3,$4,$5,$6,$7,$8,(SELECT COALESCE(MIN(sort_order), 0) - 1 FROM projects)) RETURNING *`,
       [
         name,
         client_name,

@@ -84,14 +84,17 @@ export function AuthProvider({ children }) {
         setError(null);
       })
       .catch((err) => {
-        // Only a genuinely dead/invalid refresh token should sign the
-        // user out — anything else (e.g. no stored session at all,
-        // which also 401s) just leaves them at the login screen.
-        if (stored?.refreshToken && err.response?.status !== 401) {
-          console.error("Auth restore failed:", err.message);
+        // Only a genuinely dead/invalid refresh token (401) should sign
+        // the user out. Anything else — server down/restarting,
+        // network blip, timeout — leaves the stored session alone; the
+        // user stays logged in on cached data and the next request
+        // (via the client.js interceptor) will retry the refresh.
+        if (err.response?.status === 401) {
+          clearClientSideAuth();
+        } else {
+          console.error("Auth restore check failed (session kept):", err.message);
           setError(err.message);
         }
-        clearClientSideAuth();
       })
       .finally(() => setLoading(false));
 

@@ -17,9 +17,67 @@ export default function Projects() {
   const [showArchived, setShowArchived] = useState(false);
   const [saving, setSaving] = useState(false);
   const [confirmModal, setConfirmModal] = useState({ show: false, title: '', message: '', action: null, loading: false, isDangerous: false });
+  const [draggedId, setDraggedId] = useState(null);
+  const [dragOverId, setDragOverId] = useState(null);
 
   const load = () => api.get('/projects').then(r => setProjects(r.data)).finally(() => setLoading(false));
   useEffect(() => { load(); }, []);
+
+  // Drag-and-drop reordering (managers only, active projects only).
+  // Optimistic: the grid reorders instantly, then we persist the new
+  // order in the background. If saving fails, we just reload from the
+  // server so the view never gets stuck out of sync.
+  const handleDragStart = (e, id) => {
+    setDraggedId(id);
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', String(id)); // Firefox needs this to allow the drag
+  };
+
+  const handleDragOver = (e, id) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    if (id !== dragOverId) setDragOverId(id);
+  };
+
+  const handleDragLeave = (id) => {
+    setDragOverId((prev) => (prev === id ? null : prev));
+  };
+
+  const handleDrop = async (e, targetId) => {
+    e.preventDefault();
+    setDragOverId(null);
+    const sourceId = draggedId;
+    setDraggedId(null);
+    if (sourceId === null || sourceId === targetId) return;
+
+    const current = projects.filter((p) => p.status !== 'archived');
+    const fromIndex = current.findIndex((p) => p.id === sourceId);
+    const toIndex = current.findIndex((p) => p.id === targetId);
+    if (fromIndex === -1 || toIndex === -1) return;
+
+    const reordered = [...current];
+    const [moved] = reordered.splice(fromIndex, 1);
+    reordered.splice(toIndex, 0, moved);
+
+    setProjects((prev) => [
+      ...reordered,
+      ...prev.filter((p) => p.status === 'archived'),
+    ]);
+
+    try {
+      await api.put('/projects/reorder', {
+        project_ids: reordered.map((p) => p.id),
+      });
+    } catch (err) {
+      console.error('Failed to save project order:', err.message);
+      load(); // out of sync with the server — just reload the true order
+    }
+  };
+
+  const handleDragEnd = () => {
+    setDraggedId(null);
+    setDragOverId(null);
+  };
 
   // The projects LIST endpoint doesn't include assigned members (only
   // GET /projects/:id does) — fetch the full project before opening the
@@ -146,6 +204,14 @@ export default function Projects() {
                 onEdit={() => handleEdit(p)}
                 editLoading={editLoadingId === p.id}
                 onArchive={() => handleArchive(p.id)}
+                draggable={isManager}
+                isDragging={draggedId === p.id}
+                isDragOver={dragOverId === p.id && draggedId !== p.id}
+                onDragStart={(e) => handleDragStart(e, p.id)}
+                onDragOver={(e) => handleDragOver(e, p.id)}
+                onDragLeave={() => handleDragLeave(p.id)}
+                onDrop={(e) => handleDrop(e, p.id)}
+                onDragEnd={handleDragEnd}
               />
             ))}
           </div>
@@ -214,15 +280,40 @@ export default function Projects() {
   );
 }
 
-function ProjectCard({ project: p, isManager, onEdit, editLoading, onArchive, onUnarchive, onDelete, archived }) {
+function ProjectCard({ project: p, isManager, onEdit, editLoading, onArchive, onUnarchive, onDelete, archived, draggable, isDragging, isDragOver, onDragStart, onDragOver, onDragLeave, onDrop, onDragEnd }) {
   return (
-    <div className="card" style={{ opacity: archived ? 0.75 : 1 }}>
+    <div
+      className="card"
+      draggable={draggable}
+      onDragStart={draggable ? onDragStart : undefined}
+      onDragOver={draggable ? onDragOver : undefined}
+      onDragLeave={draggable ? onDragLeave : undefined}
+      onDrop={draggable ? onDrop : undefined}
+      onDragEnd={draggable ? onDragEnd : undefined}
+      style={{
+        opacity: archived ? 0.75 : isDragging ? 0.4 : 1,
+        cursor: draggable ? 'grab' : 'default',
+        outline: isDragOver ? '2px dashed var(--accent)' : 'none',
+        outlineOffset: '2px',
+        transition: 'opacity 0.15s ease, outline 0.1s ease',
+      }}
+    >
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '12px' }}>
         <Link to={`/projects/${p.id}`} style={{ textDecoration: 'none' }}>
           <div style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text)', marginBottom: '2px' }}>{p.name}</div>
           <div style={{ fontSize: '12px', color: 'var(--text-3)' }}>{p.client_name || 'No client'}</div>
         </Link>
-        <span className={`badge badge-${p.status}`}>{p.status?.replace('_', ' ')}</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          {draggable && (
+            <span
+              title="Drag to reorder"
+              style={{ color: 'var(--text-3)', fontSize: '14px', letterSpacing: '-2px', cursor: 'grab', userSelect: 'none' }}
+            >
+              ⠿
+            </span>
+          )}
+          <span className={`badge badge-${p.status}`}>{p.status?.replace('_', ' ')}</span>
+        </div>
       </div>
 
       {p.description && (

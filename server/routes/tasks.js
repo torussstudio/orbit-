@@ -42,10 +42,70 @@ router.get("/project/:projectId", auth, async (req, res) => {
     `SELECT t.*, assignee_agg.assignee_name, assignee_agg.assignees, c.name as cluster_name FROM tasks t
      LEFT JOIN clusters c ON t.cluster_id=c.id
      ${ASSIGNEE_JOIN}
-     WHERE t.project_id=$1 AND t.parent_task_id IS NULL ORDER BY t.created_at DESC`,
+     WHERE t.project_id=$1 AND t.parent_task_id IS NULL
+     ORDER BY t.sort_order ASC NULLS LAST, t.created_at DESC`,
     [req.params.projectId],
   );
   res.json(rows);
+});
+
+// Drag-and-drop reordering within a board column, and moving a card
+// between columns. Registered before PUT /:id so Express doesn't match
+// "reorder" as an :id param.
+router.put("/reorder", auth, async (req, res) => {
+  const { stage, ordered_ids } = req.body;
+  if (!stage || !Array.isArray(ordered_ids) || !ordered_ids.length) {
+    return res
+      .status(400)
+      .json({ error: "stage and ordered_ids array required" });
+  }
+  if (req.user.role === "member" && MANAGER_STAGES.includes(stage)) {
+    return res
+      .status(403)
+      .json({ error: "Manager approval required for this stage" });
+  }
+
+  const client = await db.connect();
+  try {
+    await client.query("BEGIN");
+
+    for (let i = 0; i < ordered_ids.length; i++) {
+      const taskId = ordered_ids[i];
+      const { rows: prevRows } = await client.query(
+        "SELECT stage, title FROM tasks WHERE id = $1",
+        [taskId],
+      );
+      const prevStage = prevRows[0]?.stage;
+
+      await client.query(
+        "UPDATE tasks SET stage=$1, sort_order=$2, updated_at=NOW() WHERE id=$3",
+        [stage, i, taskId],
+      );
+
+      // Only log an activity entry for the card that actually changed
+      // column — reordering siblings within the same column shouldn't
+      // spam the activity feed.
+      if (prevStage && prevStage !== stage) {
+        await client.query(
+          `INSERT INTO task_activity(task_id,actor_id,action,meta) VALUES($1,$2,$3,$4)`,
+          [
+            taskId,
+            req.user.id,
+            "Stage changed",
+            JSON.stringify({ from: prevStage, to: stage }),
+          ],
+        );
+      }
+    }
+
+    await client.query("COMMIT");
+    res.json({ success: true });
+  } catch (e) {
+    await client.query("ROLLBACK");
+    res.status(400).json({ error: e.message });
+  } finally {
+    client.release();
+  }
 });
 
 router.get("/:id", auth, async (req, res) => {

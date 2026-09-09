@@ -422,7 +422,9 @@ function BoardView({
   onAddSubTask,
 }) {
   const { user } = useAuth();
-  const [dragOver, setDragOver] = useState(null);
+  const [dragOver, setDragOver] = useState(null); // column-level (empty space) highlight
+  const [dragOverTaskId, setDragOverTaskId] = useState(null); // per-card dashed outline
+  const [draggedId, setDraggedId] = useState(null);
 
   const boardWrapRef = useRef(null);
   const [boardMaxHeight, setBoardMaxHeight] = useState(null);
@@ -443,17 +445,35 @@ function BoardView({
     return () => window.removeEventListener("resize", calc);
   }, []);
 
-  const handleDrop = async (taskId, newStage) => {
+  // Reordering within a column, and moving a card to a different column,
+  // both go through here — same idea as the Projects board: figure out
+  // the destination column's order with the dragged card spliced into
+  // its dropped position, then persist that whole order in one call.
+  const moveTask = async (taskId, targetStage, targetIndex) => {
     const task = tasks.find((t) => String(t.id) === String(taskId));
     if (!task) return;
-    if (task.stage === newStage) return;
     const managerOnly = ["Done"];
-    if (user.role === "member" && managerOnly.includes(newStage)) return;
+    if (user.role === "member" && managerOnly.includes(targetStage)) return;
+
+    const destList = tasks
+      .filter((t) => t.stage === targetStage && String(t.id) !== String(taskId))
+      .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+
+    const insertAt =
+      targetIndex === null || targetIndex === undefined
+        ? destList.length
+        : Math.max(0, Math.min(targetIndex, destList.length));
+
+    destList.splice(insertAt, 0, task);
+
     try {
-      await api.put(`/tasks/${task.id}`, { ...task, stage: newStage });
+      await api.put("/tasks/reorder", {
+        stage: targetStage,
+        ordered_ids: destList.map((t) => t.id),
+      });
       onUpdate();
     } catch (e) {
-      console.error("Drop failed:", e);
+      console.error("Reorder failed:", e);
     }
   };
 
@@ -536,7 +556,9 @@ function BoardView({
         }}
       >
         {stages.map((stage) => {
-          const stageTasks = tasks.filter((t) => t.stage === stage);
+          const stageTasks = tasks
+            .filter((t) => t.stage === stage)
+            .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
           return (
             <div
               key={stage}
@@ -556,7 +578,11 @@ function BoardView({
               onDrop={(e) => {
                 e.preventDefault();
                 setDragOver(null);
-                handleDrop(e.dataTransfer.getData("taskId"), stage);
+                setDraggedId(null);
+                setDragOverTaskId(null);
+                // Dropped on empty column space (not on a specific
+                // card) — append to the end of this column.
+                moveTask(e.dataTransfer.getData("taskId"), stage, null);
               }}
             >
               <div
@@ -567,7 +593,7 @@ function BoardView({
                   minHeight: "80px",
                 }}
               >
-                {stageTasks.map((t) => (
+                {stageTasks.map((t, index) => (
                   <TaskCard
                     key={t.id}
                     task={t}
@@ -576,6 +602,23 @@ function BoardView({
                     onDelete={onDelete}
                     isManager={isManager}
                     onAddSubTask={onAddSubTask}
+                    isDragging={draggedId === t.id}
+                    isDragOver={dragOverTaskId === t.id && draggedId !== t.id}
+                    onCardDragStart={(id) => setDraggedId(id)}
+                    onCardDragEnd={() => {
+                      setDraggedId(null);
+                      setDragOverTaskId(null);
+                    }}
+                    onCardDragOver={() => setDragOverTaskId(t.id)}
+                    onCardDragLeave={() =>
+                      setDragOverTaskId((prev) => (prev === t.id ? null : prev))
+                    }
+                    onCardDrop={(draggedTaskId) => {
+                      setDragOver(null);
+                      setDragOverTaskId(null);
+                      setDraggedId(null);
+                      moveTask(draggedTaskId, stage, index);
+                    }}
                   />
                 ))}
               </div>
@@ -594,6 +637,13 @@ function TaskCard({
   onDelete,
   isManager,
   onAddSubTask,
+  isDragging,
+  isDragOver,
+  onCardDragStart,
+  onCardDragEnd,
+  onCardDragOver,
+  onCardDragLeave,
+  onCardDrop,
 }) {
   const overdue = isOverdue(task.due_date, task.stage);
   return (
@@ -602,12 +652,29 @@ function TaskCard({
       onDragStart={(e) => {
         e.dataTransfer.setData("taskId", String(task.id));
         e.dataTransfer.effectAllowed = "move";
+        onCardDragStart?.(task.id);
+      }}
+      onDragEnd={() => onCardDragEnd?.()}
+      onDragOver={(e) => {
+        e.preventDefault();
+        e.stopPropagation(); // don't also trigger the column's own dragOver highlight
+        onCardDragOver?.();
+      }}
+      onDragLeave={() => onCardDragLeave?.()}
+      onDrop={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        onCardDrop?.(e.dataTransfer.getData("taskId"));
       }}
       className="card"
       style={{
         padding: "12px",
         cursor: "grab",
         borderColor: overdue ? "rgba(248,113,113,0.3)" : undefined,
+        opacity: isDragging ? 0.4 : 1,
+        outline: isDragOver ? "2px dashed var(--accent)" : "none",
+        outlineOffset: "2px",
+        transition: "opacity 0.15s ease, outline 0.1s ease",
       }}
     >
       <div
@@ -631,6 +698,12 @@ function TaskCard({
         >
           {task.title}
         </Link>
+        <span
+          title="Drag to reorder"
+          style={{ color: "var(--text-3)", fontSize: "13px", letterSpacing: "-2px", cursor: "grab", userSelect: "none", flexShrink: 0, marginLeft: "6px" }}
+        >
+          ⠿
+        </span>
         <div
           style={{
             width: "8px",

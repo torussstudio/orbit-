@@ -177,6 +177,20 @@ const initDB = async () => {
     )
   `);
 
+  // Drag-and-drop project ordering. Backfill gives every existing
+  // project a stable initial position (newest first, matching the old
+  // created_at DESC sort) so the very first render after this migration
+  // looks identical to before — nothing visibly jumps around.
+  await ensureColumn("projects", "sort_order INTEGER");
+  await pool.query(`
+    UPDATE projects SET sort_order = ranked.rn
+    FROM (
+      SELECT id, ROW_NUMBER() OVER (ORDER BY created_at DESC) AS rn
+      FROM projects
+    ) ranked
+    WHERE projects.id = ranked.id AND projects.sort_order IS NULL
+  `);
+
   await pool.query(`
     CREATE TABLE IF NOT EXISTS clusters (
       id ${idDefinition(clusterIdType)},
@@ -232,6 +246,20 @@ const initDB = async () => {
     INSERT INTO task_assignees (task_id, member_id)
     SELECT id, assignee_id FROM tasks WHERE assignee_id IS NOT NULL
     ON CONFLICT DO NOTHING
+  `);
+
+  // Drag-and-drop task ordering within a board column (and moving a card
+  // between columns). Backfill preserves the current created_at DESC
+  // order per (project, stage) column so nothing visibly reshuffles the
+  // first time this runs.
+  await ensureColumn("tasks", "sort_order INTEGER");
+  await pool.query(`
+    UPDATE tasks SET sort_order = ranked.rn
+    FROM (
+      SELECT id, ROW_NUMBER() OVER (PARTITION BY project_id, stage ORDER BY created_at DESC) AS rn
+      FROM tasks
+    ) ranked
+    WHERE tasks.id = ranked.id AND tasks.sort_order IS NULL
   `);
 
   await pool.query(`
