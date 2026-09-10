@@ -23,13 +23,13 @@ router.get("/", auth, async (req, res) => {
       ),
       // Multi-assignee: LEFT JOIN LATERAL keeps this one row per task
       // (no fan-out) while showing every assignee's name, comma-joined.
-      db.query(`SELECT t.id,t.title,t.due_date,t.stage,p.name as project_name, assignee_agg.assignee_name
+      db.query(`SELECT t.id,t.title,t.due_date,t.stage,t.project_id,p.name as project_name, assignee_agg.assignee_name
         FROM tasks t JOIN projects p ON t.project_id=p.id
         LEFT JOIN LATERAL (
           SELECT STRING_AGG(m.name, ', ' ORDER BY m.name) AS assignee_name
           FROM task_assignees ta JOIN members m ON m.id=ta.member_id WHERE ta.task_id=t.id
         ) assignee_agg ON true
-        WHERE t.due_date < NOW() AND t.stage NOT IN ('Done') ORDER BY t.due_date LIMIT 10`),
+        WHERE t.due_date < NOW() AND t.stage NOT IN ('Done') ORDER BY t.due_date`),
       db.query(
         `SELECT id,name,rework_count,status FROM clusters WHERE rework_count > 0
            UNION ALL
@@ -71,7 +71,7 @@ router.get("/", auth, async (req, res) => {
         [req.user.id],
       ),
       db.query(
-        `SELECT t.id,t.title,t.due_date,p.name as project_name FROM tasks t
+        `SELECT t.id,t.title,t.due_date,t.project_id,p.name as project_name FROM tasks t
         JOIN projects p ON t.project_id=p.id
         WHERE EXISTS (SELECT 1 FROM task_assignees ta WHERE ta.task_id=t.id AND ta.member_id=$1)
           AND t.due_date < NOW() AND t.stage NOT IN ('Done')
@@ -92,6 +92,38 @@ router.get("/", auth, async (req, res) => {
       recent_comments: recentComments.rows,
     });
   }
+});
+
+// Full active-task list for one member — used by the Team Workload
+// dropdown on the manager dashboard when a member row is expanded.
+router.get("/members/:id/tasks", auth, async (req, res) => {
+  const tasks = await db.query(
+    `SELECT t.id,t.title,t.stage,t.due_date,t.project_id,p.name as project_name
+     FROM tasks t JOIN projects p ON t.project_id=p.id
+     WHERE EXISTS (SELECT 1 FROM task_assignees ta WHERE ta.task_id=t.id AND ta.member_id=$1)
+       AND t.stage NOT IN ('Done')
+     ORDER BY t.due_date NULLS LAST`,
+    [req.params.id],
+  );
+  res.json({ tasks: tasks.rows });
+});
+
+// Main-task list for the "Total Tasks" / "Completed Tasks" stat-card
+// modals on the manager dashboard. ?stage=Done for completed only,
+// omitted for all main tasks.
+router.get("/tasks", auth, async (req, res) => {
+  const { stage } = req.query;
+  const params = [];
+  let query = `SELECT t.id,t.title,t.stage,t.due_date,t.project_id,p.name as project_name
+    FROM tasks t JOIN projects p ON t.project_id=p.id
+    WHERE t.parent_task_id IS NULL`;
+  if (stage) {
+    params.push(stage);
+    query += ` AND t.stage = $${params.length}`;
+  }
+  query += ` ORDER BY t.due_date NULLS LAST`;
+  const tasks = await db.query(query, params);
+  res.json({ tasks: tasks.rows });
 });
 
 module.exports = router;

@@ -70,6 +70,13 @@ router.patch("/:id/deactivate", auth, managerOnly, async (req, res) => {
   res.json({ success: true });
 });
 
+router.patch("/:id/activate", auth, managerOnly, async (req, res) => {
+  await db.query("UPDATE members SET active=true WHERE id=$1", [
+    req.params.id,
+  ]);
+  res.json({ success: true });
+});
+
 router.delete("/:id", auth, managerOnly, async (req, res) => {
   try {
     await db.query("DELETE FROM members WHERE id=$1", [req.params.id]);
