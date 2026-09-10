@@ -96,6 +96,20 @@ export default function Members() {
     });
   };
 
+  const handleActivate = (id) => {
+    setConfirmModal({
+      show: true,
+      title: "Activate Member",
+      message: "Activate this member? They will be able to log in again.",
+      isDangerous: false,
+      action: async () => {
+        await api.patch(`/members/${id}/activate`);
+        load();
+      },
+      loading: false,
+    });
+  };
+
   const handleDelete = (id) => {
     setConfirmModal({
       show: true,
@@ -161,139 +175,160 @@ export default function Members() {
 
       <div className="page-body">
         <div className="card" style={{ padding: 0, overflow: "hidden" }}>
-          <table>
-            <thead>
-              <tr>
-                <th>Member</th>
-                <th>Email</th>
-                <th>Role</th>
-                <th>Skills</th>
-                <th>Joined</th>
-                <th>Status</th>
-                {isManager && <th>Actions</th>}
-              </tr>
-            </thead>
-            <tbody>
-              {members.length === 0 && (
+          <div className="table-wrap">
+            <table>
+              <thead>
                 <tr>
-                  <td
-                    colSpan={7}
-                    style={{
-                      textAlign: "center",
-                      color: "var(--text-3)",
-                      padding: "40px",
-                    }}
-                  >
-                    No members yet
-                  </td>
+                  <th>Member</th>
+                  <th>Email</th>
+                  <th>Role</th>
+                  <th>Skills</th>
+                  <th>Joined</th>
+                  <th>Status</th>
+                  {isManager && <th>Actions</th>}
                 </tr>
-              )}
-              {members.map((m) => (
-                <tr key={m.id} style={{ opacity: m.active ? 1 : 0.5 }}>
-                  <td>
-                    <div
+              </thead>
+              <tbody>
+                {members.length === 0 && (
+                  <tr>
+                    <td
+                      colSpan={7}
                       style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: "10px",
+                        textAlign: "center",
+                        color: "var(--text-3)",
+                        padding: "40px",
                       }}
                     >
-                      <div
-                        className="user-avatar"
-                        style={{ overflow: "hidden", padding: 0 }}
-                      >
-                        {m.avatar_url ? (
-                          <img
-                            src={m.avatar_url}
-                            alt={m.name}
-                            style={{
-                              width: "100%",
-                              height: "100%",
-                              objectFit: "cover",
-                              borderRadius: "50%",
-                              display: "block",
-                            }}
-                          />
-                        ) : (
-                          m.name[0]
-                        )}
-                      </div>
-                      <span style={{ fontWeight: 500 }}>{m.name}</span>
-                    </div>
-                  </td>
-                  <td style={{ color: "var(--text-2)" }}>{m.email}</td>
-                  <td>
-                    <span
-                      className={`badge ${m.role === "manager" ? "badge-deployed" : "badge-inprogress"}`}
-                    >
-                      {m.role}
-                    </span>
-                  </td>
-                  <td style={{ color: "var(--text-3)", fontSize: "12px" }}>
-                    {m.skills?.length
-                      ? m.skills.map((s) => (
-                          <span
-                            key={s}
-                            style={{
-                              display: "inline-block",
-                              background: "var(--bg-4)",
-                              borderRadius: "4px",
-                              padding: "1px 6px",
-                              marginRight: "4px",
-                              marginBottom: "2px",
-                              fontSize: "11px",
-                            }}
-                          >
-                            {s}
-                          </span>
-                        ))
-                      : "—"}
-                  </td>
-                  <td style={{ color: "var(--text-3)", fontSize: "12px" }}>
-                    {formatDate(m.created_at)}
-                  </td>
-                  <td>
-                    <span
-                      style={{
-                        fontSize: "11px",
-                        color: m.active ? "var(--success)" : "var(--text-3)",
-                      }}
-                    >
-                      {m.active ? "● Active" : "○ Inactive"}
-                    </span>
-                  </td>
-                  {isManager && (
+                      No members yet
+                    </td>
+                  </tr>
+                )}
+                {members.map((m) => (
+                  <tr key={m.id} style={{ opacity: m.active ? 1 : 0.5 }}>
                     <td>
-                      <div style={{ display: "flex", gap: "4px" }}>
-                        <button
-                          className="btn btn-ghost btn-sm"
-                          onClick={() => openEdit(m)}
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "10px",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        <div
+                          className="user-avatar"
+                          style={{ overflow: "hidden", padding: 0, flexShrink: 0 }}
                         >
-                          Edit
-                        </button>
-                        {m.active && (
+                          {m.avatar_url ? (
+                            <img
+                              src={m.avatar_url}
+                              alt={m.name}
+                              style={{
+                                width: "100%",
+                                height: "100%",
+                                objectFit: "cover",
+                                borderRadius: "50%",
+                                display: "block",
+                              }}
+                            />
+                          ) : (
+                            m.name[0]
+                          )}
+                        </div>
+                        <span style={{ fontWeight: 500 }}>{m.name}</span>
+                      </div>
+                    </td>
+                    <td style={{ color: "var(--text-2)", whiteSpace: "nowrap" }}>
+                      {m.email}
+                    </td>
+                    <td>
+                      <span
+                        className={`badge ${m.role === "manager" ? "badge-deployed" : "badge-inprogress"}`}
+                      >
+                        {m.role}
+                      </span>
+                    </td>
+                    <td style={{ color: "var(--text-3)", fontSize: "12px" }}>
+                      {m.skills?.length
+                        ? m.skills.map((s) => (
+                            <span
+                              key={s}
+                              style={{
+                                display: "inline-block",
+                                background: "var(--bg-4)",
+                                borderRadius: "4px",
+                                padding: "1px 6px",
+                                marginRight: "4px",
+                                marginBottom: "2px",
+                                fontSize: "11px",
+                                whiteSpace: "nowrap",
+                              }}
+                            >
+                              {s}
+                            </span>
+                          ))
+                        : "—"}
+                    </td>
+                    <td style={{ color: "var(--text-3)", fontSize: "12px", whiteSpace: "nowrap" }}>
+                      {formatDate(m.created_at)}
+                    </td>
+                    <td>
+                      <span
+                        style={{
+                          fontSize: "11px",
+                          color: m.active ? "var(--success)" : "var(--text-3)",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {m.active ? "● Active" : "○ Inactive"}
+                      </span>
+                    </td>
+                    {isManager && (
+                      <td>
+                        <div
+                          style={{
+                            display: "flex",
+                            gap: "4px",
+                            flexWrap: "wrap",
+                          }}
+                        >
+                          <button
+                            className="btn btn-ghost btn-sm"
+                            onClick={() => openEdit(m)}
+                          >
+                            Edit
+                          </button>
+                          {m.active ? (
+                            <button
+                              className="btn btn-ghost btn-sm"
+                              style={{ color: "var(--danger)" }}
+                              onClick={() => handleDeactivate(m.id)}
+                            >
+                              Deactivate
+                            </button>
+                          ) : (
+                            <button
+                              className="btn btn-ghost btn-sm"
+                              style={{ color: "var(--success)" }}
+                              onClick={() => handleActivate(m.id)}
+                            >
+                              Activate
+                            </button>
+                          )}
                           <button
                             className="btn btn-ghost btn-sm"
                             style={{ color: "var(--danger)" }}
-                            onClick={() => handleDeactivate(m.id)}
+                            onClick={() => handleDelete(m.id)}
                           >
-                            Deactivate
+                            Delete
                           </button>
-                        )}
-                        <button
-                          className="btn btn-ghost btn-sm"
-                          style={{ color: "var(--danger)" }}
-                          onClick={() => handleDelete(m.id)}
-                        >
-                          Delete
-                        </button>
-                      </div>
-                    </td>
-                  )}
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                        </div>
+                      </td>
+                    )}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
 

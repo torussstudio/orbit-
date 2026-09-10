@@ -277,9 +277,96 @@ if (nextStage === 'Done') {
 
   return (
     <>
+      <style>{`
+        .td-main-grid {
+          display: grid;
+          grid-template-columns: 1fr 320px;
+          gap: 24px;
+          align-items: start;
+        }
+        @media (max-width: 900px) {
+          .td-main-grid {
+            grid-template-columns: 1fr;
+          }
+        }
+        .td-main-grid > * { min-width: 0; }
+
+        .td-breadcrumb {
+          flex-wrap: wrap;
+        }
+
+        .td-header-badges {
+          display: flex;
+          gap: 8px;
+          align-items: center;
+          flex-wrap: wrap;
+        }
+
+        .td-subtask-row {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          gap: 12px;
+          padding: 10px 12px;
+          background: var(--bg-3);
+          border-radius: 6px;
+          flex-wrap: wrap;
+        }
+        .td-subtask-info {
+          min-width: 0;
+          flex: 1 1 200px;
+        }
+        .td-subtask-info a {
+          display: block;
+          overflow-wrap: anywhere;
+        }
+        .td-subtask-meta {
+          display: flex;
+          gap: 8px;
+          font-size: 11px;
+          color: var(--text-3);
+          flex-wrap: wrap;
+          align-items: center;
+        }
+        .td-subtask-actions {
+          display: flex;
+          gap: 6px;
+          flex-shrink: 0;
+        }
+
+        .td-details-row {
+          display: flex;
+          justify-content: space-between;
+          gap: 12px;
+          padding: 7px 0;
+          border-bottom: 1px solid var(--border);
+          font-size: 13px;
+        }
+        .td-details-row span:last-child {
+          text-align: right;
+          overflow-wrap: anywhere;
+        }
+
+        .td-review-options {
+          display: flex;
+          gap: 12px;
+          margin-bottom: 20px;
+        }
+        @media (max-width: 480px) {
+          .td-review-options {
+            flex-direction: column;
+          }
+        }
+
+        @media (max-width: 640px) {
+          .page-header { padding-left: 16px !important; padding-right: 16px !important; }
+          .page-body { padding-left: 16px !important; padding-right: 16px !important; }
+        }
+      `}</style>
+
       <div className="page-header">
-        <div>
-           <div className="breadcrumb">
+        <div style={{ minWidth: 0 }}>
+           <div className="breadcrumb td-breadcrumb">
             <Link to="/projects">Projects</Link>
             <span className="breadcrumb-sep">/</span>
             <Link to={`/projects/${projectId}`}>{project?.name}</Link>
@@ -294,20 +381,20 @@ if (nextStage === 'Done') {
               <span>Task</span>
             )}
           </div>
-          <div className="page-title" style={{ fontSize: '18px' }}>{task.title}</div>
+          <div className="page-title" style={{ fontSize: '18px', overflowWrap: 'anywhere' }}>{task.title}</div>
         </div>
-        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+        <div className="td-header-badges">
           <span className={`badge badge-${task.priority}`}>{task.priority}</span>
           <span className={`badge badge-${task.stage?.toLowerCase().replace(/\s/g,'')}`}>{task.stage}</span>
         </div>
       </div>
 
-      <div className="page-body" style={{ display: 'grid', gridTemplateColumns: '1fr 320px', gap: '24px', alignItems: 'start' }}>
+      <div className="page-body td-main-grid">
         <div>
           {/* Description */}
           <div className="card" style={{ marginBottom: '16px' }}>
             <h3 style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-2)', marginBottom: '10px' }}>Description</h3>
-            <p style={{ fontSize: '14px', color: 'var(--text)', lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>
+            <p style={{ fontSize: '14px', color: 'var(--text)', lineHeight: 1.7, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
               {task.description || task.details || task.desc || <span style={{ color: 'var(--text-3)' }}>No description provided.</span>}
             </p>
           </div>
@@ -315,7 +402,7 @@ if (nextStage === 'Done') {
           {/* Sub Tasks */}
           {!task.parent_task_id && (
             <div className="card" style={{ marginBottom: '16px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', flexWrap: 'wrap', gap: '8px' }}>
               <h3 style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-2)' }}>
                 Sub Tasks ({task.subtasks?.length || 0})
                 {task.subtasks?.some(s => s.time_taken) && (
@@ -332,10 +419,10 @@ if (nextStage === 'Done') {
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                 {task.subtasks?.map(st => (
-                  <div key={st.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 12px', background: 'var(--bg-3)', borderRadius: '6px', borderLeft: `3px solid ${PRIORITY_COLORS[st.priority]}` }}>
-                    <div>
-                      <Link to={`/projects/${projectId}/tasks/${st.id}`} style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text)', textDecoration: 'none', display: 'block', marginBottom: '4px' }}>{st.title}</Link>
-                      <div style={{ display: 'flex', gap: '8px', fontSize: '11px', color: 'var(--text-3)', flexWrap: 'wrap' }}>
+                  <div key={st.id} className="td-subtask-row" style={{ borderLeft: `3px solid ${PRIORITY_COLORS[st.priority]}` }}>
+                    <div className="td-subtask-info">
+                      <Link to={`/projects/${projectId}/tasks/${st.id}`} style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text)', textDecoration: 'none', marginBottom: '4px' }}>{st.title}</Link>
+                      <div className="td-subtask-meta">
                          <span style={{ position: 'relative', display: 'inline-block' }}>
                           <span
                             className={`badge badge-${st.stage?.toLowerCase().replace(/\s/g,'')}`}
@@ -389,7 +476,7 @@ if (nextStage === 'Done') {
                         {st.rework_count > 0 && <span style={{ color: 'var(--danger)', fontWeight: 600 }}>↺ {st.rework_count} rework{st.rework_count > 1 ? 's' : ''}</span>}
                       </div>
                     </div>
-                    <div style={{ display: 'flex', gap: '6px' }}>
+                    <div className="td-subtask-actions">
                       <button className="btn btn-ghost btn-sm" onClick={() => { setEditingSubTask(st); setShowSubTaskModal(true); }}>Edit</button>
                       {isManager && <button className="btn btn-ghost btn-sm" style={{ color: 'var(--danger)' }} onClick={() => handleDeleteSubTask(st.id)}>Delete</button>}
                     </div>
@@ -455,7 +542,7 @@ if (nextStage === 'Done') {
                   <span className="comment-author">{c.author_name}</span>
                   <span className="comment-time">{new Date(c.created_at).toLocaleString()}</span>
                 </div>
-                <div className="comment-body">{c.content}</div>
+                <div className="comment-body" style={{ overflowWrap: 'anywhere' }}>{c.content}</div>
               </div>
             ))}
           </div>
@@ -475,8 +562,8 @@ if (nextStage === 'Done') {
                 ? [['Total Time', `⏱ ${task.subtasks.reduce((sum, s) => sum + (s.time_taken || 0), 0)} min`]]
                 : []),
             ].map(([l, v]) => (
-              <div key={l} style={{ display: 'flex', justifyContent: 'space-between', padding: '7px 0', borderBottom: '1px solid var(--border)', fontSize: '13px' }}>
-                <span style={{ color: 'var(--text-3)' }}>{l}</span>
+              <div key={l} className="td-details-row">
+                <span style={{ color: 'var(--text-3)', flexShrink: 0 }}>{l}</span>
                 <span style={{ color: 'var(--text)' }}>{v}</span>
               </div>
             ))}
@@ -486,7 +573,7 @@ if (nextStage === 'Done') {
             <h3 style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-2)', marginBottom: '12px' }}>Activity</h3>
             {task.activity?.length === 0 && <p style={{ color: 'var(--text-3)', fontSize: '13px' }}>No activity yet.</p>}
             {task.activity?.map(a => (
-              <div key={a.id} style={{ padding: '6px 0', borderBottom: '1px solid var(--border)', fontSize: '12px' }}>
+              <div key={a.id} style={{ padding: '6px 0', borderBottom: '1px solid var(--border)', fontSize: '12px', overflowWrap: 'anywhere' }}>
                 <span style={{ color: 'var(--accent)' }}>{a.actor_name}</span>
                 <span style={{ color: 'var(--text-2)' }}> {a.action}</span>
                 {a.meta?.from && <span style={{ color: 'var(--text-3)' }}> ({a.meta.from} → {a.meta.to})</span>}
@@ -558,7 +645,7 @@ if (nextStage === 'Done') {
           <p style={{ fontSize: '13px', color: 'var(--text-2)', marginBottom: '20px' }}>
             What would you like to do with <strong>"{managerReviewModal.subtask?.title}"</strong>?
           </p>
-          <div style={{ display: 'flex', gap: '12px', marginBottom: '20px' }}>
+          <div className="td-review-options">
             <div
               onClick={() => setReviewAction('done')}
               style={{ flex: 1, padding: '16px', borderRadius: '8px', border: `2px solid ${reviewAction === 'done' ? 'var(--success)' : 'var(--border)'}`, cursor: 'pointer', textAlign: 'center', background: reviewAction === 'done' ? 'rgba(16,185,129,0.08)' : 'var(--bg-2)', transition: 'all 0.15s' }}>

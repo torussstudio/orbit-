@@ -51,7 +51,7 @@ function GlobalSearch() {
   const handleSelect = () => { setQuery(''); setShowDropdown(false); };
 
   return (
-    <div style={{ position: 'relative', flex: 1, maxWidth: '480px' }}>
+    <div style={{ position: 'relative', flex: 1, maxWidth: '480px', minWidth: 0 }}>
       <div style={{ position: 'relative' }}>
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
           style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-3)', pointerEvents: 'none' }}>
@@ -179,9 +179,24 @@ export default function Layout() {
   const [profileDropdownOpen, setProfileDropdownOpen] = useState(false);
   const profileDropdownRef = useRef(null);
 
-  // Close dropdown on route change
+  // Sidebar state: "collapsed" = desktop icon-only mode, "mobileOpen" = mobile off-canvas drawer
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    try { return localStorage.getItem('orbit_sidebar_collapsed') === '1'; } catch { return false; }
+  });
+  const [mobileOpen, setMobileOpen] = useState(false);
+
+  const toggleCollapsed = () => {
+    setSidebarCollapsed(prev => {
+      const next = !prev;
+      try { localStorage.setItem('orbit_sidebar_collapsed', next ? '1' : '0'); } catch {}
+      return next;
+    });
+  };
+
+  // Close dropdown / mobile sidebar on route change
   useEffect(() => {
     setProfileDropdownOpen(false);
+    setMobileOpen(false);
   }, [location.pathname]);
 
   const handleLogoutClick = () => {
@@ -210,9 +225,92 @@ export default function Layout() {
     return () => document.removeEventListener('mousedown', handleClick);
   }, []);
 
+  const navItems = [
+    { to: '/', end: true, icon: 'M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z', label: 'Dashboard' },
+    { to: '/projects', icon: 'M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z', label: 'Projects' },
+    { to: '/calendar', icon: 'M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z', label: 'Calendar' },
+  ];
+
   return (
     <div className="app-layout">
-      <aside className="sidebar">
+      <style>{`
+        .sidebar { transition: width 0.2s ease; position: relative; flex-shrink: 0; }
+
+        .sidebar-collapse-btn {
+          position: absolute; top: 22px; right: -12px;
+          width: 24px; height: 24px; border-radius: 50%;
+          background: var(--bg-2); border: 1px solid var(--border);
+          display: flex; align-items: center; justify-content: center;
+          cursor: pointer; color: var(--text-2); box-shadow: var(--shadow);
+          z-index: 10; transition: transform 0.2s ease, background 0.15s, color 0.15s;
+        }
+        .sidebar-collapse-btn:hover { background: var(--bg-3); color: var(--accent); }
+        .sidebar-collapse-btn svg { transition: transform 0.2s ease; }
+
+        .sidebar.collapsed { width: 72px; min-width: 72px; }
+        .sidebar.collapsed .sidebar-logo { justify-content: center; padding: 24px 8px 20px; gap: 0; }
+        .sidebar.collapsed .sidebar-logo .logo-sub { display: none; }
+        .sidebar.collapsed .sidebar-section-label { display: none; }
+        .sidebar.collapsed .sidebar-nav a { justify-content: center; padding: 10px; }
+        .sidebar.collapsed .sidebar-nav a .nav-label { display: none; }
+        .sidebar.collapsed .sidebar-collapse-btn svg { transform: rotate(180deg); }
+        .sidebar.collapsed .sidebar-footer-text { display: none; }
+
+        .menu-toggle {
+          display: none; background: none; border: none; cursor: pointer;
+          color: var(--text-2); padding: 6px; border-radius: 8px;
+          align-items: center; justify-content: center; flex-shrink: 0;
+        }
+        .menu-toggle:hover { background: var(--bg-3); color: var(--text); }
+
+        .sidebar-overlay { display: none; }
+
+        @media (max-width: 900px) {
+          .sidebar {
+            position: fixed; top: 0; left: 0; bottom: 0;
+            z-index: 1500; transform: translateX(-100%);
+            transition: transform 0.25s ease;
+            width: 240px !important; min-width: 240px !important;
+            box-shadow: 4px 0 24px rgba(0,0,0,0.18);
+          }
+          .sidebar.mobile-open { transform: translateX(0); }
+          .sidebar.collapsed { width: 240px !important; min-width: 240px !important; }
+          .sidebar.collapsed .sidebar-logo { justify-content: flex-start; padding: 24px 20px 20px; gap: 10px; }
+          .sidebar.collapsed .sidebar-logo .logo-sub,
+          .sidebar.collapsed .sidebar-section-label,
+          .sidebar.collapsed .sidebar-nav a .nav-label,
+          .sidebar.collapsed .sidebar-footer-text { display: block; }
+          .sidebar.collapsed .sidebar-nav a { justify-content: flex-start; padding: 9px 12px; }
+          .sidebar-collapse-btn { display: none; }
+          .menu-toggle { display: flex; }
+
+          .sidebar-overlay.show {
+            display: block; position: fixed; inset: 0;
+            background: rgba(15,17,38,0.45); z-index: 1400;
+            backdrop-filter: blur(2px); animation: fadeIn 0.15s ease;
+          }
+
+          .page-header { padding-left: 16px !important; padding-right: 16px !important; }
+          .page-body { padding-left: 16px !important; padding-right: 16px !important; }
+        }
+
+        @media (max-width: 480px) {
+          .top-header { padding: 0 12px !important; gap: 10px !important; }
+        }
+      `}</style>
+
+      <aside className={`sidebar${sidebarCollapsed ? ' collapsed' : ''}${mobileOpen ? ' mobile-open' : ''}`}>
+        <button
+          className="sidebar-collapse-btn"
+          onClick={toggleCollapsed}
+          title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          aria-label="Toggle sidebar"
+        >
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M15 18l-6-6 6-6" />
+          </svg>
+        </button>
+
         <div className="sidebar-logo">
           <div className="logo-text">⬡ Orbit</div>
           <div className="logo-sub">Agency OS</div>
@@ -221,28 +319,22 @@ export default function Layout() {
         <div className="sidebar-section">
           <div className="sidebar-section-label">Main</div>
           <nav className="sidebar-nav">
-            <NavLink to="/" end>
-              <Icon d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z" />
-              Dashboard
-            </NavLink>
-            <NavLink to="/projects">
-              <Icon d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
-              Projects
-            </NavLink>
-            <NavLink to="/calendar">
-              <Icon d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-              Calendar
-            </NavLink>
+            {navItems.map(item => (
+              <NavLink key={item.to} to={item.to} end={item.end} title={item.label}>
+                <Icon d={item.icon} />
+                <span className="nav-label">{item.label}</span>
+              </NavLink>
+            ))}
             {isManager && (
-              <NavLink to="/members">
+              <NavLink to="/members" title="Members">
                 <Icon d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75" />
-                Members
+                <span className="nav-label">Members</span>
               </NavLink>
             )}
             {isManager && (
-              <NavLink to="/in-review">
+              <NavLink to="/in-review" title="In Review">
                 <Icon d="M9 11l3 3L22 4M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11" />
-                In Review
+                <span className="nav-label">In Review</span>
               </NavLink>
             )}
           </nav>
@@ -250,19 +342,34 @@ export default function Layout() {
 
         {/* Sidebar footer kept minimal — main profile now lives in header */}
         <div className="sidebar-footer" style={{ padding: '12px 16px' }}>
-          <div style={{ fontSize: '11px', color: 'var(--text-3)', textAlign: 'center' }}>
+          <div className="sidebar-footer-text" style={{ fontSize: '11px', color: 'var(--text-3)', textAlign: 'center' }}>
             Orbit Agency OS
           </div>
         </div>
       </aside>
 
+      <div
+        className={`sidebar-overlay${mobileOpen ? ' show' : ''}`}
+        onClick={() => setMobileOpen(false)}
+      />
+
       <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0 }}>
         {/* Top Header */}
-        <header style={{
+        <header className="top-header" style={{
           height: '73.5px', background: 'var(--bg-2)', borderBottom: '1px solid var(--border)',
           display: 'flex', alignItems: 'center', padding: '0 24px', gap: '16px',
           position: 'sticky', top: 0, zIndex: 100,
         }}>
+          <button
+            className="menu-toggle"
+            onClick={() => setMobileOpen(true)}
+            aria-label="Open menu"
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M3 12h18M3 6h18M3 18h18" />
+            </svg>
+          </button>
+
           <GlobalSearch />
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginLeft: 'auto' }}>
