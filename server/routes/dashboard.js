@@ -126,4 +126,22 @@ router.get("/tasks", auth, async (req, res) => {
   res.json({ tasks: tasks.rows });
 });
 
+// Full task list (main tasks + sub-tasks) assigned to the current user,
+// across ALL projects and ALL stages (including Done) — used by the
+// "Task View" sidebar page. Works for both managers and members since
+// it's scoped by assignment, not role.
+router.get("/my-tasks", auth, async (req, res) => {
+  const tasks = await db.query(
+    `SELECT t.*, p.name as project_name,
+      (SELECT title FROM tasks pt WHERE pt.id = t.parent_task_id) as parent_title
+     FROM tasks t JOIN projects p ON t.project_id=p.id
+     WHERE EXISTS (SELECT 1 FROM task_assignees ta WHERE ta.task_id=t.id AND ta.member_id=$1)
+     ORDER BY t.due_date NULLS LAST`,
+    [req.user.id],
+  );
+  res.json({ tasks: tasks.rows });
+});
+
+module.exports = router;
+
 module.exports = router;
