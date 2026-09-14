@@ -1,0 +1,72 @@
+name: Deploy Orbit
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: orbit-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy to VPS
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy Orbit
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          set -e
+
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+
+          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/orbit_deploy_key
+          chmod 600 ~/.ssh/orbit_deploy_key
+
+          ssh-keyscan -H "$VPS_HOST" >> ~/.ssh/known_hosts
+
+          ssh \
+            -i ~/.ssh/orbit_deploy_key \
+            -o IdentitiesOnly=yes \
+            -o BatchMode=yes \
+            "$VPS_USER@$VPS_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+
+          cd /opt/toruss/projects/Orbit
+
+          echo "==> Updating Orbit source..."
+          git fetch origin main
+          git reset --hard origin/main
+
+          echo "==> Building Orbit..."
+          docker compose build orbit-app
+
+          echo "==> Starting Orbit..."
+          docker compose up -d orbit-app
+
+          echo "==> Waiting for Orbit API..."
+          for i in $(seq 1 30); do
+            if docker exec orbit-app wget -qO- http://127.0.0.1:4000/health | grep -q '"status":"ok"'; then
+              echo "Orbit deployment successful."
+              exit 0
+            fi
+
+            sleep 2
+          done
+
+          echo "Orbit health check failed."
+          docker logs --tail 100 orbit-app
+          exit 1
+          REMOTE
+
+          rm -f ~/.ssh/orbit_deploy_key
