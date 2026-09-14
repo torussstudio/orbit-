@@ -49,7 +49,7 @@ const allowedOrigins = [
   'http://localhost:3000',
   'http://localhost:3001',
   'http://localhost:5173',
-  'https://orbit.torusdxn.in',
+  'https://orbit.toruss.agency',
 ];
 
 const envOrigins = [

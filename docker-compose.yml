@@ -1,0 +1,23 @@
+services:
+  orbit-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        REACT_APP_API_URL: /api
+    container_name: orbit-app
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      PORT: 4000
+    expose:
+      - "3000"
+      - "4000"
+    networks:
+      - toruss-network
+
+networks:
+  toruss-network:
+    external: true

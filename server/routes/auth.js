@@ -111,7 +111,7 @@ router.post("/login", async (req, res) => {
 // token. SIMPLE MODE: no rotation — see the file-top comment.
 // =========================
 router.post("/refresh", async (req, res) => {
-  const allowedOrigins = ["http://localhost:3000", "https://orbit.torusdxn.in"];
+  const allowedOrigins = ["http://localhost:3000", "https://orbit.toruss.agency"];
 
   const origin = req.get("origin");
 
@@ -201,7 +201,7 @@ router.post("/refresh", async (req, res) => {
 // Clears the auth cookie to invalidate the session.
 // =========================
 router.post("/logout", async (req, res) => {
-  const allowedOrigins = ["http://localhost:3000", "https://orbit.torusdxn.in"];
+  const allowedOrigins = ["http://localhost:3000", "https://orbit.toruss.agency"];
 
   const origin = req.get("origin");
 

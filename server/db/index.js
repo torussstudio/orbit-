@@ -7,7 +7,9 @@ const { Pool } = require("pg");
 // eat the whole budget on its own.
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false },
+  ssl: process.env.DB_SSL === "true"
+  ? { rejectUnauthorized: false }
+  : false,
   max: 5,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 5000,
