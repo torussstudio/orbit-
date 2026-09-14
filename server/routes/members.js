@@ -52,7 +52,17 @@ router.post("/", auth, managerOnly, async (req, res) => {
 
 router.put("/:id", auth, managerOnly, async (req, res) => {
   try {
-    const { name, email, role, birthday, skills } = req.body;
+    const { name, email, role, birthday, skills, password } = req.body;
+
+    if (password) {
+      const hash = await bcrypt.hash(password, 10);
+      const { rows } = await db.query(
+        "UPDATE members SET name=$1,email=$2,role=$3,birthday=$4,skills=$5,password_hash=$6 WHERE id=$7 RETURNING id,name,email,role,birthday,skills",
+        [name, email, role, birthday || null, skills, hash, req.params.id],
+      );
+      return res.json(rows[0]);
+    }
+
     const { rows } = await db.query(
       "UPDATE members SET name=$1,email=$2,role=$3,birthday=$4,skills=$5 WHERE id=$6 RETURNING id,name,email,role,birthday,skills",
       [name, email, role, birthday || null, skills, req.params.id],
@@ -79,6 +89,29 @@ router.patch("/:id/activate", auth, managerOnly, async (req, res) => {
 
 router.delete("/:id", auth, managerOnly, async (req, res) => {
   try {
+    // Block deletion if this member still has any non-Done tasks
+    // assigned to them — manager must delete or complete those tasks
+    // (via the normal task UI) before the member can be removed.
+    const { rows: pendingTasks } = await db.query(
+      `SELECT t.id, t.title, t.stage
+       FROM tasks t
+       JOIN task_assignees ta ON ta.task_id = t.id
+       WHERE ta.member_id = $1 AND t.stage != 'Done'
+       ORDER BY t.title`,
+      [req.params.id],
+    );
+
+    if (pendingTasks.length > 0) {
+      return res.status(400).json({
+        error: `This member has ${pendingTasks.length} task${pendingTasks.length > 1 ? "s" : ""} that ${pendingTasks.length > 1 ? "aren't" : "isn't"} marked Done (${pendingTasks.map((t) => t.title).join(", ")}). Delete or complete ${pendingTasks.length > 1 ? "them" : "it"} first, then delete this member.`,
+      });
+    }
+
+    // Safe to delete — clean up any lingering assignee links on Done
+    // tasks first in case the FK isn't set to cascade.
+    await db.query("DELETE FROM task_assignees WHERE member_id=$1", [
+      req.params.id,
+    ]);
     await db.query("DELETE FROM members WHERE id=$1", [req.params.id]);
     res.json({ success: true });
   } catch (e) {

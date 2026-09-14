@@ -5,16 +5,6 @@ const { createNotification } = require("../utils/pushNotify");
 
 const MANAGER_STAGES = ["Done"];
 
-// Multi-assignee support: rolls a task's assignees (from task_assignees)
-// into two convenience fields on every task row:
-//  - assignee_name: comma-joined display string, so every existing
-//    single-name display spot in the UI ("assignee_name || 'Unassigned'")
-//    keeps working unchanged.
-//  - assignees: [{id, name, email}] array, used by the multi-select
-//    assignee picker and to restrict a subtask's assignee options to
-//    whoever is assigned on the parent task.
-// This is a LEFT JOIN LATERAL, not a plain JOIN, so it always contributes
-// exactly one row per task (no row-multiplication / no GROUP BY needed).
 const ASSIGNEE_JOIN = `
   LEFT JOIN LATERAL (
     SELECT
@@ -37,12 +27,80 @@ function extractAssigneeIds(body) {
   return body.assignee_id ? [body.assignee_id] : [];
 }
 
+// Whenever a subtask is created, its due_date changes, or it's deleted,
+// the parent task's due_date is recomputed as the MAX (latest) due_date
+// among its remaining subtasks. If a parent has no subtasks with a due
+// date, its due_date is cleared (falls back to null / manual entry).
+// `queryable` is either the plain `db` pool or an in-transaction `client`
+// so this can be called from both transactional and non-transactional
+// code paths.
+async function recomputeParentDueDate(queryable, parentId) {
+  const { rows } = await queryable.query(
+    `SELECT MAX(due_date) as max_due FROM tasks WHERE parent_task_id = $1 AND due_date IS NOT NULL`,
+    [parentId],
+  );
+  await queryable.query(
+    `UPDATE tasks SET due_date = $1, updated_at = NOW() WHERE id = $2`,
+    [rows[0]?.max_due || null, parentId],
+  );
+}
+
+// Derives a main task's stage from the full set of its subtask stages
+// (instead of only recognizing the Done <-> In Progress transition):
+//  - no subtasks left           -> Todo
+//  - every subtask is Todo      -> Todo
+//  - every subtask is Done      -> Done
+//  - anything else (a mix, or
+//    any subtask In Progress /
+//    In Review)                 -> In Progress
+// Only writes + logs activity when the computed stage actually differs
+// from the parent's current stage. `actorId` is optional — pass it when
+// available so the activity entry has a real actor instead of null.
+async function recomputeParentStage(queryable, parentId, actorId = null) {
+  const { rows: siblings } = await queryable.query(
+    `SELECT stage FROM tasks WHERE parent_task_id = $1`,
+    [parentId],
+  );
+  const { rows: parentRows } = await queryable.query(
+    `SELECT stage FROM tasks WHERE id = $1`,
+    [parentId],
+  );
+  const currentStage = parentRows[0]?.stage;
+
+  let nextStage;
+  if (siblings.length === 0) {
+    nextStage = "Todo";
+  } else if (siblings.every((s) => s.stage === "Done")) {
+    nextStage = "Done";
+  } else if (siblings.every((s) => s.stage === "Todo")) {
+    nextStage = "Todo";
+  } else {
+    nextStage = "In Progress";
+  }
+
+  if (nextStage && nextStage !== currentStage) {
+    await queryable.query(
+      `UPDATE tasks SET stage = $1, updated_at = NOW() WHERE id = $2`,
+      [nextStage, parentId],
+    );
+    await queryable.query(
+      `INSERT INTO task_activity(task_id,actor_id,action,meta) VALUES($1,$2,$3,$4)`,
+      [
+        parentId,
+        actorId,
+        "Stage changed",
+        JSON.stringify({ from: currentStage, to: nextStage }),
+      ],
+    );
+  }
+}
+
 router.get("/project/:projectId", auth, async (req, res) => {
   const { rows } = await db.query(
     `SELECT t.*, assignee_agg.assignee_name, assignee_agg.assignees, c.name as cluster_name FROM tasks t
      LEFT JOIN clusters c ON t.cluster_id=c.id
      ${ASSIGNEE_JOIN}
-     WHERE t.project_id=$1 AND t.parent_task_id IS NULL
+     WHERE t.project_id=$1
      ORDER BY t.sort_order ASC NULLS LAST, t.created_at DESC`,
     [req.params.projectId],
   );
@@ -72,10 +130,11 @@ router.put("/reorder", auth, async (req, res) => {
     for (let i = 0; i < ordered_ids.length; i++) {
       const taskId = ordered_ids[i];
       const { rows: prevRows } = await client.query(
-        "SELECT stage, title FROM tasks WHERE id = $1",
+        "SELECT stage, title, parent_task_id FROM tasks WHERE id = $1",
         [taskId],
       );
       const prevStage = prevRows[0]?.stage;
+      const parentTaskId = prevRows[0]?.parent_task_id;
 
       await client.query(
         "UPDATE tasks SET stage=$1, sort_order=$2, updated_at=NOW() WHERE id=$3",
@@ -95,6 +154,11 @@ router.put("/reorder", auth, async (req, res) => {
             JSON.stringify({ from: prevStage, to: stage }),
           ],
         );
+
+        // If this card is a subtask, keep its parent's derived stage in sync.
+        if (parentTaskId) {
+          await recomputeParentStage(client, parentTaskId, req.user.id);
+        }
       }
     }
 
@@ -197,27 +261,15 @@ router.post("/", auth, async (req, res) => {
       [task.id, req.user.id, actionLabel],
     );
 
-    // If a new subtask is added to a Done parent task, reset parent back to In Progress
+    // A new subtask can shift the parent's derived stage (e.g. parent
+    // was Todo/Done and now has an In Progress/In Review sibling) — keep
+    // it in sync with the full set of subtask stages.
     if (parent_task_id) {
-      const { rows: parentRows } = await client.query(
-        `SELECT stage FROM tasks WHERE id = $1`,
-        [parent_task_id],
-      );
-      if (parentRows[0]?.stage === "Done") {
-        await client.query(
-          `UPDATE tasks SET stage = 'In Progress', updated_at = NOW() WHERE id = $1`,
-          [parent_task_id],
-        );
-        await client.query(
-          `INSERT INTO task_activity(task_id,actor_id,action,meta) VALUES($1,$2,$3,$4)`,
-          [
-            parent_task_id,
-            req.user.id,
-            "Stage changed",
-            JSON.stringify({ from: "Done", to: "In Progress" }),
-          ],
-        );
-      }
+      await recomputeParentStage(client, parent_task_id, req.user.id);
+
+      // New subtask may push the parent's derived due date later —
+      // recompute it as the MAX due_date across all subtasks.
+      await recomputeParentDueDate(client, parent_task_id);
     }
 
     await client.query("COMMIT");
@@ -300,26 +352,11 @@ router.put("/:id", auth, async (req, res) => {
     );
 
     if (task.rows[0].parent_task_id) {
-      const { rows: siblings } = await db.query(
-        `SELECT stage FROM tasks WHERE parent_task_id = $1`,
-        [task.rows[0].parent_task_id],
-      );
-      const allDone = siblings.every((s) => s.stage === "Done");
-      const { rows: parentRows } = await db.query(
-        `SELECT stage FROM tasks WHERE id = $1`,
-        [task.rows[0].parent_task_id],
-      );
-      if (allDone && parentRows[0]?.stage !== "Done") {
-        await db.query(
-          `UPDATE tasks SET stage = 'Done', updated_at = NOW() WHERE id = $1`,
-          [task.rows[0].parent_task_id],
-        );
-      } else if (!allDone && parentRows[0]?.stage === "Done") {
-        await db.query(
-          `UPDATE tasks SET stage = 'In Progress', updated_at = NOW() WHERE id = $1`,
-          [task.rows[0].parent_task_id],
-        );
-      }
+      await recomputeParentStage(db, task.rows[0].parent_task_id, req.user.id);
+
+      // This path can change the subtask's due_date (via new_due_date on
+      // rework), so keep the parent's derived due date in sync.
+      await recomputeParentDueDate(db, task.rows[0].parent_task_id);
     }
 
     // NOTIFICATION REMOVED (see chat) — was: "📌 Task Updated" alert
@@ -343,9 +380,22 @@ router.put("/:id", auth, async (req, res) => {
       : existingTime > 0
         ? existingTime
         : null;
+
+  // A main task with subtasks has its due_date derived from those
+  // subtasks (see recomputeParentDueDate) rather than taken from the
+  // form, so an empty/omitted due_date here should NOT clear it — we
+  // only use the submitted due_date when this task has no subtasks yet.
+  const { rows: existingSubtasks } = await db.query(
+    `SELECT 1 FROM tasks WHERE parent_task_id = $1 LIMIT 1`,
+    [req.params.id],
+  );
+  const taskHasSubtasks = existingSubtasks.length > 0;
+
   const finalDueDate = isRework
     ? req.body.new_due_date || due_date || null
-    : due_date || null;
+    : taskHasSubtasks
+      ? task.rows[0].due_date // leave untouched; recomputeParentDueDate (subtask path) owns this
+      : due_date || null;
 
   const client = await db.connect();
   try {
@@ -391,28 +441,13 @@ router.put("/:id", auth, async (req, res) => {
       );
     }
 
-    // Auto-complete parent task if all subtasks are Done
+    // Keep parent stage derived from the full set of subtask stages
     if (task.rows[0].parent_task_id) {
-      const { rows: siblings } = await client.query(
-        `SELECT stage FROM tasks WHERE parent_task_id = $1`,
-        [task.rows[0].parent_task_id],
-      );
-      const allDone = siblings.every((s) => s.stage === "Done");
-      const { rows: parentRows } = await client.query(
-        `SELECT stage FROM tasks WHERE id = $1`,
-        [task.rows[0].parent_task_id],
-      );
-      if (allDone && parentRows[0]?.stage !== "Done") {
-        await client.query(
-          `UPDATE tasks SET stage = 'Done', updated_at = NOW() WHERE id = $1`,
-          [task.rows[0].parent_task_id],
-        );
-      } else if (!allDone && parentRows[0]?.stage === "Done") {
-        await client.query(
-          `UPDATE tasks SET stage = 'In Progress', updated_at = NOW() WHERE id = $1`,
-          [task.rows[0].parent_task_id],
-        );
-      }
+      await recomputeParentStage(client, task.rows[0].parent_task_id, req.user.id);
+
+      // This edit may have changed the subtask's own due_date — keep the
+      // parent's derived due date (MAX across subtasks) in sync.
+      await recomputeParentDueDate(client, task.rows[0].parent_task_id);
     }
 
     await client.query("COMMIT");
@@ -439,34 +474,11 @@ router.delete("/:id", auth, managerOnly, async (req, res) => {
   await db.query("DELETE FROM tasks WHERE id=$1", [req.params.id]);
 
   if (parentId) {
-    const { rows: siblings } = await db.query(
-      `SELECT stage FROM tasks WHERE parent_task_id = $1`,
-      [parentId],
-    );
-    const { rows: parentRows } = await db.query(
-      `SELECT stage FROM tasks WHERE id = $1`,
-      [parentId],
-    );
+    await recomputeParentStage(db, parentId, req.user.id);
 
-    if (siblings.length === 0) {
-      await db.query(
-        `UPDATE tasks SET stage = 'Todo', updated_at = NOW() WHERE id = $1`,
-        [parentId],
-      );
-    } else {
-      const allDone = siblings.every((s) => s.stage === "Done");
-      if (allDone && parentRows[0]?.stage !== "Done") {
-        await db.query(
-          `UPDATE tasks SET stage = 'Done', updated_at = NOW() WHERE id = $1`,
-          [parentId],
-        );
-      } else if (!allDone && parentRows[0]?.stage === "Done") {
-        await db.query(
-          `UPDATE tasks SET stage = 'In Progress', updated_at = NOW() WHERE id = $1`,
-          [parentId],
-        );
-      }
-    }
+    // The deleted subtask may have held the parent's derived due date —
+    // recompute from whatever subtasks remain (or clear it if none left).
+    await recomputeParentDueDate(db, parentId);
   }
 
   res.json({ success: true });

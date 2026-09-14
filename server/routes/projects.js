@@ -181,6 +181,22 @@ router.patch("/:id/unarchive", auth, managerOnly, async (req, res) => {
 
 router.delete("/:id", auth, managerOnly, async (req, res) => {
   try {
+    // A project can't be deleted while it still has tasks — the FK on
+    // tasks.project_id would reject it anyway (raw Postgres error, not
+    // user-friendly), so check up front and return a clear message
+    // telling the manager to clear out tasks first. Counts both main
+    // tasks and subtasks under this project.
+    const { rows: countRows } = await db.query(
+      "SELECT COUNT(*)::int AS count FROM tasks WHERE project_id=$1",
+      [req.params.id],
+    );
+    const taskCount = countRows[0]?.count || 0;
+    if (taskCount > 0) {
+      return res.status(400).json({
+        error: `This project still has ${taskCount} task${taskCount === 1 ? "" : "s"} (including sub tasks). Delete all tasks before deleting the project.`,
+      });
+    }
+
     await db.query("DELETE FROM projects WHERE id=$1", [req.params.id]);
     res.json({ success: true });
   } catch (e) {
