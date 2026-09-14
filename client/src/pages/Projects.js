@@ -322,10 +322,7 @@ function ProjectCard({ project: p, isManager, onEdit, editLoading, onArchive, on
         </p>
       )}
 
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '8px' }}>
-        <span style={{ fontSize: '11px', color: 'var(--text-3)' }}>
-          {p.end_date ? `Due ${formatDate(p.end_date)}` : 'No deadline'}
-        </span>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', marginTop: '8px' }}>
         <div style={{ display: 'flex', gap: '6px' }}>
           {!archived ? (
             <>
