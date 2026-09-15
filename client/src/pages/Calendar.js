@@ -8,8 +8,8 @@ import Select from '../components/ui/Select';
 
 const COLORS = {
   event: '#6366f1',
-  task: '#3b82f6',
-  deadline: '#8b5cf6',
+  task: '#0ea5e9',
+  deadline: '#a855f7',
   birthday: '#f59e0b',
 };
 
@@ -300,7 +300,16 @@ export default function Calendar() {
           userEmail={user?.email}
         />
 
-        <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+        <div
+          className="card"
+          style={{
+            padding: 0,
+            overflow: 'hidden',
+            borderRadius: '14px',
+            boxShadow: '0 4px 16px rgba(0,0,0,0.06), 0 1px 3px rgba(0,0,0,0.04)',
+            border: '1px solid var(--border)',
+          }}
+        >
           <div
             style={{
               display: 'flex',
@@ -577,12 +586,14 @@ function MonthView({ current, getItemsForDate, onDayClick }) {
               onClick={() => onDayClick(date)}
               style={{
                 minHeight: '100px',
+                minWidth: 0,
                 padding: '8px',
                 borderRight: '1px solid var(--border)',
                 borderBottom: '1px solid var(--border)',
                 cursor: 'pointer',
-                transition: 'background 0.15s',
+                transition: 'background 0.18s ease, box-shadow 0.18s ease',
                 background: baseBackground,
+                boxShadow: isToday ? 'inset 0 0 0 1px rgba(99,102,241,0.15)' : 'none',
               }}
               onMouseEnter={(event) => {
                 event.currentTarget.style.background = 'var(--bg-3)';
@@ -602,7 +613,7 @@ function MonthView({ current, getItemsForDate, onDayClick }) {
                   marginBottom: '4px',
                   fontSize: '13px',
                   fontWeight: isToday ? 700 : 400,
-                  background: isToday ? 'var(--accent)' : 'transparent',
+                  background: isToday ? 'linear-gradient(135deg, #6366f1, #818cf8)' : 'transparent',
                   color: isToday ? 'white' : 'var(--text)',
                 }}
               >
@@ -719,7 +730,7 @@ function WeekView({ current, getItemsForDate, onDayClick, isManager, onClickEven
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  background: isToday ? 'var(--accent)' : 'transparent',
+                  background: isToday ? 'linear-gradient(135deg, #6366f1, #818cf8)' : 'transparent',
                   color: isToday ? 'white' : 'var(--text)',
                   fontWeight: isToday ? 700 : 400,
                   fontSize: '14px',
@@ -869,7 +880,6 @@ function EventForm({ initial, members, onSave, onCancel, saving = false }) {
     
     setInvitingGuest(true);
     try {
-      // Send notification email to guest
       await api.post('/calendar/notify-guest', {
         guest_email: form.guest_email,
         event_title: form.title,
@@ -995,4 +1005,3 @@ function EventForm({ initial, members, onSave, onCancel, saving = false }) {
     </div>
   );
 }
-  

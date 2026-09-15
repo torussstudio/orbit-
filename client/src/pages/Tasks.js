@@ -112,19 +112,21 @@ export default function Tasks({ project: propProject }) {
     }
   };
 
-  // Monthly filter helpers
-  const getMonthKey = (dateStr) => (dateStr ? dateStr.slice(0, 7) : null);
+  // Monthly filter helpers — filter by due date (falls back to created date
+  // for tasks that have no due date set, so they still show up somewhere)
+  const getMonthKey = (t) => {
+    const dateStr = t?.due_date || t?.created_at;
+    return dateStr ? dateStr.slice(0, 7) : null;
+  };
 
   const allMonthKeys = [
     ...new Set([
-      ...tasks.map((t) => getMonthKey(t.created_at)).filter(Boolean),
+      ...tasks.map((t) => getMonthKey(t)).filter(Boolean),
       currentMonthKey,
     ]),
   ].sort((a, b) => a.localeCompare(b));
 
-  const filteredTasks = tasks.filter(
-    (t) => getMonthKey(t.created_at) === selectedMonth
-  );
+  const filteredTasks = tasks.filter((t) => getMonthKey(t) === selectedMonth);
 
   // Main tasks vs sub tasks (a sub task has parent_task_id set)
   const mainTasks = filteredTasks.filter((t) => !t.parent_task_id);
@@ -160,8 +162,10 @@ export default function Tasks({ project: propProject }) {
       <div
         style={{
           display: "flex",
+          flexWrap: "wrap",
           justifyContent: "space-between",
           alignItems: "center",
+          rowGap: "12px",
           position: "sticky",
           top: 0,
           zIndex: 30,
@@ -171,7 +175,7 @@ export default function Tasks({ project: propProject }) {
         }}
       >
                 {/* Left: Board / List toggle */}
-        <div style={{ display: "flex", gap: "8px" }}>
+        <div style={{ display: "flex", gap: "8px", flexShrink: 0 }}>
           <button
             className={`btn btn-ghost btn-sm ${view === "list" ? "active" : ""}`}
             onClick={() => setView("list")}
@@ -197,7 +201,16 @@ export default function Tasks({ project: propProject }) {
         </div>
 
         {/* Right: Month navigator + Add Task */}
-        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+        <div
+          style={{
+            display: "flex",
+            flexWrap: "wrap",
+            alignItems: "center",
+            justifyContent: "flex-end",
+            gap: "10px",
+            rowGap: "8px",
+          }}
+        >
           {/* ‹ Prev */}
           <button
             onClick={() => {
@@ -239,6 +252,7 @@ export default function Tasks({ project: propProject }) {
               fontSize: "12px",
               fontWeight: 600,
               minWidth: "140px",
+              flexShrink: 0,
             }}
           >
             {allMonthKeys.map((key) => (
@@ -287,7 +301,8 @@ export default function Tasks({ project: propProject }) {
               borderRadius: "10px",
               padding: "2px 8px",
               color: "var(--text-3)",
-              textWrap: "nowrap"
+              whiteSpace: "nowrap",
+              flexShrink: 0,
             }}
           >
             {mainTasks.length} task{mainTasks.length !== 1 ? "s" : ""}
@@ -300,6 +315,7 @@ export default function Tasks({ project: propProject }) {
                 width: "1px",
                 height: "20px",
                 background: "var(--border)",
+                flexShrink: 0,
               }}
             />
           )}
@@ -308,7 +324,7 @@ export default function Tasks({ project: propProject }) {
           {isManager && (
             <button
               className="btn btn-primary btn-sm"
-              style={{ textWrap: "nowrap"}}
+              style={{ whiteSpace: "nowrap", flexShrink: 0 }}
               onClick={() => {
                 setEditing(null);
                 setShowModal(true);
@@ -362,9 +378,10 @@ export default function Tasks({ project: propProject }) {
             setEditing(null);
           }}
         >
-          <TaskForm
+                  <TaskForm
             initial={editing}
             members={members.filter((m) => projectMemberIds.has(m.id))}
+            allMembers={members}
             clusters={clusters}
             stages={stages}
             onSave={handleSave}

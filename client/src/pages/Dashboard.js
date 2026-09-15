@@ -660,8 +660,12 @@ function DevDash({ data }) {
     });
   };
 
+  // Stat cards count every task assigned to this member — main tasks
+  // AND sub-tasks — not just main tasks. A member's work is very often
+  // entirely sub-tasks (see: Vishnu's dashboard), so basing these on
+  // mainTasks alone left the stat cards at 0 even with a full task list.
   const byStage = {};
-  mainTasks.forEach((t) => {
+  myTasks.forEach((t) => {
     byStage[t.stage] = (byStage[t.stage] || 0) + 1;
   });
 
@@ -669,7 +673,7 @@ function DevDash({ data }) {
     <>
       <div className="stats-grid">
         <div className="stat-card">
-          <div className="stat-value">{mainTasks.length}</div>
+          <div className="stat-value">{myTasks.length}</div>
           <div className="stat-label">My Active Tasks</div>
         </div>
         <div className="stat-card">
