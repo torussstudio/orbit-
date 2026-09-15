@@ -966,7 +966,7 @@ export default function TaskDetail() {
               ["Assignee", task.assignee_name || "—"],
               ["Priority", task.priority],
               ["Due Date", formatDate(task.due_date)],
-              ["Cluster", task.cluster_name || "—"],
+              ["Cluster", task.cluster_name || "No cluster"],
               ["Created", formatDate(task.created_at)],
               ...(task.subtasks?.some((s) => s.time_taken)
                 ? [

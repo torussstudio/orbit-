@@ -48,12 +48,14 @@ export default function TaskForm({ initial, members, allMembers, clusters, stage
       setTimeTakenError('Please enter time taken before moving to In Review.');
       return;
     }
-    // Due date is sent for sub tasks, and for simple main tasks with
-    // subtasks disabled — a main task with subtasks enabled still
-    // derives its due date server-side from its sub tasks.
+    // Due date is sent for sub tasks, for simple main tasks with
+    // subtasks disabled, and when editing an existing main task
+    // (its due date field is shown then too) — a *new* main task
+    // with subtasks enabled still derives its due date server-side
+    // from its sub tasks, so it's excluded here.
     const { due_date, ...rest } = form;
     const payload = { ...rest, time_taken: form.time_taken ? parseInt(form.time_taken) : null };
-    if ((isSubtaskForm || !hasSubtasks) && due_date) {
+    if ((isSubtaskForm || !hasSubtasks || initial) && due_date) {
       payload.due_date = due_date;
     }
     onSave(payload);
@@ -143,6 +145,52 @@ export default function TaskForm({ initial, members, allMembers, clusters, stage
             <label className="form-label" style={{ margin: 0 }}>
               Assignees <span style={{ color: 'var(--danger)' }}>*</span>
             </label>
+            {allActiveMembers.length ? (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                {allActiveMembers.map(m => (
+                  <label key={m.id} style={chipStyle(form.assignee_ids.includes(m.id))}>
+                    <input type="checkbox" checked={form.assignee_ids.includes(m.id)} onChange={() => toggleAssignee(m.id)} style={{ display: 'none' }} />
+                    {m.name}
+                  </label>
+                ))}
+              </div>
+            ) : (
+              <div style={{ fontSize: '12px', color: 'var(--text-3)', padding: '10px', background: 'var(--bg-2, var(--bg-3))', borderRadius: '6px' }}>
+                No members available to assign.
+              </div>
+            )}
+            {assigneeError && (
+              <div style={{ color: 'var(--danger)', fontSize: '12px' }}>⚠ {assigneeError}</div>
+            )}
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <label className="form-label" style={{ margin: 0 }}>Due Date</label>
+            <DatePicker
+              value={form.due_date}
+              onChange={val => setForm(f => ({ ...f, due_date: val }))}
+              placeholder="dd-mm-yyyy"
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Editing an existing main task that has subtasks enabled:
+          assignees and due date are editable here too. */}
+      {!isSubtaskForm && initial && hasSubtasks && (
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '16px',
+            padding: '14px',
+            background: 'var(--bg-3)',
+            borderRadius: '8px',
+            border: '1px solid var(--border)',
+          }}
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <label className="form-label" style={{ margin: 0 }}>Assignees</label>
             {allActiveMembers.length ? (
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
                 {allActiveMembers.map(m => (
