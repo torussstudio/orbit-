@@ -98,21 +98,13 @@ app.use(
   cors({
     origin(origin, callback) {
       /*
-       * Allow non-browser/no-origin requests
-       * only in development.
+       * Allow requests without an Origin header.
        */
-      if (
-        !origin &&
-        !config.isProd
-      ) {
-        return callback(
-          null,
-          true,
-        );
+      if (!origin) {
+        return callback(null, true);
       }
 
       if (
-        origin &&
         config.clientOrigins.includes(
           origin,
         )
