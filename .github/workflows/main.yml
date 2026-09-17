@@ -41,6 +41,8 @@ jobs:
             -o BatchMode=yes \
             "$VPS_USER@$VPS_HOST" 'bash -s' <<'REMOTE'
           set -euo pipefail
+                    echo "==> VPS deployment session started"
+          set -x
 
           cd /opt/toruss/projects/Orbit
 
