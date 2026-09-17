@@ -2,18 +2,14 @@ const router = require("express").Router();
 const db = require("../db");
 const { auth } = require("../middleware/auth");
 
-router.get("/", auth, async (req, res) => {
-  const { q } = req.query;
-  if (!q || q.trim().length < 2) return res.json({ projects: [], tasks: [], members: [] });
-
-  const search = `%${q.trim().toLowerCase()}%`;
-
+router.get("/", auth, async (req, res, next) => {
   try {
+    const { q } = req.query;
+    if (!q || q.trim().length < 2) return res.json({ projects: [], tasks: [], members: [] });
+    const search = `%${q.trim().toLowerCase()}%`;
     const [projects, tasks, members] = await Promise.all([
       db.query(
-        `SELECT id, name, status, description FROM projects
-         WHERE LOWER(name) LIKE $1 OR LOWER(description) LIKE $1
-         ORDER BY name LIMIT 5`,
+        `SELECT id, name, status, description FROM projects WHERE LOWER(name) LIKE $1 OR LOWER(description) LIKE $1 ORDER BY name LIMIT 5`,
         [search]
       ),
       db.query(
@@ -24,21 +20,12 @@ router.get("/", auth, async (req, res) => {
         [search]
       ),
       db.query(
-        `SELECT id, name, email, role FROM members
-         WHERE active = true AND (LOWER(name) LIKE $1 OR LOWER(email) LIKE $1)
-         ORDER BY name LIMIT 5`,
+        `SELECT id, name, email, role FROM members WHERE active = true AND (LOWER(name) LIKE $1 OR LOWER(email) LIKE $1) ORDER BY name LIMIT 5`,
         [search]
       ),
     ]);
-
-    res.json({
-      projects: projects.rows,
-      tasks: tasks.rows,
-      members: members.rows,
-    });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
+    res.json({ projects: projects.rows, tasks: tasks.rows, members: members.rows });
+  } catch (err) { next(err); }
 });
 
 module.exports = router;

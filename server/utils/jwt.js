@@ -1,10 +1,13 @@
 const jwt = require("jsonwebtoken");
+const { config } = require("../config/env");
 
-function requireEnv(name, fallback) {
-  const value = process.env[name] || fallback;
+function requireSecret(name, value) {
   if (!value) {
-    throw new Error(`Missing required environment variable: ${name}`);
+    throw new Error(
+      `Missing required JWT secret: ${name}`,
+    );
   }
+
   return value;
 }
 
@@ -12,25 +15,39 @@ function parseExpiresInToMs(expiresIn) {
   if (typeof expiresIn === "number") {
     return expiresIn * 1000;
   }
+
   if (typeof expiresIn !== "string") {
     return null;
   }
 
-  const m = expiresIn.trim().match(/^(\d+)\s*([smhd])$/i);
-  if (!m) return null;
-  const n = Number(m[1]);
-  const unit = m[2].toLowerCase();
-  if (!Number.isFinite(n)) return null;
+  const value = expiresIn.trim();
+
+  const match = value.match(/^(\d+)\s*([smhd])$/i);
+
+  if (!match) {
+    return null;
+  }
+
+  const amount = Number(match[1]);
+  const unit = match[2].toLowerCase();
+
+  if (!Number.isFinite(amount)) {
+    return null;
+  }
 
   switch (unit) {
     case "s":
-      return n * 1000;
+      return amount * 1000;
+
     case "m":
-      return n * 60 * 1000;
+      return amount * 60 * 1000;
+
     case "h":
-      return n * 60 * 60 * 1000;
+      return amount * 60 * 60 * 1000;
+
     case "d":
-      return n * 24 * 60 * 60 * 1000;
+      return amount * 24 * 60 * 60 * 1000;
+
     default:
       return null;
   }
@@ -38,71 +55,84 @@ function parseExpiresInToMs(expiresIn) {
 
 function nowPlusExpiresIn(expiresIn) {
   const ms = parseExpiresInToMs(expiresIn);
-  if (!ms) return null;
+
+  if (!ms) {
+    return null;
+  }
+
   return new Date(Date.now() + ms);
 }
 
 function accessSecret() {
-  return requireEnv("JWT_ACCESS_SECRET", process.env.JWT_SECRET);
+  return requireSecret(
+    "JWT_ACCESS_SECRET",
+    config.jwtAccessSecret,
+  );
 }
 
 function refreshSecret() {
-  return requireEnv("JWT_REFRESH_SECRET", process.env.JWT_SECRET);
+  return requireSecret(
+    "JWT_REFRESH_SECRET",
+    config.jwtRefreshSecret,
+  );
 }
 
 function accessExpiresIn() {
-  return process.env.JWT_ACCESS_EXPIRES_IN || "5m";
+  return config.accessTokenExpiresIn;
 }
 
 function refreshExpiresIn() {
-  // ⚠️ TEMP (simple/insecure mode — see server/routes/auth.js top comment):
-  // long-lived on purpose so sessions behave like WhatsApp/Telegram Web —
-  // stay logged in until the user explicitly logs out.
-  return process.env.JWT_REFRESH_EXPIRES_IN || "180d";
+  return config.refreshTokenExpiresIn;
 }
 
 function signAccessToken(user) {
-  const payload = {
-    sub: String(user.id),
-    id: user.id,
-    role: user.role,
-  };
-
-return jwt.sign(payload, accessSecret(), {
-  expiresIn: accessExpiresIn(),
-  issuer: "orbit-api",
-  audience: "orbit-client",
-});
+  return jwt.sign(
+    {
+      sub: String(user.id),
+      role: user.role,
+      type: "access",
+    },
+    accessSecret(),
+    {
+      expiresIn: accessExpiresIn(),
+      issuer: "orbit-api",
+      audience: "orbit-client",
+      algorithm: "HS256",
+    },
+  );
 }
 
 function signRefreshToken(user, jti) {
-  const payload = {
-    sub: String(user.id),
-    id: user.id,
-    role: user.role,
-    jti,
-    typ: "refresh",
-  };
-
- return jwt.sign(payload, refreshSecret(), {
-  expiresIn: refreshExpiresIn(),
-  issuer: "orbit-api",
-  audience: "orbit-client",
-});
+  return jwt.sign(
+    {
+      sub: String(user.id),
+      jti,
+      type: "refresh",
+    },
+    refreshSecret(),
+    {
+      expiresIn: refreshExpiresIn(),
+      issuer: "orbit-api",
+      audience: "orbit-client",
+      algorithm: "HS256",
+    },
+  );
 }
 
 function verifyAccessToken(token) {
   return jwt.verify(token, accessSecret(), {
-  issuer: "orbit-api",
-  audience: "orbit-client",
-});
+    issuer: "orbit-api",
+    audience: "orbit-client",
+    algorithms: ["HS256"],
+  });
 }
 
 function verifyRefreshToken(token) {
- return jwt.verify(token, refreshSecret(), {
-  issuer: "orbit-api",
-  audience: "orbit-client",
-});
+  return jwt.verify(token, refreshSecret(), {
+    issuer: "orbit-api",
+    audience: "orbit-client",
+    algorithms: ["HS256"],
+  });
 }
 
 function computeAccessExpiry() {
@@ -123,4 +153,3 @@ module.exports = {
   accessExpiresIn,
   refreshExpiresIn,
 };
-

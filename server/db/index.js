@@ -35,9 +35,11 @@ async function shutdownPool(signal) {
     process.exit(0);
   }
 }
-process.on("SIGINT", () => shutdownPool("SIGINT"));
-process.on("SIGTERM", () => shutdownPool("SIGTERM"));
-process.once("SIGUSR2", () => shutdownPool("SIGUSR2")); // nodemon restart
+if (!process.env.VERCEL) {
+  process.on("SIGINT", () => shutdownPool("SIGINT"));
+  process.on("SIGTERM", () => shutdownPool("SIGTERM"));
+  process.once("SIGUSR2", () => shutdownPool("SIGUSR2"));
+}
 
 async function getColumnType(tableName, columnName = "id") {
   const { rows } = await pool.query(
@@ -416,6 +418,27 @@ const initDB = async () => {
       WHERE stage != 'Deployed'
     )
     WHERE custom_stages @> '["Deployed"]'::jsonb
+  `);
+
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_refresh_tokens_member_id
+    ON refresh_tokens (member_id)
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_refresh_tokens_jti
+    ON refresh_tokens (jti)
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_refresh_tokens_expires_at
+    ON refresh_tokens (expires_at)
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_tasks_project_id
+    ON tasks (project_id)
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_project_members_member
+    ON project_members (member_id)
   `);
 
   console.log("Database schema ready");

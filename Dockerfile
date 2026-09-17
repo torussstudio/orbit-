@@ -7,8 +7,8 @@ RUN npm ci
 
 COPY client/ ./
 
-ARG REACT_APP_API_URL
-ENV REACT_APP_API_URL=$REACT_APP_API_URL
+ARG VITE_API_URL
+ENV VITE_API_URL=$VITE_API_URL
 
 RUN npm run build
 
@@ -23,7 +23,7 @@ COPY server/package*.json ./server/
 RUN cd server && npm ci --omit=dev
 
 COPY server/ ./server/
-COPY --from=frontend-build /app/client/build /usr/share/nginx/html
+COPY --from=frontend-build /app/client/dist /usr/share/nginx/html
 
 COPY docker/nginx.conf /etc/nginx/http.d/default.conf
 COPY docker/supervisord.conf /etc/supervisord.conf
