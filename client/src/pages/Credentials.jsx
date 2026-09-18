@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
-import axios from "../lib/axios";
-import Modal from "../components/Modal";
-import ConfirmModal from "../components/ConfirmModal";
-import Select from "../components/Select";
-import { Loader } from "../components/Loader";
+import axios from "../api/client";
+import Modal from "../components/ui/Modal";
+import ConfirmModal from "../components/ui/ConfirmModal";
+import Select from "../components/ui/Select";
+import { Loader } from "../components/ui/Loader";
 
 const INITIAL_CLUSTER_FORM = {
   name: "",
