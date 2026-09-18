@@ -103,6 +103,18 @@ const createProject = async (user, data) => {
       }
     }
     await client.query("COMMIT");
+    if (member_ids?.length) {
+      const { createNotification } = require("../utils/pushNotify");
+      member_ids.forEach((memberId) => {
+        createNotification(memberId, "Added to Project", `You have been added to: ${proj.name}`, {
+          type: "project_member_added",
+          entityId: proj.id,
+          entityType: "project",
+          eventKey: `project-member-added:${proj.id}:${memberId}:${proj.created_at}`,
+          url: `/projects/${proj.id}`,
+        }).catch(() => {});
+      });
+    }
     return proj;
   } catch (e) {
     await client.query("ROLLBACK");
@@ -126,6 +138,9 @@ const updateProject = async (projectId, data) => {
   const client = await db.connect();
   try {
     await client.query("BEGIN");
+    const { rows: previousMembers } = member_ids
+      ? await client.query("SELECT member_id FROM project_members WHERE project_id=$1", [projectId])
+      : { rows: [] };
     const { rows } = await client.query(
       `UPDATE projects SET name=$1,client_name=$2,description=$3,status=$4,start_date=$5,end_date=$6,custom_stages=$7
        WHERE id=$8 RETURNING *`,
@@ -152,6 +167,33 @@ const updateProject = async (projectId, data) => {
       }
     }
     await client.query("COMMIT");
+
+    if (member_ids) {
+      const previousIds = new Set(previousMembers.map((row) => String(row.member_id)));
+      const nextIds = new Set(member_ids.map((id) => String(id)));
+      const added = member_ids.filter((id) => !previousIds.has(String(id)));
+      const removed = [...previousIds].filter((id) => !nextIds.has(id));
+      const { createNotification } = require("../utils/pushNotify");
+
+      added.forEach((memberId) => {
+        createNotification(memberId, "Added to Project", `You have been added to: ${rows[0].name}`, {
+          type: "project_member_added",
+          entityId: projectId,
+          entityType: "project",
+          eventKey: `project-member-added:${projectId}:${memberId}:${rows[0].updated_at || rows[0].created_at}`,
+          url: `/projects/${projectId}`,
+        }).catch(() => {});
+      });
+      removed.forEach((memberId) => {
+        createNotification(memberId, "Removed from Project", `You have been removed from: ${rows[0].name}`, {
+          type: "project_member_removed",
+          entityId: projectId,
+          entityType: "project",
+          eventKey: `project-member-removed:${projectId}:${memberId}:${rows[0].updated_at || rows[0].created_at}`,
+          url: "/projects",
+        }).catch(() => {});
+      });
+    }
     return rows[0];
   } catch (e) {
     await client.query("ROLLBACK");

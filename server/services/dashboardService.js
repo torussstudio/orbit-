@@ -11,7 +11,8 @@ async function getDashboardData(user) {
         (SELECT COUNT(*) FROM tasks WHERE project_id=p.id AND stage='Done') as done_tasks
         FROM projects p WHERE status!='archived' ORDER BY created_at DESC LIMIT 10`),
       db.query(`SELECT stage, COUNT(*) as count FROM tasks WHERE parent_task_id IS NULL GROUP BY stage ORDER BY count DESC`),
-      db.query(`SELECT t.id,t.title,t.due_date,t.stage,t.project_id,p.name as project_name, assignee_agg.assignee_name
+            db.query(`SELECT t.id,t.title,t.due_date,t.stage,t.project_id,t.parent_task_id,p.name as project_name, assignee_agg.assignee_name,
+        (SELECT title FROM tasks pt WHERE pt.id = t.parent_task_id) as parent_title
         FROM tasks t JOIN projects p ON t.project_id=p.id
         LEFT JOIN LATERAL (
           SELECT STRING_AGG(m.name, ', ' ORDER BY m.name) AS assignee_name

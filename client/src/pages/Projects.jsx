@@ -6,6 +6,7 @@ import { formatDate } from '../utils/helpers';
 import Modal from '../components/ui/Modal';
 import ConfirmModal from '../components/ui/ConfirmModal';
 import ProjectForm from '../components/projects/ProjectForm';
+import Loader from '../components/ui/Loader';
 
 export default function Projects() {
   const { isManager } = useAuth();
@@ -163,7 +164,7 @@ export default function Projects() {
   const activeProjects = projects.filter(p => p.status !== 'archived');
   const archivedProjects = projects.filter(p => p.status === 'archived');
 
-  if (loading) return <div className="loading-screen"><div className="spinner" /></div>;
+  if (loading) return <Loader label="Loading projects" size="lg" variant="page" />;
 
   return (
     <>
@@ -330,7 +331,7 @@ function ProjectCard({ project: p, isManager, onEdit, editLoading, onArchive, on
               {isManager && (
                 <>
                   <button className="btn btn-ghost btn-sm" onClick={onEdit} disabled={editLoading}>
-                    {editLoading ? 'Loading…' : 'Edit'}
+                    {editLoading ? <Loader label="Loading" size="sm" variant="button" /> : 'Edit'}
                   </button>
                   <button
                     className="btn btn-ghost btn-sm"

@@ -15,8 +15,10 @@
  */
 
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import api from '../../api/client';
 import { useAuth } from '../../context/AuthContext';
+import { LoadingSkeleton } from './Loader';
 
 // ── VAPID key decoder ─────────────────────────────────────────────
 function urlBase64ToUint8Array(base64String) {
@@ -27,32 +29,45 @@ function urlBase64ToUint8Array(base64String) {
 
 // ── Push subscription save ────────────────────────────────────────
 async function savePushSubscription(subscription) {
-  const subJson = subscription.toJSON();
+  const subJson = typeof subscription.toJSON === 'function'
+    ? subscription.toJSON()
+    : subscription;
   await api.post('/notifications/push-subscribe', subJson);
 }
 
 export default function NotificationBell() {
   const { user } = useAuth();
+  const navigate = useNavigate();
 
   const [notifications, setNotifications] = useState([]);
   const [unreadCount,   setUnreadCount]   = useState(0);
   const [showDropdown,  setShowDropdown]  = useState(false);
   const [loading,       setLoading]       = useState(false);
+  const [loadError,     setLoadError]     = useState('');
+  const [actionLoading, setActionLoading] = useState(null);
   const [pushStatus,    setPushStatus]    = useState('idle'); // idle | pending | granted | denied | unsupported
 
   const swRegRef       = useRef(null);   // holds the ServiceWorkerRegistration
   const subscribedRef  = useRef(false);  // prevents double-subscription in React StrictMode
+  const setupUserRef   = useRef(null);
   const dropdownRef    = useRef(null);
 
   // ── Load notifications ──────────────────────────────────────────
   const loadNotifications = useCallback(async () => {
     try {
       setLoading(true);
-      const { data } = await api.get('/notifications');
+      setLoadError('');
+      const [{ data }, { data: countData }] = await Promise.all([
+        api.get('/notifications'),
+        api.get('/notifications/unread-count'),
+      ]);
       const notifs = Array.isArray(data) ? data : [];
       setNotifications(notifs);
-      setUnreadCount(notifs.filter((n) => !n.read).length);
+      setUnreadCount(Number.isInteger(countData?.count)
+        ? countData.count
+        : notifs.filter((n) => !n.read).length);
     } catch (err) {
+      setLoadError(err.response?.data?.error || 'Notifications could not be loaded.');
       console.error('[NotificationBell] Failed to load notifications:', err);
     } finally {
       setLoading(false);
@@ -61,10 +76,10 @@ export default function NotificationBell() {
 
   // ── Register SW + subscribe to push ────────────────────────────
   const setupPush = useCallback(async () => {
-    if (subscribedRef.current) return; // already done this session
+    if (subscribedRef.current && setupUserRef.current === user?.id) return;
 
     // Guard: browser support
-    if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+    if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) {
       setPushStatus('unsupported');
       return;
     }
@@ -97,19 +112,17 @@ export default function NotificationBell() {
         return;
       }
 
-      // 4. Get or create a push subscription
-      // Always unsubscribe first so we get a fresh key tied to this login session.
+      // Reuse the browser subscription when possible so other devices remain active.
       const existing = await reg.pushManager.getSubscription();
-      if (existing) await existing.unsubscribe();
-
-      const subscription = await reg.pushManager.subscribe({
-        userVisibleOnly:      true,
+      const subscription = existing || await reg.pushManager.subscribe({
+        userVisibleOnly: true,
         applicationServerKey: urlBase64ToUint8Array(vapidData.publicKey),
       });
 
       // 5. Save to server
       await savePushSubscription(subscription);
       subscribedRef.current = true;
+      setupUserRef.current = user?.id;
 
       console.log('[NotificationBell] ✅ Push subscribed for', user?.name);
     } catch (err) {
@@ -135,7 +148,11 @@ export default function NotificationBell() {
 
   // ── Main effect: load + poll + subscribe (runs when user logs in) ─
   useEffect(() => {
-    if (!user) return;
+    if (!user) {
+      subscribedRef.current = false;
+      setupUserRef.current = null;
+      return undefined;
+    }
 
     loadNotifications();
     const interval = setInterval(loadNotifications, 30_000);
@@ -149,6 +166,12 @@ export default function NotificationBell() {
     };
   }, [user, loadNotifications, setupPush]);
 
+  useEffect(() => {
+    const refresh = () => loadNotifications();
+    window.addEventListener('orbit:notifications-updated', refresh);
+    return () => window.removeEventListener('orbit:notifications-updated', refresh);
+  }, [loadNotifications]);
+
   // ── Close dropdown on outside click ────────────────────────────
   useEffect(() => {
     const handler = (e) => {
@@ -161,31 +184,53 @@ export default function NotificationBell() {
   }, []);
 
   // ── Actions ─────────────────────────────────────────────────────
-  const handleMarkAsRead = async (id) => {
+  const handleMarkAsRead = async (id, navigableUrl) => {
+    if (actionLoading) return;
+    setActionLoading(id);
     try {
+      setNotifications((current) => current.map((notification) => (
+        notification.id === id ? { ...notification, read: true } : notification
+      )));
+      setUnreadCount((count) => Math.max(0, count - 1));
       await api.patch(`/notifications/${id}/read`);
-      loadNotifications();
+      if (navigableUrl) navigate(navigableUrl);
     } catch (err) {
       console.error('[NotificationBell] Mark as read failed:', err);
+      loadNotifications();
+    } finally {
+      setActionLoading(null);
     }
   };
 
   const handleMarkAllRead = async () => {
+    if (actionLoading) return;
+    setActionLoading('all');
     try {
+      setNotifications((current) => current.map((notification) => ({ ...notification, read: true })));
+      setUnreadCount(0);
       await api.patch('/notifications/read-all');
-      loadNotifications();
     } catch (err) {
       console.error('[NotificationBell] Mark all read failed:', err);
+      loadNotifications();
+    } finally {
+      setActionLoading(null);
     }
   };
 
   const handleDelete = async (id, e) => {
     e.stopPropagation();
+    if (actionLoading) return;
+    setActionLoading(id);
     try {
+      const deleted = notifications.find((notification) => notification.id === id);
       await api.delete(`/notifications/${id}`);
-      loadNotifications();
+      setNotifications((current) => current.filter((notification) => notification.id !== id));
+      if (deleted && !deleted.read) setUnreadCount((count) => Math.max(0, count - 1));
     } catch (err) {
       console.error('[NotificationBell] Delete failed:', err);
+      loadNotifications();
+    } finally {
+      setActionLoading(null);
     }
   };
 
@@ -238,7 +283,7 @@ export default function NotificationBell() {
       {showDropdown && (
         <div style={{
           position: 'absolute', top: '40px', right: '0px',
-          width: '320px', maxHeight: '440px',
+          width: 'min(320px, calc(100vw - 24px))', maxHeight: '440px',
           background: 'var(--bg-2)', borderRadius: '12px',
           border: '1px solid var(--border)', boxShadow: 'var(--shadow)',
           zIndex: 1000, overflow: 'hidden',
@@ -256,6 +301,7 @@ export default function NotificationBell() {
             {unreadCount > 0 && (
               <button
                 onClick={handleMarkAllRead}
+                disabled={actionLoading !== null}
                 style={{
                   background: 'none', border: 'none', cursor: 'pointer',
                   color: 'var(--accent)', fontSize: '11px', fontWeight: 600,
@@ -279,10 +325,15 @@ export default function NotificationBell() {
 
           {/* List */}
           <div style={{ overflowY: 'auto', flex: 1 }}>
-            {loading && notifications.length === 0 ? (
-              <div style={{ padding: '24px 16px', textAlign: 'center', color: 'var(--text-3)', fontSize: '13px' }}>
-                Loading…
+              {loading && notifications.length === 0 ? (
+                <div className="orbit-notification-skeleton-list" aria-label="Loading notifications">
+                  <LoadingSkeleton lines={3} />
               </div>
+              ) : loadError ? (
+                <div style={{ padding: '24px 16px', textAlign: 'center', color: 'var(--danger)', fontSize: '13px' }}>
+                  {loadError}
+                  <button className="btn btn-ghost btn-sm" onClick={loadNotifications} style={{ display: 'block', margin: '10px auto 0' }}>Retry</button>
+                </div>
             ) : notifications.length === 0 ? (
               <div style={{ padding: '24px 16px', textAlign: 'center', color: 'var(--text-3)', fontSize: '13px' }}>
                 No notifications
@@ -298,7 +349,7 @@ export default function NotificationBell() {
                     cursor: n.read ? 'default' : 'pointer',
                     transition: 'background 0.15s',
                   }}
-                  onClick={() => !n.read && handleMarkAsRead(n.id)}
+                  onClick={() => !n.read && handleMarkAsRead(n.id, n.metadata?.url)}
                 >
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '8px' }}>
                     <div style={{ flex: 1 }}>
@@ -326,6 +377,7 @@ export default function NotificationBell() {
                     {/* Delete button */}
                     <button
                       onClick={(e) => handleDelete(n.id, e)}
+                      disabled={actionLoading !== null}
                       title="Delete"
                       style={{
                         background: 'none', border: 'none', cursor: 'pointer',

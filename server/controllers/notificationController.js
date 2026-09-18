@@ -4,6 +4,10 @@ async function getNotifications(req, res, next) {
   try { res.json(await notificationService.getNotifications(req.user.id)); } catch (err) { next(err); }
 }
 
+async function getUnreadCount(req, res, next) {
+  try { res.json({ count: await notificationService.getUnreadCount(req.user.id) }); } catch (err) { next(err); }
+}
+
 async function markAllRead(req, res, next) {
   try { res.json(await notificationService.markAllRead(req.user.id)); } catch (err) { next(err); }
 }
@@ -50,4 +54,4 @@ function getVapidPublicKey(req, res) {
   res.json({ publicKey: key });
 }
 
-module.exports = { getNotifications, markAllRead, markOneRead, deleteNotification, pushSubscribe, pushUnsubscribe, getVapidPublicKey };
+module.exports = { getNotifications, getUnreadCount, markAllRead, markOneRead, deleteNotification, pushSubscribe, pushUnsubscribe, getVapidPublicKey };

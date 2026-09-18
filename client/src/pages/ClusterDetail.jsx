@@ -4,6 +4,7 @@ import api from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { formatDate } from '../utils/helpers';
 import Modal from '../components/ui/Modal';
+import Loader from '../components/ui/Loader';
 
 export default function ClusterDetail() {
   const { id: projectId, clusterId } = useParams();
@@ -32,7 +33,7 @@ export default function ClusterDetail() {
 
   const toggleRework = id => setReworkTaskIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
 
-  if (loading) return <div className="loading-screen"><div className="spinner" /></div>;
+  if (loading) return <Loader label="Loading cluster" size="lg" variant="page" />;
   if (!cluster) return <div className="page-body">Cluster not found.</div>;
 
   return (
@@ -61,7 +62,7 @@ export default function ClusterDetail() {
         </div>
       </div>
 
-      <div className="page-body" style={{ display: 'grid', gridTemplateColumns: '1fr 300px', gap: '24px', alignItems: 'start' }}>
+      <div className="page-body cluster-detail-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 300px', gap: '24px', alignItems: 'start' }}>
         {/* Tasks */}
         <div>
           <div className="card" style={{ marginBottom: '16px' }}>
@@ -159,8 +160,8 @@ export default function ClusterDetail() {
           <div className="modal-actions">
             <button className="btn btn-ghost" onClick={() => setShowReview(false)}>Cancel</button>
             {reworkTaskIds.length > 0
-              ? <button className="btn btn-danger" onClick={() => handleReview('needs_rework')} disabled={submitting}>Send for Rework</button>
-              : <button className="btn btn-primary" style={{ background: 'var(--success)', borderColor: 'var(--success)' }} onClick={() => handleReview('approved')} disabled={submitting}>Approve All</button>
+              ? <button className="btn btn-danger" onClick={() => handleReview('needs_rework')} disabled={submitting}>{submitting ? <Loader label="Sending..." size="sm" variant="button" /> : 'Send for Rework'}</button>
+              : <button className="btn btn-primary" style={{ background: 'var(--success)', borderColor: 'var(--success)' }} onClick={() => handleReview('approved')} disabled={submitting}>{submitting ? <Loader label="Approving..." size="sm" variant="button" /> : 'Approve All'}</button>
             }
           </div>
         </Modal>

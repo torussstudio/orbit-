@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
+import Loader from './Loader';
 
 export default function MemberFilter({
   members = [],
@@ -72,7 +73,6 @@ export default function MemberFilter({
           }}
         />
         
-        {/* Loading spinner */}
         {isLoading && (
           <div style={{
             position: 'absolute',
@@ -81,7 +81,7 @@ export default function MemberFilter({
             transform: 'translateY(-50%)',
             fontSize: '12px'
           }}>
-            ⟳
+            <Loader label="Loading members" size="sm" />
           </div>
         )}
       </div>

@@ -6,6 +6,7 @@ import { formatDate } from '../utils/helpers';
 import DatePicker from '../components/ui/DatePicker';
 import Modal from '../components/ui/Modal';
 import ConfirmModal from '../components/ui/ConfirmModal';
+import Loader from '../components/ui/Loader';
 
 const STATUS_COLORS = { draft: 'var(--text-3)', in_review: 'var(--accent-2)', approved: 'var(--success)', needs_rework: 'var(--danger)', completed: 'var(--success)' };
 
@@ -70,10 +71,10 @@ export default function Clusters({ project: propProject }) {
     }
   };
 
-  if (loading) return <div style={{ padding: '24px' }}><div className="spinner" /></div>;
+  if (loading) return <Loader label="Loading clusters" size="lg" variant="page" />;
 
   return (
-    <div style={{ padding: '24px 32px' }}>
+    <div className="clusters-page" style={{ padding: '24px 32px' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
         <div style={{ fontSize: '14px', color: 'var(--text-2)' }}>{clusters.length} cluster{clusters.length !== 1 ? 's' : ''}</div>
         {isManager && <button className="btn btn-primary btn-sm" onClick={() => { setEditing(null); setForm({ name: '', description: '', target_date: '' }); setShowModal(true); }}>+ New Cluster</button>}
@@ -104,7 +105,7 @@ export default function Clusters({ project: propProject }) {
                 {isManager && <>
                   {c.status === 'draft' || c.status === 'needs_rework' ? (
                     <button className="btn btn-ghost btn-sm" style={{ color: 'var(--accent-2)' }} onClick={() => handleSubmitReview(c.id)} disabled={submittingReview === c.id}>
-                      {submittingReview === c.id ? 'Submitting...' : 'Submit for Review'}
+                      {submittingReview === c.id ? <Loader label="Submitting..." size="sm" variant="button" /> : 'Submit for Review'}
                     </button>
                   ) : null}
                   <button className="btn btn-ghost btn-sm" onClick={() => { setEditing(c); setForm({ name: c.name, description: c.description||'', target_date: c.target_date||'' }); setShowModal(true); }}>Edit</button>
@@ -133,7 +134,7 @@ export default function Clusters({ project: propProject }) {
           <div className="modal-actions">
             <button className="btn btn-ghost" onClick={() => setShowModal(false)}>Cancel</button>
             <button className="btn btn-primary" onClick={handleSave} disabled={saving}>
-              {saving ? 'Saving...' : 'Save'}
+              {saving ? <Loader label="Saving..." size="sm" variant="button" /> : 'Save'}
             </button>
           </div>
         </Modal>

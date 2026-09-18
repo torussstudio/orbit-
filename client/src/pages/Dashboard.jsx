@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import api from "../api/client";
 import { useAuth } from "../context/AuthContext";
 import { formatDate, isOverdue } from "../utils/helpers";
+import Loader from "../components/ui/Loader";
 
 export default function Dashboard() {
   const { user, isManager } = useAuth();
@@ -25,9 +26,7 @@ export default function Dashboard() {
 
   if (loading)
     return (
-      <div className="loading-screen">
-        <div className="spinner" />
-      </div>
+      <Loader label="Loading dashboard" size="lg" variant="page" />
     );
 
   return (
@@ -449,7 +448,7 @@ function ManagerDash({ data }) {
           ) : (
             <div style={{ maxHeight: "320px", overflowY: "auto" }}>
               {data.overdue_tasks?.map((t) => (
-                <Link
+                                             <Link
                   to={`/projects/${t.project_id}/tasks/${t.id}`}
                   key={t.id}
                   style={{
@@ -460,7 +459,17 @@ function ManagerDash({ data }) {
                     fontSize: "13px",
                   }}
                 >
-                  <div style={{ color: "var(--text)" }}>{t.title}</div>
+                  <div
+                    style={{
+                      color: "var(--text)",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "6px",
+                    }}
+                  >
+                    {t.parent_title && <span style={{ fontSize: "11px" }}>📌</span>}
+                    {t.parent_title || t.title}
+                  </div>
                   <div
                     style={{
                       fontSize: "11px",

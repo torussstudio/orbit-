@@ -5,6 +5,7 @@ import { formatDate } from "../utils/helpers";
 import Modal from "../components/ui/Modal";
 import ConfirmModal from "../components/ui/ConfirmModal";
 import Select from "../components/ui/Select";
+import Loader from "../components/ui/Loader";
 
 export default function Members() {
   const { isManager } = useAuth();
@@ -143,9 +144,7 @@ export default function Members() {
 
   if (loading)
     return (
-      <div className="loading-screen">
-        <div className="spinner" />
-      </div>
+      <Loader label="Loading members" size="lg" variant="page" />
     );
 
   return (
@@ -444,7 +443,7 @@ export default function Members() {
               onClick={handleSave}
               disabled={saving}
             >
-              {saving ? "Saving..." : "Save Member"}
+              {saving ? <Loader label="Saving..." size="sm" variant="button" /> : "Save Member"}
             </button>
           </div>
         </Modal>

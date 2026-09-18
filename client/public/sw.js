@@ -33,7 +33,14 @@ self.addEventListener('notificationclick', (event) => {
   if (event.action === 'dismiss') return;
 
   // Deep-link to the URL carried in the notification payload
-  const url = event.notification.data?.url || '/';
+  const requestedUrl = event.notification.data?.url || '/';
+  let url = '/';
+  try {
+    const parsedUrl = new URL(requestedUrl, self.location.origin);
+    if (parsedUrl.origin === self.location.origin) {
+      url = parsedUrl.pathname + parsedUrl.search + parsedUrl.hash;
+    }
+  } catch (_) {}
 
   event.waitUntil(
     clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
@@ -53,20 +60,12 @@ self.addEventListener('notificationclick', (event) => {
 
 // Auto-refresh push subscription if the browser rotates it
 self.addEventListener('pushsubscriptionchange', (event) => {
-  event.waitUntil(
-    self.registration.pushManager.subscribe({
-      userVisibleOnly:      true,
-      applicationServerKey: event.oldSubscription?.options?.applicationServerKey,
-    }).then((newSubscription) => {
-      // Tell the app to save the new subscription
-      self.clients.matchAll().then((clients) => {
-        clients.forEach((client) => {
-          client.postMessage({
-            type:         'PUSH_SUBSCRIPTION_CHANGED',
-            subscription: newSubscription.toJSON(),
-          });
-        });
-      });
-    })
-  );
+  const newSubscription = event.newSubscription;
+  if (!newSubscription) return;
+  event.waitUntil(self.clients.matchAll().then((clients) => {
+    clients.forEach((client) => client.postMessage({
+      type: 'PUSH_SUBSCRIPTION_CHANGED',
+      subscription: newSubscription.toJSON(),
+    }));
+  }));
 });

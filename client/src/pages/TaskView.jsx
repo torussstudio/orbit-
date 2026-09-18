@@ -5,6 +5,7 @@ import { formatDate, isOverdue } from "../utils/helpers";
 import { StageBadge } from "./Dashboard";
 import Select from "../components/ui/Select";
 import Modal from "../components/ui/Modal";
+import Loader from "../components/ui/Loader";
 
 // Todo / In Progress switch instantly. In Review needs a time-taken
 // value first, so it's handled separately (see handleStageSelect) —
@@ -134,9 +135,7 @@ export default function TaskView() {
 
   if (loading)
     return (
-      <div className="loading-screen">
-        <div className="spinner" />
-      </div>
+      <Loader label="Loading tasks" size="lg" variant="page" />
     );
 
   return (

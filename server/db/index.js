@@ -41,6 +41,45 @@ if (!process.env.VERCEL) {
   process.once("SIGUSR2", () => shutdownPool("SIGUSR2"));
 }
 
+// ---------------------------------------------------------------------
+// Migration tracking — every one-time backfill/data-migration below is
+// gated on this table so it runs exactly once, ever, instead of being
+// replayed (with a full-table scan) on every single server boot.
+// ---------------------------------------------------------------------
+async function ensureMigrationsTable() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS schema_migrations (
+      name VARCHAR(255) PRIMARY KEY,
+      run_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+}
+
+async function hasMigrationRun(name) {
+  const { rows } = await pool.query(
+    `SELECT 1 FROM schema_migrations WHERE name = $1`,
+    [name],
+  );
+  return rows.length > 0;
+}
+
+async function markMigrationRun(name) {
+  await pool.query(
+    `INSERT INTO schema_migrations (name, run_at) VALUES ($1, NOW())
+     ON CONFLICT (name) DO NOTHING`,
+    [name],
+  );
+}
+
+// Run a one-time migration exactly once, tracked by name.
+async function runOnce(name, fn) {
+  if (await hasMigrationRun(name)) {
+    return;
+  }
+  await fn();
+  await markMigrationRun(name);
+}
+
 async function getColumnType(tableName, columnName = "id") {
   const { rows } = await pool.query(
     `
@@ -107,7 +146,12 @@ async function ensureConstraint(tableName, constraintName, sql) {
 
 const initDB = async () => {
   await pool.query("CREATE EXTENSION IF NOT EXISTS pgcrypto");
+  await ensureMigrationsTable();
 
+  // id-type detection — still runs each boot (cheap, indexed lookups),
+  // but only until every table has a resolvable id type; once
+  // getColumnType stops returning null for these, this is effectively
+  // free (single-row indexed reads against information_schema).
   const defaultIdType =
     (await getColumnType("members")) ||
     (await getColumnType("projects")) ||
@@ -185,15 +229,19 @@ const initDB = async () => {
   // project a stable initial position (newest first, matching the old
   // created_at DESC sort) so the very first render after this migration
   // looks identical to before — nothing visibly jumps around.
+  // Tracked in schema_migrations so this full-table window-function
+  // scan runs exactly once, not on every boot.
   await ensureColumn("projects", "sort_order INTEGER");
-  await pool.query(`
-    UPDATE projects SET sort_order = ranked.rn
-    FROM (
-      SELECT id, ROW_NUMBER() OVER (ORDER BY created_at DESC) AS rn
-      FROM projects
-    ) ranked
-    WHERE projects.id = ranked.id AND projects.sort_order IS NULL
-  `);
+  await runOnce("backfill_projects_sort_order", async () => {
+    await pool.query(`
+      UPDATE projects SET sort_order = ranked.rn
+      FROM (
+        SELECT id, ROW_NUMBER() OVER (ORDER BY created_at DESC) AS rn
+        FROM projects
+      ) ranked
+      WHERE projects.id = ranked.id AND projects.sort_order IS NULL
+    `);
+  });
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS clusters (
@@ -245,26 +293,32 @@ const initDB = async () => {
   `);
 
   // One-time backfill: carry every existing single-assignee task over into
-  // the new table. Safe to re-run on every boot (ON CONFLICT DO NOTHING).
-  await pool.query(`
-    INSERT INTO task_assignees (task_id, member_id)
-    SELECT id, assignee_id FROM tasks WHERE assignee_id IS NOT NULL
-    ON CONFLICT DO NOTHING
-  `);
+  // the new table. Tracked so it runs once instead of scanning `tasks`
+  // (with an ON CONFLICT no-op per row) on every boot.
+  await runOnce("backfill_task_assignees", async () => {
+    await pool.query(`
+      INSERT INTO task_assignees (task_id, member_id)
+      SELECT id, assignee_id FROM tasks WHERE assignee_id IS NOT NULL
+      ON CONFLICT DO NOTHING
+    `);
+  });
 
   // Drag-and-drop task ordering within a board column (and moving a card
   // between columns). Backfill preserves the current created_at DESC
   // order per (project, stage) column so nothing visibly reshuffles the
-  // first time this runs.
+  // first time this runs. Tracked — this is a per-partition window-
+  // function scan over all tasks, too expensive to repeat every boot.
   await ensureColumn("tasks", "sort_order INTEGER");
-  await pool.query(`
-    UPDATE tasks SET sort_order = ranked.rn
-    FROM (
-      SELECT id, ROW_NUMBER() OVER (PARTITION BY project_id, stage ORDER BY created_at DESC) AS rn
-      FROM tasks
-    ) ranked
-    WHERE tasks.id = ranked.id AND tasks.sort_order IS NULL
-  `);
+  await runOnce("backfill_tasks_sort_order", async () => {
+    await pool.query(`
+      UPDATE tasks SET sort_order = ranked.rn
+      FROM (
+        SELECT id, ROW_NUMBER() OVER (PARTITION BY project_id, stage ORDER BY created_at DESC) AS rn
+        FROM tasks
+      ) ranked
+      WHERE tasks.id = ranked.id AND tasks.sort_order IS NULL
+    `);
+  });
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS task_comments (
@@ -393,10 +447,25 @@ const initDB = async () => {
       id ${idDefinition(defaultIdType)},
       member_id ${refType(memberIdType)} REFERENCES members(id) ON DELETE CASCADE,
       message TEXT NOT NULL,
+      type VARCHAR(50) DEFAULT 'general',
+      title VARCHAR(255),
+      body TEXT,
+      related_entity_id TEXT,
+      related_entity_type VARCHAR(50),
+      metadata JSONB DEFAULT '{}'::jsonb,
+      dedupe_key TEXT,
       read BOOLEAN DEFAULT false,
       created_at TIMESTAMPTZ DEFAULT NOW()
     )
   `);
+
+  await ensureColumn("notifications", "type VARCHAR(50) DEFAULT 'general'");
+  await ensureColumn("notifications", "title VARCHAR(255)");
+  await ensureColumn("notifications", "body TEXT");
+  await ensureColumn("notifications", "related_entity_id TEXT");
+  await ensureColumn("notifications", "related_entity_type VARCHAR(50)");
+  await ensureColumn("notifications", "metadata JSONB DEFAULT '{}'::jsonb");
+  await ensureColumn("notifications", "dedupe_key TEXT");
 
   await pool.query(`
   CREATE TABLE IF NOT EXISTS push_subscriptions (
@@ -409,16 +478,34 @@ const initDB = async () => {
   )
 `);
 
-  // Migration: remove 'Deployed' from existing projects' custom_stages
   await pool.query(`
-    UPDATE projects
-    SET custom_stages = (
-      SELECT jsonb_agg(stage)
-      FROM jsonb_array_elements_text(custom_stages) AS stage
-      WHERE stage != 'Deployed'
-    )
-    WHERE custom_stages @> '["Deployed"]'::jsonb
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_notifications_member_dedupe
+    ON notifications (member_id, dedupe_key)
+    WHERE dedupe_key IS NOT NULL
   `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_notifications_member_created
+    ON notifications (member_id, created_at DESC)
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_push_subscriptions_member
+    ON push_subscriptions (member_id)
+  `);
+
+  // One-time migration: remove 'Deployed' from existing projects'
+  // custom_stages. Tracked — the untracked version re-scanned every
+  // project row's JSONB array on every single boot forever.
+  await runOnce("remove_deployed_stage", async () => {
+    await pool.query(`
+      UPDATE projects
+      SET custom_stages = (
+        SELECT jsonb_agg(stage)
+        FROM jsonb_array_elements_text(custom_stages) AS stage
+        WHERE stage != 'Deployed'
+      )
+      WHERE custom_stages @> '["Deployed"]'::jsonb
+    `);
+  });
 
   await pool.query(`
     CREATE INDEX IF NOT EXISTS idx_refresh_tokens_member_id
@@ -437,8 +524,55 @@ const initDB = async () => {
     ON tasks (project_id)
   `);
   await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_tasks_project_sort
+    ON tasks (project_id, sort_order, created_at DESC)
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_tasks_due_date
+    ON tasks (due_date)
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_task_assignees_member_id
+    ON task_assignees (member_id)
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_task_comments_task_created
+    ON task_comments (task_id, created_at)
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_task_activity_task_created
+    ON task_activity (task_id, created_at DESC)
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_calendar_attendees_member_id
+    ON calendar_attendees (member_id)
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_projects_sort_order
+    ON projects (sort_order, created_at DESC)
+  `);
+  await pool.query(`
     CREATE INDEX IF NOT EXISTS idx_project_members_member
     ON project_members (member_id)
+  `);
+
+  // Previously missing FK-lookup indexes — added to cover common
+  // project-scoped queries against these tables.
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_knowledge_files_project_id
+    ON knowledge_files (project_id)
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_knowledge_notes_project_id
+    ON knowledge_notes (project_id)
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_credential_entries_cluster_id
+    ON credential_entries (cluster_id)
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_cluster_reviews_cluster_id
+    ON cluster_reviews (cluster_id)
   `);
 
   console.log("Database schema ready");

@@ -1,37 +1,56 @@
-import Modal from './Modal';
+import Modal from "./Modal";
+import Loader from "./Loader";
 
 export default function ConfirmModal({
   isOpen,
-  title = 'Confirm Action',
-  message = 'Are you sure you want to proceed?',
-  confirmText = 'Confirm',
-  cancelText = 'Cancel',
+  title = "Confirm Action",
+  message = "Are you sure you want to proceed?",
+  confirmText = "Confirm",
+  cancelText = "Cancel",
   onConfirm,
   onCancel,
   isDangerous = true,
-  loading = false
+  loading = false,
 }) {
   if (!isOpen) return null;
 
+  const handleClose = () => {
+    if (!loading) onCancel();
+  };
+
   return (
-    <Modal title={title} onClose={!loading ? onCancel : () => { }}>
-      <div style={{ marginBottom: '24px', fontSize: '14px', color: 'var(--text-2)' }}>
+    <Modal title={title} onClose={handleClose}>
+      <div
+        style={{
+          marginBottom: "24px",
+          fontSize: "14px",
+          color: "var(--text-2)",
+        }}
+      >
         {message}
       </div>
+
       <div className="modal-actions">
         <button
+          type="button"
           className="btn btn-ghost"
-          onClick={onCancel}
+          onClick={handleClose}
           disabled={loading}
         >
           {cancelText}
         </button>
+
         <button
-          className={`btn ${isDangerous ? 'btn-danger' : 'btn-primary'}`}
+          type="button"
+          className={`btn ${isDangerous ? "btn-danger" : "btn-primary"}`}
           onClick={onConfirm}
           disabled={loading}
         >
-          {loading ? 'Processing...' : confirmText}
+          {loading ? (
+            <Loader label="Processing..." size="sm" variant="button" />
+          ) : (
+            confirmText
+          )}
         </button>
       </div>
     </Modal>

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import Select from '../ui/Select';
 import DatePicker from '../ui/DatePicker';
+import Loader from '../ui/Loader';
 
 export default function TaskForm({ initial, members, allMembers, clusters, stages, onSave, onCancel, hideCluster, saving = false, userRole, isSubtaskForm = false, emptyMembersMessage }) {
   const [form, setForm] = useState({
@@ -324,8 +325,7 @@ export default function TaskForm({ initial, members, allMembers, clusters, stage
       <div className="modal-actions">
         <button className="btn btn-ghost" onClick={onCancel} disabled={saving}>Cancel</button>
         <button className="btn btn-primary" onClick={handleSave} disabled={saving}>
-          {saving && <span className="btn-spinner" />}
-          {saving ? 'Saving...' : 'Save Task'}
+          {saving ? <Loader label="Saving..." size="sm" variant="button" /> : 'Save Task'}
         </button>
       </div>
     </div>

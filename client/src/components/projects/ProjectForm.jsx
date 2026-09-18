@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import Select from '../ui/Select';
+import Loader from '../ui/Loader';
 
 const DEFAULT_STAGES = ["Todo","In Progress","In Review","Done"];
 
@@ -67,7 +68,7 @@ export default function ProjectForm({ initial, onSave, onCancel, saving = false 
       <div className="modal-actions">
         <button className="btn btn-ghost" onClick={onCancel}>Cancel</button>
         <button className="btn btn-primary" onClick={() => onSave(form)} disabled={saving}>
-          {saving ? 'Saving...' : 'Save Project'}
+          {saving ? <Loader label="Saving..." size="sm" variant="button" /> : 'Save Project'}
         </button>
       </div>
     </>

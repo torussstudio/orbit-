@@ -3,6 +3,8 @@ import { AuthProvider } from './context/AuthContext';
 import { RequireAuth, RequireManager } from './routes/guards';
 import Layout from './components/layout/Layout';
 import { lazy, Suspense } from 'react';
+import { ToastProvider } from './context/ToastContext';
+import Loader from './components/ui/Loader';
 
 const Login = lazy(() => import('./pages/Login'));
 const Dashboard = lazy(() => import('./pages/Dashboard'));
@@ -21,14 +23,13 @@ const InReview = lazy(() => import('./pages/InReview'));
 const AccountSettings = lazy(() => import('./pages/AccountSettings'));
 
 const SuspenseFallback = () => (
-  <div className="flex items-center justify-center h-full w-full p-10">
-    <div className="w-8 h-8 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin"></div>
-  </div>
+  <Loader label="Loading page" size="lg" variant="page" />
 );
 
 export default function App() {
   return (
     <AuthProvider>
+      <ToastProvider>
       <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
         <Routes>
           <Route path="/login" element={<Suspense fallback={<SuspenseFallback />}><Login /></Suspense>} />
@@ -50,6 +51,7 @@ export default function App() {
           </Route>
         </Routes>
       </BrowserRouter>
+      </ToastProvider>
     </AuthProvider>
   );
 }

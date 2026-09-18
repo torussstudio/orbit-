@@ -1,4 +1,4 @@
-import { useState, useEffect, Fragment } from "react";
+import { useState, useEffect, useMemo, Fragment } from "react";
 import { useParams, Link } from "react-router-dom";
 import api from "../api/client";
 import { useAuth } from "../context/AuthContext";
@@ -7,6 +7,7 @@ import Modal from "../components/ui/Modal";
 import ConfirmModal from "../components/ui/ConfirmModal";
 import TaskForm from "../components/tasks/TaskForm";
 import Select from "../components/ui/Select";
+import Loader from "../components/ui/Loader";
 
 const PRIORITY_COLORS = {
   low: "var(--accent)",
@@ -48,11 +49,15 @@ export default function Tasks({ project: propProject }) {
   ];
 
   const load = () => {
+    const projectRequest = propProject
+      ? Promise.resolve({ data: propProject })
+      : api.get(`/projects/${projectId}`);
+
     Promise.all([
       api.get(`/tasks/project/${projectId}`),
       api.get("/members"),
       api.get(`/clusters/project/${projectId}`),
-      api.get(`/projects/${projectId}`),
+      projectRequest,
     ])
       .then(([t, m, c, proj]) => {
         setTasks(t.data);
@@ -119,34 +124,48 @@ export default function Tasks({ project: propProject }) {
     return dateStr ? dateStr.slice(0, 7) : null;
   };
 
-  const allMonthKeys = [
-    ...new Set([
-      ...tasks.map((t) => getMonthKey(t)).filter(Boolean),
-      currentMonthKey,
-    ]),
-  ].sort((a, b) => a.localeCompare(b));
+  const allMonthKeys = useMemo(
+    () => [
+      ...new Set([
+        ...tasks.map((t) => getMonthKey(t)).filter(Boolean),
+        currentMonthKey,
+      ]),
+    ].sort((a, b) => a.localeCompare(b)),
+    [tasks, currentMonthKey],
+  );
 
-  const filteredTasks = tasks.filter((t) => getMonthKey(t) === selectedMonth);
+  const filteredTasks = useMemo(
+    () => tasks.filter((t) => getMonthKey(t) === selectedMonth),
+    [tasks, selectedMonth],
+  );
 
   // Main tasks vs sub tasks (a sub task has parent_task_id set)
   // Newest-created task first — the API returns tasks in creation order
   // (oldest first), so we reverse-sort here rather than relying on the
   // backend query order.
-  const mainTasks = filteredTasks
-    .filter((t) => !t.parent_task_id)
-    .sort((a, b) => {
-      const bTime = b.created_at ? new Date(b.created_at).getTime() : b.id;
-      const aTime = a.created_at ? new Date(a.created_at).getTime() : a.id;
-      return bTime - aTime;
-    });
+  const mainTasks = useMemo(
+    () =>
+      filteredTasks
+        .filter((t) => !t.parent_task_id)
+        .sort((a, b) => {
+          const bTime = b.created_at ? new Date(b.created_at).getTime() : b.id;
+          const aTime = a.created_at ? new Date(a.created_at).getTime() : a.id;
+          return bTime - aTime;
+        }),
+    [filteredTasks],
+  );
 
-  const subtasksByParent = filteredTasks.reduce((acc, t) => {
-    if (t.parent_task_id) {
-      if (!acc[t.parent_task_id]) acc[t.parent_task_id] = [];
-      acc[t.parent_task_id].push(t);
-    }
-    return acc;
-  }, {});
+  const subtasksByParent = useMemo(
+    () =>
+      filteredTasks.reduce((acc, t) => {
+        if (t.parent_task_id) {
+          if (!acc[t.parent_task_id]) acc[t.parent_task_id] = [];
+          acc[t.parent_task_id].push(t);
+        }
+        return acc;
+      }, {}),
+    [filteredTasks],
+  );
 
   const formatMonthLabel = (key) => {
     const [year, month] = key.split("-");
@@ -169,14 +188,15 @@ export default function Tasks({ project: propProject }) {
   if (loading)
     return (
       <div style={{ padding: "24px" }}>
-        <div className="spinner" />
+        <Loader label="Loading tasks" size="lg" variant="page" />
       </div>
     );
 
   return (
-    <div style={{ padding: "24px 32px" }}>
+    <div className="tasks-page" style={{ padding: "24px 32px" }}>
       {/* Toolbar */}
       <div
+        className="tasks-toolbar"
         style={{
           display: "flex",
           flexWrap: "wrap",

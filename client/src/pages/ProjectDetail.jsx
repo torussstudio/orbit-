@@ -6,6 +6,23 @@ import Tasks from "./Tasks";
 import Clusters from "./Clusters";
 import Credentials from "./Credentials";
 import Knowledge from "./Knowledge";
+import Loader from "../components/ui/Loader";
+
+const safeImageUrl = (url) => {
+  if (!url) return "";
+
+  try {
+    const parsed = new URL(url);
+
+    if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+      return "";
+    }
+
+    return parsed.href;
+  } catch {
+    return "";
+  }
+};
 
 const TABS = ["Tasks", "Clusters", "Credentials", "Knowledge"];
 
@@ -24,11 +41,7 @@ export default function ProjectDetail() {
   }, [id]);
 
   if (loading)
-    return (
-      <div className="loading-screen">
-        <div className="spinner" />
-      </div>
-    );
+    return <Loader label="Loading project" size="lg" variant="page" />;
   if (!project)
     return (
       <div className="page-body">
@@ -77,10 +90,10 @@ export default function ProjectDetail() {
                   padding: 0,
                 }}
               >
-                {m.avatar_url ? (
+                {safeImageUrl(m.avatar_url) ? (
                   <img
-                    src={m.avatar_url}
-                    alt={m.name}
+                    src={safeImageUrl(m.avatar_url)}
+                    alt={m.name || "User avatar"}
                     style={{
                       width: "100%",
                       height: "100%",
@@ -90,7 +103,7 @@ export default function ProjectDetail() {
                     }}
                   />
                 ) : (
-                  m.name[0]
+                  m.name?.[0] || "?"
                 )}
               </div>
             ))}

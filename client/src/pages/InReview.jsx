@@ -4,6 +4,7 @@ import api from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import Modal from '../components/ui/Modal';
 import DatePicker from '../components/ui/DatePicker';
+import Loader from '../components/ui/Loader';
 
 export default function InReview() {
   const { isManager } = useAuth();
@@ -62,7 +63,7 @@ export default function InReview() {
   const mainTasks = filtered.filter(s => !s.parent_task_id);
   const subTasks = filtered.filter(s => s.parent_task_id);
 
-  if (loading) return <div className="loading-screen"><div className="spinner" /></div>;
+  if (loading) return <Loader label="Loading review queue" size="lg" variant="page" />;
 
   return (
     <>
@@ -273,7 +274,7 @@ export default function InReview() {
                             style={{ fontSize: '11px', color: 'var(--success)', borderColor: 'var(--success)' }}
                             disabled={actionLoading === s.id + '_done'}
                             onClick={() => handleMarkDone(s)}>
-                            {actionLoading === s.id + '_done' ? '...' : '✓ Done'}
+                            {actionLoading === s.id + '_done' ? <Loader label="Updating..." size="sm" variant="button" /> : '✓ Done'}
                           </button>
                           <button
                             className="btn btn-ghost btn-sm"

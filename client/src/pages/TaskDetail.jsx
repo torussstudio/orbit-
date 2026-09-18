@@ -7,6 +7,7 @@ import DatePicker from "../components/ui/DatePicker";
 import Modal from "../components/ui/Modal";
 import ConfirmModal from "../components/ui/ConfirmModal";
 import TaskForm from "../components/tasks/TaskForm";
+import Loader from "../components/ui/Loader";
 
 const PRIORITY_COLORS = {
   low: "var(--accent)",
@@ -360,9 +361,7 @@ export default function TaskDetail() {
 
   if (loading)
     return (
-      <div className="loading-screen">
-        <div className="spinner" />
-      </div>
+      <Loader label="Loading task" size="lg" variant="page" />
     );
   if (!task) return <div className="page-body">Task not found.</div>;
 
@@ -922,7 +921,7 @@ export default function TaskDetail() {
                 type="submit"
                 disabled={submitting}
               >
-                {submitting ? "Posting..." : "Post Comment"}
+                {submitting ? <Loader label="Posting..." size="sm" variant="button" /> : "Post Comment"}
               </button>
             </form>
             {task.comments?.length === 0 && (

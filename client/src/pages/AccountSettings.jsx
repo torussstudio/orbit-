@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import api from '../api/client';
 import DatePicker from '../components/ui/DatePicker';
+import Loader from '../components/ui/Loader';
 
 // Reusable avatar renderer — shows image if url exists, else initial letter
 export function UserAvatar({ avatarUrl, name, size = 34, fontSize = 13 }) {
@@ -164,7 +165,7 @@ export default function AccountSettings() {
   };
 
   return (
-    <div style={{ padding: '32px'}}>
+    <div className="account-settings-page" style={{ padding: '32px'}}>
       {/* Page title */}
       <div style={{ marginBottom: '28px' }}>
         <h1 style={{ fontSize: '22px', fontWeight: 700, color: 'var(--text)', letterSpacing: '-0.4px' }}>
@@ -175,7 +176,7 @@ export default function AccountSettings() {
         </p>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '350px 1fr', gap: '24px', alignItems: 'start' }}>
+      <div className="account-settings-grid" style={{ display: 'grid', gridTemplateColumns: '350px 1fr', gap: '24px', alignItems: 'start' }}>
 
         {/* ══ LEFT PANEL ══════════════════════════════════════ */}
         <div style={{
@@ -285,7 +286,7 @@ export default function AccountSettings() {
             </h2>
 
             {/* Name + Email */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '16px' }}>
+            <div className="account-settings-form-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '16px' }}>
               <div>
                 <label style={labelStyle}>Full Name</label>
                 <input style={inputStyle} value={form.name} onChange={handleChange('name')} placeholder="Your full name"
@@ -301,7 +302,7 @@ export default function AccountSettings() {
             </div>
 
             {/* Phone + Role */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '16px' }}>
+            <div className="account-settings-form-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '16px' }}>
               <div>
                 <label style={labelStyle}>Phone</label>
                 <input style={inputStyle} value={form.phone} onChange={handleChange('phone')} placeholder="+91 00000 00000"
@@ -316,7 +317,7 @@ export default function AccountSettings() {
             </div>
 
             {/* Location + DOB */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '16px' }}>
+            <div className="account-settings-form-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '16px' }}>
               <div>
                 <label style={labelStyle}>Location</label>
                 <input style={inputStyle} value={form.location} onChange={handleChange('location')} placeholder="City, Country"
@@ -330,7 +331,7 @@ export default function AccountSettings() {
             </div>
 
             {/* New Password + Confirm */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '16px' }}>
+            <div className="account-settings-form-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '16px' }}>
               <div>
                 <label style={labelStyle}>New Password</label>
                 <input style={inputStyle} value={newPassword} type="password" onChange={e => setNewPassword(e.target.value)} placeholder="Leave blank to keep current"
@@ -373,8 +374,7 @@ export default function AccountSettings() {
                 fontFamily: 'var(--font-body)', boxShadow: '0 2px 8px rgba(99,102,241,0.3)',
                 display: 'flex', alignItems: 'center', gap: '6px',
               }}>
-                {saving && <div className="spinner" style={{ width: '13px', height: '13px', borderWidth: '2px' }} />}
-                {saving ? 'Saving...' : 'Save Changes'}
+                {saving ? <Loader label="Saving..." size="sm" variant="button" /> : 'Save Changes'}
               </button>
             </div>
           </div>

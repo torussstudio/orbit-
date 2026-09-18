@@ -24,6 +24,22 @@ const api = axios.create({
   },
 });
 
+function emitToast(type, message) {
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent("orbit:toast", { detail: { type, message } }));
+  }
+}
+
+function mutationMessage(config) {
+  const method = String(config?.method || "").toLowerCase();
+  const path = String(config?.url || "");
+  if (!["post", "put", "patch", "delete"].includes(method)) return null;
+  if (/auth\/(login|refresh|logout)|notifications/.test(path)) return null;
+  if (method === "delete") return "Deleted successfully";
+  if (method === "post") return "Created successfully";
+  return "Updated successfully";
+}
+
 /*
  * Attach access token to protected API requests.
  *
@@ -118,8 +134,14 @@ export function clearClientAuthState() {
 }
 
 api.interceptors.response.use(
-  (response) =>
-    response,
+  (response) => {
+    const message = mutationMessage(response.config);
+    if (message) {
+      emitToast("success", message);
+      if (typeof window !== "undefined") window.dispatchEvent(new Event("orbit:notifications-updated"));
+    }
+    return response;
+  },
 
   async (error) => {
     const status =
@@ -183,10 +205,18 @@ api.interceptors.response.use(
           );
         }
 
+        if (mutationMessage(originalRequest)) {
+          emitToast("error", refreshError.response?.data?.error || refreshError.message || "Action failed");
+        }
+
         return Promise.reject(
           refreshError,
         );
       }
+    }
+
+    if (mutationMessage(originalRequest)) {
+      emitToast("error", error.response?.data?.error || error.message || "Action failed");
     }
 
     if (!error.response) {

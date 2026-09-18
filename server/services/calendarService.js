@@ -286,10 +286,17 @@ class CalendarService {
     if (memberRows.length > 0) {
       // Create notification for member
       const memberId = memberRows[0].id;
-      const message = `You have been invited to event: ${event_title}`;
-      await db.query(
-        "INSERT INTO notifications(member_id, message) VALUES($1, $2)",
-        [memberId, message]
+      const { createNotification } = require("../utils/pushNotify");
+      await createNotification(
+        memberId,
+        "Calendar invitation",
+        `You have been invited to event: ${event_title}`,
+        {
+          type: "calendar_invitation",
+          entityType: "calendar_event",
+          eventKey: `calendar-invitation:${memberId}:${guest_email}:${event_title}`,
+          url: "/calendar",
+        },
       );
     }
     

@@ -1,10 +1,11 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useMemo, useState, useRef } from 'react';
 import api from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import Modal from '../components/ui/Modal';
 import ConfirmModal from '../components/ui/ConfirmModal';
 import MemberFilterBar from '../components/ui/MemberFilterBar';
 import Select from '../components/ui/Select';
+import Loader from '../components/ui/Loader';
 
 const COLORS = {
   event: '#6366f1',
@@ -98,6 +99,80 @@ function formatDayMeta(item) {
   return '';
 }
 
+// Shared responsive rules for this page. Kept in one place so every sub-view
+// (month/week/day) stays consistent across breakpoints without repeating
+// media queries inline (inline styles can't express them).
+function CalendarResponsiveStyles() {
+  return (
+    <style>{`
+      .cal-header-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+      .cal-view-toggle { display: flex; background: var(--bg-3); border-radius: 8px; padding: 3px; gap: 2px; }
+      .cal-nav-bar {
+        display: flex; align-items: center; justify-content: space-between;
+        padding: 12px 14px; border-bottom: 1px solid var(--border); gap: 8px;
+      }
+      .cal-nav-btn-label { display: inline; }
+      .cal-month-label { font-weight: 700; font-size: 15px; color: var(--text); text-align: center; flex: 1; min-width: 0; }
+
+      .cal-month-grid {
+        display: grid;
+        grid-template-columns: repeat(7, minmax(0, 1fr));
+        overflow: auto;
+      }
+      .cal-day-head {
+        padding: 10px 2px; text-align: center; font-size: 11px; font-weight: 700;
+        color: var(--text-3); text-transform: uppercase; letter-spacing: 0.5px;
+      }
+      .cal-cell {
+        min-height: 100px; min-width: 0; padding: 8px;
+        border-right: 1px solid var(--border); border-bottom: 1px solid var(--border);
+        cursor: pointer; transition: background 0.18s ease;
+      }
+      .cal-cell-empty { min-height: 100px; border-right: 1px solid var(--border); border-bottom: 1px solid var(--border); background: var(--bg-3); }
+      .cal-day-num {
+        width: 26px; height: 26px; border-radius: 50%; display: flex; align-items: center;
+        justify-content: center; margin-bottom: 4px; font-size: 13px;
+      }
+      .cal-pill {
+        font-size: 10px; padding: 2px 5px; border-radius: 4px; margin-bottom: 2px;
+        font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      }
+      .cal-dots { display: none; gap: 3px; flex-wrap: wrap; margin-top: 2px; }
+      .cal-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+      .cal-more { font-size: 10px; color: var(--text-3); margin-top: 2px; }
+
+      .cal-week-scroll { display: flex; height: 100%; overflow: auto; border-top: 1px solid var(--border); -webkit-overflow-scrolling: touch; }
+      .cal-week-timecol { min-width: 56px; border-right: 1px solid var(--border); background: var(--bg-3); flex-shrink: 0; }
+      .cal-week-grid { display: grid; grid-template-columns: repeat(7, minmax(72px, 1fr)); flex: 1; min-width: 560px; }
+      .cal-week-hour { height: 52px; display: flex; align-items: flex-start; justify-content: center; padding: 2px 0; font-size: 10px; color: var(--text-3); font-weight: 500; border-bottom: 1px solid var(--border); }
+      .cal-week-slot { min-height: 52px; padding: 3px; cursor: default; position: relative; }
+      .cal-week-event { font-size: 10px; padding: 3px 5px; border-radius: 4px; margin-bottom: 2px; color: #fff; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+
+      .cal-detail-item { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; padding: 10px 12px; border-radius: 8px; margin-bottom: 8px; background: var(--bg-3); flex-wrap: wrap; }
+      .cal-detail-actions { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+
+      @media (max-width: 640px) {
+        .cal-nav-btn-label { display: none; }
+        .cal-month-label { font-size: 13px; }
+        .cal-nav-bar { padding: 10px 8px; }
+        .cal-cell, .cal-cell-empty { min-height: 68px; padding: 5px; }
+        .cal-day-num { width: 22px; height: 22px; font-size: 12px; }
+        .cal-pill { display: none; }
+        .cal-dots { display: flex; }
+        .cal-week-timecol { min-width: 44px; }
+        .cal-week-hour { height: 44px; font-size: 9px; }
+        .cal-week-slot { min-height: 44px; padding: 2px; }
+        .cal-week-event { font-size: 9px; padding: 2px 4px; }
+      }
+
+      @media (max-width: 400px) {
+        .cal-cell, .cal-cell-empty { min-height: 56px; }
+        .cal-day-head { font-size: 9px; padding: 8px 1px; }
+      }
+    `}</style>
+  );
+}
+
 export default function Calendar() {
   const { isManager, user } = useAuth();
   const [data, setData] = useState({ events: [], tasks: [], projects: [], birthdays: [] });
@@ -144,17 +219,25 @@ export default function Calendar() {
     load();
   }, [selectedFilterMembers]);
 
-  const allItems = buildCalendarItems(data, current.getFullYear());
+  const allItems = useMemo(
+    () => buildCalendarItems(data, current.getFullYear()),
+    [data, current],
+  );
 
-  const getItemsForDate = (date) =>
-    allItems.filter((item) => {
-      const itemDate = item.date;
-      return (
-        itemDate.getDate() === date.getDate() &&
-        itemDate.getMonth() === date.getMonth() &&
-        itemDate.getFullYear() === date.getFullYear()
-      );
+  const itemsByDate = useMemo(() => {
+    const byDate = new Map();
+    allItems.forEach((item) => {
+      const key = `${item.date.getFullYear()}-${item.date.getMonth()}-${item.date.getDate()}`;
+      const items = byDate.get(key);
+      if (items) items.push(item);
+      else byDate.set(key, [item]);
     });
+    return byDate;
+  }, [allItems]);
+
+  const getItemsForDate = (date) => itemsByDate.get(
+    `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`,
+  ) || [];
 
   const handleSave = async (formData) => {
     setSaving(true);
@@ -222,29 +305,21 @@ export default function Calendar() {
 
   if (loading) {
     return (
-      <div className="loading-screen">
-        <div className="spinner" />
-      </div>
+      <Loader label="Loading calendar" size="lg" variant="page" />
     );
   }
 
   return (
     <>
+      <CalendarResponsiveStyles />
+
       <div className="page-header">
         <div>
           <div className="page-title">Calendar</div>
           <div className="page-subtitle">Track deadlines, tasks and events</div>
         </div>
-        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-          <div
-            style={{
-              display: 'flex',
-              background: 'var(--bg-3)',
-              borderRadius: '8px',
-              padding: '3px',
-              gap: '2px',
-            }}
-          >
+        <div className="cal-header-actions">
+          <div className="cal-view-toggle">
             {['month', 'week', 'day'].map((nextView) => (
               <button
                 key={nextView}
@@ -286,7 +361,7 @@ export default function Calendar() {
               key={type}
               style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: 'var(--text-2)' }}
             >
-              <div style={{ width: '10px', height: '10px', borderRadius: '50%', background: color }} />
+              <div style={{ width: '10px', height: '10px', borderRadius: '50%', background: color, flexShrink: 0 }} />
               {type.charAt(0).toUpperCase() + type.slice(1)}
             </div>
           ))}
@@ -310,15 +385,7 @@ export default function Calendar() {
             border: '1px solid var(--border)',
           }}
         >
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              padding: '16px 20px',
-              borderBottom: '1px solid var(--border)',
-            }}
-          >
+          <div className="cal-nav-bar">
             <button
               className="btn btn-ghost btn-sm"
               onClick={() => {
@@ -328,11 +395,12 @@ export default function Calendar() {
                 else nextDate.setDate(nextDate.getDate() - 1);
                 setCurrent(nextDate);
               }}
+              aria-label="Previous"
             >
-              {'<-'} Prev
+              {'<-'} <span className="cal-nav-btn-label">Prev</span>
             </button>
 
-            <span style={{ fontWeight: 700, fontSize: '15px', color: 'var(--text)' }}>
+            <span className="cal-month-label">
               {view === 'month' && `${MONTHS[current.getMonth()]} ${current.getFullYear()}`}
               {view === 'week' && `Week of ${current.toLocaleDateString()}`}
               {view === 'day' &&
@@ -353,8 +421,9 @@ export default function Calendar() {
                 else nextDate.setDate(nextDate.getDate() + 1);
                 setCurrent(nextDate);
               }}
+              aria-label="Next"
             >
-              Next {'->'}
+              <span className="cal-nav-btn-label">Next</span> {'->'}
             </button>
           </div>
 
@@ -403,9 +472,11 @@ export default function Calendar() {
                   justifyContent: 'space-between',
                   alignItems: 'center',
                   marginBottom: '16px',
+                  gap: '8px',
+                  flexWrap: 'wrap',
                 }}
               >
-                <h3 style={{ fontSize: '14px', fontWeight: 700 }}>
+                <h3 style={{ fontSize: '14px', fontWeight: 700, minWidth: 0 }}>
                   {selectedDay.toLocaleDateString('en-US', {
                     weekday: 'long',
                     month: 'long',
@@ -423,23 +494,15 @@ export default function Calendar() {
                 getItemsForDate(selectedDay).map((item, index) => (
                   <div
                     key={`${item.itemType}-${item.id || item.name || index}`}
-                    style={{
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'center',
-                      padding: '10px 12px',
-                      borderRadius: '8px',
-                      marginBottom: '8px',
-                      background: 'var(--bg-3)',
-                      borderLeft: `3px solid ${COLORS[item.itemType]}`,
-                    }}
+                    className="cal-detail-item"
+                    style={{ borderLeft: `3px solid ${COLORS[item.itemType]}` }}
                   >
-                    <div>
-                      <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text)' }}>
+                    <div style={{ minWidth: 0, flex: '1 1 160px' }}>
+                      <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text)', wordBreak: 'break-word' }}>
                         {item.displayTitle}
                       </div>
                       {item.description && (
-                        <div style={{ fontSize: '12px', color: 'var(--text-2)', marginTop: '2px' }}>
+                        <div style={{ fontSize: '12px', color: 'var(--text-2)', marginTop: '2px', wordBreak: 'break-word' }}>
                           {item.description}
                         </div>
                       )}
@@ -450,7 +513,7 @@ export default function Calendar() {
                       )}
                     </div>
 
-                    <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                    <div className="cal-detail-actions">
                       <span
                         style={{
                           fontSize: '11px',
@@ -459,6 +522,7 @@ export default function Calendar() {
                           background: `${COLORS[item.itemType]}20`,
                           color: COLORS[item.itemType],
                           fontWeight: 600,
+                          whiteSpace: 'nowrap',
                         }}
                       >
                         {item.itemType}
@@ -541,39 +605,18 @@ function MonthView({ current, getItemsForDate, onDayClick }) {
 
   return (
     <div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', borderBottom: '1px solid var(--border)' }}>
+      <div className="cal-month-grid" style={{ borderBottom: '1px solid var(--border)' }}>
         {DAYS.map((dayName) => (
-          <div
-            key={dayName}
-            style={{
-              padding: '10px',
-              textAlign: 'center',
-              fontSize: '11px',
-              fontWeight: 700,
-              color: 'var(--text-3)',
-              textTransform: 'uppercase',
-              letterSpacing: '0.5px',
-            }}
-          >
+          <div key={dayName} className="cal-day-head">
             {dayName}
           </div>
         ))}
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', overflow:'auto'}}>
+      <div className="cal-month-grid">
         {cells.map((date, index) => {
           if (!date) {
-            return (
-              <div
-                key={`empty-${index}`}
-                style={{
-                  minHeight: '100px',
-                  borderRight: '1px solid var(--border)',
-                  borderBottom: '1px solid var(--border)',
-                  background: 'var(--bg-3)',
-                }}
-              />
-            );
+            return <div key={`empty-${index}`} className="cal-cell-empty" />;
           }
 
           const items = getItemsForDate(date);
@@ -583,15 +626,12 @@ function MonthView({ current, getItemsForDate, onDayClick }) {
           return (
             <div
               key={date.toISOString()}
+              className="cal-cell"
               onClick={() => onDayClick(date)}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') onDayClick(date); }}
               style={{
-                minHeight: '100px',
-                minWidth: 0,
-                padding: '8px',
-                borderRight: '1px solid var(--border)',
-                borderBottom: '1px solid var(--border)',
-                cursor: 'pointer',
-                transition: 'background 0.18s ease, box-shadow 0.18s ease',
                 background: baseBackground,
                 boxShadow: isToday ? 'inset 0 0 0 1px rgba(99,102,241,0.15)' : 'none',
               }}
@@ -603,15 +643,8 @@ function MonthView({ current, getItemsForDate, onDayClick }) {
               }}
             >
               <div
+                className="cal-day-num"
                 style={{
-                  width: '26px',
-                  height: '26px',
-                  borderRadius: '50%',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  marginBottom: '4px',
-                  fontSize: '13px',
                   fontWeight: isToday ? 700 : 400,
                   background: isToday ? 'linear-gradient(135deg, #6366f1, #818cf8)' : 'transparent',
                   color: isToday ? 'white' : 'var(--text)',
@@ -620,30 +653,33 @@ function MonthView({ current, getItemsForDate, onDayClick }) {
                 {date.getDate()}
               </div>
 
+              {/* Full pills — hidden on narrow screens in favour of dots below */}
               {items.slice(0, 3).map((item, itemIndex) => (
                 <div
                   key={`${item.itemType}-${item.id || item.name || itemIndex}`}
-                  style={{
-                    fontSize: '10px',
-                    padding: '2px 5px',
-                    borderRadius: '4px',
-                    marginBottom: '2px',
-                    background: `${COLORS[item.itemType]}20`,
-                    color: COLORS[item.itemType],
-                    fontWeight: 600,
-                    whiteSpace: 'nowrap',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                  }}
+                  className="cal-pill"
+                  style={{ background: `${COLORS[item.itemType]}20`, color: COLORS[item.itemType] }}
                   title={formatCellLabel(item)}
                 >
                   {formatCellLabel(item)}
                 </div>
               ))}
-
               {items.length > 3 && (
-                <div style={{ fontSize: '10px', color: 'var(--text-3)', marginTop: '2px' }}>
-                  +{items.length - 3} more
+                <div className="cal-more">+{items.length - 3} more</div>
+              )}
+
+              {/* Compact dot indicators — shown only on narrow screens */}
+              {items.length > 0 && (
+                <div className="cal-dots">
+                  {items.slice(0, 4).map((item, itemIndex) => (
+                    <div
+                      key={`dot-${item.itemType}-${item.id || item.name || itemIndex}`}
+                      className="cal-dot"
+                      style={{ background: COLORS[item.itemType] }}
+                      title={formatCellLabel(item)}
+                    />
+                  ))}
+                  {items.length > 4 && <span className="cal-more">+{items.length - 4}</span>}
                 </div>
               )}
             </div>
@@ -678,44 +714,33 @@ function WeekView({ current, getItemsForDate, onDayClick, isManager, onClickEven
   };
 
   return (
-    <div style={{ display: 'flex', height: '100%', overflow: 'auto', borderTop: '1px solid var(--border)' }}>
+    <div className="cal-week-scroll">
       {/* Time column on the left */}
-      <div style={{ minWidth: '80px', borderRight: '1px solid var(--border)', background: 'var(--bg-3)' }}>
+      <div className="cal-week-timecol">
         <div style={{ height: '60px', display: 'flex', alignItems: 'flex-end', justifyContent: 'center', paddingBottom: '8px', fontWeight: 600, fontSize: '12px' }}></div>
         {hours.map(hour => (
-          <div
-            key={hour}
-            style={{
-              height: '60px',
-              display: 'flex',
-              alignItems: 'flex-start',
-              justifyContent: 'center',
-              padding: '2px 0',
-              fontSize: '11px',
-              color: 'var(--text-3)',
-              fontWeight: 500,
-              borderBottom: '1px solid var(--border)',
-            }}
-          >
+          <div key={hour} className="cal-week-hour">
             {String(hour).padStart(2, '0')}:00
           </div>
         ))}
       </div>
 
       {/* Days grid */}
-      <div style={{ display: 'grid', gridTemplateColumns: `repeat(7, 1fr)`, flex: 1 }}>
+      <div className="cal-week-grid">
         {/* Day headers */}
         {days.map((date, dayIndex) => {
           const isToday = date.toDateString() === today.toDateString();
           return (
             <div
               key={`header-${date.toISOString()}`}
+              onClick={() => onDayClick(date)}
               style={{
                 padding: '12px 4px',
                 textAlign: 'center',
                 borderRight: dayIndex < 6 ? '1px solid var(--border)' : 'none',
                 borderBottom: '1px solid var(--border)',
                 background: isToday ? 'rgba(99,102,241,0.04)' : 'var(--bg-2)',
+                cursor: 'pointer',
               }}
             >
               <div style={{ fontSize: '11px', color: 'var(--text-3)', fontWeight: 600, textTransform: 'uppercase' }}>
@@ -751,37 +776,24 @@ function WeekView({ current, getItemsForDate, onDayClick, isManager, onClickEven
             return (
               <div
                 key={`slot-${date.toISOString()}-${hour}`}
+                className="cal-week-slot"
                 onClick={() => isManager && onClickTimeSlot(date, hour)}
                 style={{
-                  minHeight: '60px',
-                  padding: '4px',
                   borderRight: dayIndex < 6 ? '1px solid var(--border)' : 'none',
                   borderBottom: '1px solid var(--border)',
                   background: isToday ? 'rgba(99,102,241,0.02)' : 'var(--bg-2)',
                   cursor: isManager ? 'pointer' : 'default',
-                  position: 'relative',
                 }}
               >
                 {slotEvents.map((event, idx) => (
                   <div
                     key={`${event.id}-${idx}`}
+                    className="cal-week-event"
                     onClick={(e) => {
                       e.stopPropagation();
                       onClickEvent(event);
                     }}
-                    style={{
-                      fontSize: '11px',
-                      padding: '4px 6px',
-                      borderRadius: '4px',
-                      marginBottom: '2px',
-                      background: COLORS[event.itemType],
-                      color: 'white',
-                      fontWeight: 600,
-                      cursor: 'pointer',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
-                    }}
+                    style={{ background: COLORS[event.itemType] }}
                     title={event.displayTitle}
                   >
                     {event.displayTitle}
@@ -798,9 +810,9 @@ function WeekView({ current, getItemsForDate, onDayClick, isManager, onClickEven
 
 function DayView({ current, items, isManager, onEdit, onDelete }) {
   return (
-    <div style={{ padding: '20px', minHeight: '300px' }}>
+    <div style={{ padding: '16px', minHeight: '300px' }}>
       {items.length === 0 ? (
-        <div style={{ textAlign: 'center', padding: '40px', color: 'var(--text-3)' }}>
+        <div style={{ textAlign: 'center', padding: '40px 12px', color: 'var(--text-3)' }}>
           <div style={{ fontSize: '32px', marginBottom: '10px' }}>No items</div>
           <p>No events on this day</p>
         </div>
@@ -808,21 +820,13 @@ function DayView({ current, items, isManager, onEdit, onDelete }) {
         items.map((item, index) => (
           <div
             key={`${item.itemType}-${item.id || item.name || index}`}
-            style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              padding: '14px 16px',
-              borderRadius: '10px',
-              marginBottom: '10px',
-              background: 'var(--bg-3)',
-              borderLeft: `4px solid ${COLORS[item.itemType]}`,
-            }}
+            className="cal-detail-item"
+            style={{ borderLeft: `4px solid ${COLORS[item.itemType]}`, padding: '14px 16px', borderRadius: '10px' }}
           >
-            <div>
-              <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text)' }}>{item.displayTitle}</div>
+            <div style={{ minWidth: 0, flex: '1 1 180px' }}>
+              <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text)', wordBreak: 'break-word' }}>{item.displayTitle}</div>
               {item.description && (
-                <div style={{ fontSize: '12px', color: 'var(--text-2)', marginTop: '3px' }}>
+                <div style={{ fontSize: '12px', color: 'var(--text-2)', marginTop: '3px', wordBreak: 'break-word' }}>
                   {item.description}
                 </div>
               )}
@@ -834,7 +838,7 @@ function DayView({ current, items, isManager, onEdit, onDelete }) {
             </div>
 
             {isManager && item.itemType === 'event' && (
-              <div style={{ display: 'flex', gap: '6px' }}>
+              <div className="cal-detail-actions">
                 <button className="btn btn-ghost btn-sm" onClick={() => onEdit(item)}>
                   Edit
                 </button>
@@ -973,7 +977,7 @@ function EventForm({ initial, members, onSave, onCancel, saving = false }) {
 
       <div className="form-group">
         <label className="form-label">Add Guest by Email</label>
-        <div style={{ display: 'flex', gap: '8px' }}>
+        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
           <input
             className="form-input"
             type="email"
@@ -981,6 +985,7 @@ function EventForm({ initial, members, onSave, onCancel, saving = false }) {
             onChange={(event) => setField('guest_email', event.target.value)}
             placeholder="guest@example.com"
             onKeyPress={(e) => e.key === 'Enter' && handleAddGuest()}
+            style={{ flex: '1 1 180px', minWidth: 0 }}
           />
           <button 
             type="button" 
@@ -989,7 +994,7 @@ function EventForm({ initial, members, onSave, onCancel, saving = false }) {
             disabled={invitingGuest}
             style={{ whiteSpace: 'nowrap' }}
           >
-            {invitingGuest ? 'Sending...' : 'Send Invite'}
+            {invitingGuest ? <Loader label="Sending..." size="sm" variant="button" /> : 'Send Invite'}
           </button>
         </div>
       </div>
@@ -999,7 +1004,7 @@ function EventForm({ initial, members, onSave, onCancel, saving = false }) {
           Cancel
         </button>
         <button className="btn btn-primary" onClick={() => onSave(form)} disabled={saving}>
-          {saving ? 'Saving...' : (initial?.id ? 'Save Changes' : 'Create Event')}
+          {saving ? <Loader label="Saving..." size="sm" variant="button" /> : (initial?.id ? 'Save Changes' : 'Create Event')}
         </button>
       </div>
     </div>

@@ -55,9 +55,9 @@ async function deliverPush(userId, title, body, data = {}) {
           payload,
         );
       } catch (err) {
-        // 404/410 = subscription is dead (browser unsubscribed, device
-        // reset, etc.) — clean it up so future sends don't keep failing.
-        if (err.statusCode === 404 || err.statusCode === 410) {
+        // Provider rejection means the endpoint is no longer usable. Remove
+        // it so future notifications do not repeatedly retry a dead device.
+        if ([400, 401, 403, 404, 410].includes(err.statusCode)) {
           await db
             .query(`DELETE FROM push_subscriptions WHERE id = $1`, [sub.id])
             .catch(() => {});
@@ -78,21 +78,53 @@ async function deliverPush(userId, title, body, data = {}) {
 async function createNotification(userId, title, body, data = {}) {
   try {
     const message = body ? `${title}: ${body}` : title;
+    const metadata = { ...data };
+    const dedupeKey = metadata.eventKey || null;
+    delete metadata.eventKey;
 
     const { rows } = await db.query(
-      `INSERT INTO notifications (member_id, message)
-       VALUES ($1, $2)
-       RETURNING id, member_id, message, read, created_at`,
-      [userId, message],
+      `INSERT INTO notifications
+         (member_id, message, type, title, body, related_entity_id,
+          related_entity_type, metadata, dedupe_key)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+       ON CONFLICT (member_id, dedupe_key) WHERE dedupe_key IS NOT NULL
+       DO NOTHING
+       RETURNING id, member_id, type, title, body, message, related_entity_id,
+                 related_entity_type, metadata, read, created_at`,
+      [
+        userId,
+        message,
+        data.type || "general",
+        title,
+        body || null,
+        data.entityId == null ? null : String(data.entityId),
+        data.entityType || null,
+        JSON.stringify(metadata),
+        dedupeKey,
+      ],
     );
+
+    const created = Boolean(rows[0]);
+    const notification = rows[0] || (dedupeKey
+      ? (await db.query(
+        `SELECT id, member_id, type, title, body, message, related_entity_id,
+                related_entity_type, metadata, read, created_at
+           FROM notifications WHERE member_id = $1 AND dedupe_key = $2`,
+        [userId, dedupeKey],
+      )).rows[0]
+      : null);
+
+    if (!notification) return null;
 
     // Fire-and-forget: don't let a push delivery failure block the
     // in-app notification from being saved/returned.
-    deliverPush(userId, title, body, data).catch((err) => {
-      console.error('[pushNotify] deliverPush failed:', err.message);
-    });
+    if (created) {
+      deliverPush(userId, title, body, metadata).catch((err) => {
+        console.error('[pushNotify] deliverPush failed:', err.message);
+      });
+    }
 
-    return rows[0];
+    return notification;
   } catch (err) {
     console.error('[pushNotify] createNotification failed:', err.message);
     return null;

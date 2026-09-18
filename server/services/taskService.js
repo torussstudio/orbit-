@@ -261,7 +261,13 @@ async function createTask(data, user) {
         mid,
         "📌 New Task Assigned",
         `You have been assigned: ${title}`,
-        { url: "/tasks" },
+        {
+          type: parent_task_id ? "subtask_assigned" : "task_assigned",
+          entityId: task.id,
+          entityType: "task",
+          eventKey: `task-assigned:${task.id}:${mid}:${task.created_at}`,
+          url: `/projects/${task.project_id}/tasks/${task.id}`,
+        },
       ).catch(() => {});
     });
 
@@ -288,6 +294,10 @@ async function updateTask(taskId, data, user) {
   }
 
   const isSubTask = Boolean(task.rows[0].parent_task_id);
+  const { rows: previousAssignees } = assigneeIdsProvided
+    ? await db.query("SELECT member_id FROM task_assignees WHERE task_id=$1", [taskId])
+    : { rows: [] };
+  const previousAssigneeIds = new Set(previousAssignees.map((row) => String(row.member_id)));
 
   if (user.role === "member") {
     if (MANAGER_STAGES.includes(stage)) {
@@ -417,6 +427,41 @@ async function updateTask(taskId, data, user) {
     }
 
     await client.query("COMMIT");
+
+    if (assigneeIdsProvided) {
+      const nextAssigneeIds = new Set(assigneeIds.map((id) => String(id)));
+      const added = assigneeIds.filter((id) => !previousAssigneeIds.has(String(id)));
+      const removed = [...previousAssigneeIds].filter((id) => !nextAssigneeIds.has(id));
+
+      added.forEach((memberId) => {
+        createNotification(
+          memberId,
+          isSubTask ? "Subtask Assigned" : "Task Assigned",
+          `You have been assigned: ${rows[0].title}`,
+          {
+            type: isSubTask ? "subtask_assigned" : "task_assigned",
+            entityId: rows[0].id,
+            entityType: "task",
+            eventKey: `task-assigned:${rows[0].id}:${memberId}:${rows[0].updated_at}`,
+            url: `/projects/${rows[0].project_id}/tasks/${rows[0].id}`,
+          },
+        ).catch(() => {});
+      });
+      removed.forEach((memberId) => {
+        createNotification(
+          memberId,
+          isSubTask ? "Subtask Unassigned" : "Task Unassigned",
+          `You are no longer assigned to: ${rows[0].title}`,
+          {
+            type: isSubTask ? "subtask_unassigned" : "task_unassigned",
+            entityId: rows[0].id,
+            entityType: "task",
+            eventKey: `task-unassigned:${rows[0].id}:${memberId}:${rows[0].updated_at}`,
+            url: `/projects/${rows[0].project_id}/tasks/${rows[0].id}`,
+          },
+        ).catch(() => {});
+      });
+    }
 
     return rows[0];
   } catch (e) {

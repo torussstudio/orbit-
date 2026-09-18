@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import Loader from '../components/ui/Loader';
 
 export default function Login() {
   const [email, setEmail] = useState('');
@@ -81,7 +82,7 @@ export default function Login() {
               disabled={loading}
               className="w-full flex items-center justify-center gap-1.5 px-5 py-2.5 rounded-[var(--radius-sm)] text-[13px] font-semibold cursor-pointer transition-all border-0 bg-gradient-to-br from-[var(--accent)] to-[var(--accent-2)] text-white shadow-[0_2px_8px_rgba(99,102,241,0.3)] hover:shadow-[0_4px_16px_rgba(99,102,241,0.4)] hover:-translate-y-px disabled:opacity-70 disabled:cursor-not-allowed"
             >
-              {loading ? 'Signing in...' : 'Sign In'}
+              {loading ? <Loader label="Signing in..." size="sm" variant="button" /> : 'Sign In'}
             </button>
           </form>
         </div>

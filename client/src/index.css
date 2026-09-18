@@ -33,6 +33,11 @@
 
   * { box-sizing: border-box; margin: 0; padding: 0; }
 
+  html, body, #root { min-height: 100%; }
+  body { overflow-x: hidden; }
+  img, svg, video, canvas { max-width: 100%; }
+  button, input, select, textarea { max-width: 100%; }
+
   body {
     background: var(--bg);
     color: var(--text);
@@ -48,19 +53,50 @@
 }
 
 @layer components {
-  /* Spinner utilities */
-  .spinner {
-    width: 32px; height: 32px;
-    border: 2.5px solid var(--border);
-    border-top-color: var(--accent);
-    border-radius: 50%;
-    animation: spin 0.7s linear infinite;
+  .orbit-loader { display: inline-flex; align-items: center; justify-content: center; gap: 8px; color: var(--text-2); }
+  .orbit-loader-screen {
+    position: fixed; inset: 0; z-index: 4000; width: 100vw; height: 100dvh;
+    display: flex; align-items: center; justify-content: center; overflow: hidden;
+    background: var(--bg-2);
   }
+  .orbit-loader-page {
+    position: fixed; inset: 0; z-index: 4000; width: 100vw; height: 100dvh;
+    display: flex; align-items: center; justify-content: center; overflow: hidden;
+    background: var(--bg-2);
+  }
+  .orbit-loader-button { color: currentColor; font-size: inherit; white-space: nowrap; }
+  .orbit-loader-spinner { display: block; width: 24px; height: 24px; flex: 0 0 auto; border: 2.5px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: orbitLoaderSpin 0.75s linear infinite; }
+  .orbit-loader-sm .orbit-loader-spinner { width: 14px; height: 14px; border-width: 2px; }
+  .orbit-loader-lg .orbit-loader-spinner { width: 24px; height: 24px; }
+  .orbit-skeleton { display: grid; gap: 10px; min-height: 82px; }
+  .orbit-skeleton-line { display: block; width: 100%; height: 12px; border-radius: 6px; background: linear-gradient(100deg, var(--bg-3) 20%, var(--bg-4) 45%, var(--bg-3) 70%); background-size: 220% 100%; animation: orbitSkeletonShimmer 1.25s ease-in-out infinite; }
+  .orbit-skeleton-line:last-child { width: 68%; }
+  .orbit-notification-skeleton-list { padding: 14px 16px; }
+  .toast-stack {
+    position: fixed; right: 20px; bottom: 20px; z-index: 3000;
+    display: flex; flex-direction: column; gap: 8px; width: min(360px, calc(100vw - 24px));
+    pointer-events: none;
+  }
+  .toast {
+    display: flex; align-items: center; gap: 9px; padding: 11px 13px;
+    border: 1px solid var(--border); border-left: 3px solid var(--success);
+    border-radius: 9px; background: var(--bg-2); box-shadow: var(--shadow);
+    color: var(--text); font-size: 13px; animation: toastIn 0.2s ease both;
+  }
+  .toast-error { border-left-color: var(--danger); }
+  .toast-mark { color: var(--success); font-weight: 700; }
+  .toast-error .toast-mark { color: var(--danger); }
 
-  @keyframes spin { to { transform: rotate(360deg); } }
+  @keyframes orbitLoaderSpin { to { transform: rotate(360deg); } }
+  @keyframes orbitSkeletonShimmer { to { background-position: -220% 0; } }
+  @keyframes toastIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
   @keyframes fadeIn { from { opacity: 0; } }
   @keyframes slideUp { from { transform: translateY(20px); opacity: 0; } }
   @keyframes datePickerIn { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: translateY(0); } }
+
+  @media (prefers-reduced-motion: reduce) {
+    .orbit-loader-spinner, .orbit-skeleton-line { animation: none; }
+  }
 
   /* Badges — kept as Tailwind component utilities for reuse across components */
   .badge {
@@ -229,7 +265,7 @@
   }
   .modal {
     background: var(--bg-2); border: 1px solid var(--border);
-    border-radius: 16px; width: 100%; max-width: 520px; max-height: 85vh;
+    border-radius: 16px; width: min(520px, calc(100vw - 32px)); max-width: 520px; max-height: 85vh;
     overflow: hidden; display: flex; flex-direction: column;
     animation: slideUp 0.2s ease; box-shadow: 0 20px 60px rgba(99,102,241,0.15);
   }
@@ -260,7 +296,7 @@
   .page-body { padding: 24px 32px 40px; flex: 1; }
 
   /* Cards grid */
-  .card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; }
+  .card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(300px, 100%), 1fr)); gap: 16px; }
 
   /* Stats */
   .stats-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 14px; margin-bottom: 24px; }
@@ -279,6 +315,7 @@
   /* Tables */
   .table-wrap { overflow-x: auto; }
   table { width: 100%; border-collapse: collapse; }
+  .table-wrap table { min-width: 620px; }
   th {
     padding: 10px 14px; text-align: left;
     font-size: 11px; font-weight: 700; letter-spacing: 0.8px;
@@ -333,4 +370,63 @@
     display: flex; align-items: center; justify-content: center;
     font-size: 13px; font-weight: 700; color: white; font-family: var(--font-body);
   }
+
+  .sidebar { position: fixed; }
+
+  .page-header > *, .page-body > *, .card, .stat-card, .modal-body,
+  .main-content, .td-main-grid > *, [class*="grid"] > * { min-width: 0; }
+}
+
+@media (max-width: 767px) {
+  .page-header { padding: 20px 16px 0; align-items: flex-start; }
+  .page-body { padding: 18px 16px 32px; }
+  .page-title { font-size: 20px; }
+  .form-row { grid-template-columns: 1fr; gap: 0; }
+  .modal-overlay { align-items: flex-end; }
+  .modal { width: calc(100vw - 24px); max-width: none; max-height: 92vh; border-radius: 16px 16px 0 0; }
+  .modal-header { padding: 20px 18px 0; margin-bottom: 18px; }
+  .modal-body { padding: 0 18px 20px; }
+  .modal-actions { flex-wrap: wrap; }
+  .modal-actions .btn { flex: 1 1 120px; justify-content: center; }
+  .project-tabs { padding: 0 16px; overflow-x: auto; }
+  .tab-btn { white-space: nowrap; padding: 11px 14px; }
+  .toast-stack { right: 12px; bottom: 12px; }
+  .account-settings-page, .knowledge-page { padding: 20px 16px !important; }
+  .account-settings-grid, .knowledge-page { grid-template-columns: 1fr !important; }
+  .account-settings-form-grid { grid-template-columns: 1fr !important; gap: 0 !important; }
+  .tasks-page, .clusters-page, .credentials-page { padding: 18px 16px 32px !important; }
+  .tasks-toolbar { padding: 18px 16px 16px !important; margin: -18px -16px 0 !important; }
+  .cluster-detail-grid { grid-template-columns: 1fr !important; gap: 16px !important; }
+  .calendar-header-actions { width: 100%; flex-wrap: wrap; justify-content: flex-start; }
+  .calendar-header-actions > * { max-width: 100%; }
+}
+
+@media (min-width: 768px) {
+  .sidebar { position: relative; }
+}
+
+@media (max-width: 640px) {
+  .page-header { gap: 16px; }
+  .page-header > *:last-child { width: 100%; }
+  .page-header .btn { flex: 1 1 auto; justify-content: center; }
+  .table-wrap { max-width: 100%; }
+  .table-wrap table { min-width: 620px; }
+  .date-picker-panel { width: min(300px, calc(100vw - 16px)); }
+  .date-picker-day { width: 34px; height: 34px; }
+  .tasks-toolbar > * { min-width: 0; }
+}
+
+@media (max-width: 480px) {
+  .page-header { padding-inline: 12px; }
+  .page-body { padding-inline: 12px; }
+  .card { padding: 16px; }
+  .toast { max-width: calc(100vw - 24px); }
+}
+
+@media (max-width: 639px) {
+  header { padding-inline: 12px !important; gap: 8px !important; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
 }
