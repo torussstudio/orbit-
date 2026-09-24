@@ -26,11 +26,27 @@ async function authenticate(req, res, next) {
   }
 
   try {
-    const payload = verifyAccessToken(token);
+    const payload =
+      verifyAccessToken(token);
 
+    /*
+     * New access token structure:
+     *
+     * {
+     *   sub: user id,
+     *   sid: session id,
+     *   role: user role,
+     *   type: "access"
+     * }
+     *
+     * sid is required so the access token
+     * is always associated with one
+     * specific Orbit session.
+     */
     if (
       payload?.type !== "access" ||
-      !payload?.sub
+      !payload?.sub ||
+      !payload?.sid
     ) {
       return res.status(401).json({
         error: "INVALID_TOKEN",
@@ -55,14 +71,24 @@ async function authenticate(req, res, next) {
       });
     }
 
+    /*
+     * Keep sessionId in req.user.
+     *
+     * Controllers/services can use this when
+     * an operation needs to identify the
+     * current Orbit session.
+     */
     req.user = {
       id: member.id,
       role: member.role,
+      sessionId: payload.sid,
     };
 
     return next();
   } catch (err) {
-    if (err.name === "TokenExpiredError") {
+    if (
+      err.name === "TokenExpiredError"
+    ) {
       return res.status(401).json({
         error: "TOKEN_EXPIRED",
       });
@@ -98,7 +124,10 @@ function requireRole(...roles) {
   };
 }
 
-function requireSelfOrRole(paramName, role) {
+function requireSelfOrRole(
+  paramName,
+  role,
+) {
   return (req, res, next) => {
     if (
       req.user?.role === role ||
@@ -116,7 +145,8 @@ function requireSelfOrRole(paramName, role) {
 
 const auth = authenticate;
 
-const managerOnly = requireRole("manager");
+const managerOnly =
+  requireRole("manager");
 
 module.exports = {
   authenticate,

@@ -35,14 +35,14 @@ export default function App() {
           <Route path="/login" element={<Suspense fallback={<SuspenseFallback />}><Login /></Suspense>} />
           <Route path="/" element={<RequireAuth><Layout /></RequireAuth>}>
             <Route index element={<Suspense fallback={<SuspenseFallback />}><Dashboard /></Suspense>} />
-            <Route path="projects" element={<Suspense fallback={<SuspenseFallback />}><Projects /></Suspense>} />
-            <Route path="projects/:id" element={<Suspense fallback={<SuspenseFallback />}><ProjectDetail /></Suspense>} />
-            <Route path="projects/:id/tasks" element={<Suspense fallback={<SuspenseFallback />}><Tasks /></Suspense>} />
+            <Route path="projects" element={<RequireManager><Suspense fallback={<SuspenseFallback />}><Projects /></Suspense></RequireManager>} />
+            <Route path="projects/:id" element={<RequireManager><Suspense fallback={<SuspenseFallback />}><ProjectDetail /></Suspense></RequireManager>} />
+            <Route path="projects/:id/tasks" element={<RequireManager><Suspense fallback={<SuspenseFallback />}><Tasks /></Suspense></RequireManager>} />
             <Route path="projects/:id/tasks/:taskId" element={<Suspense fallback={<SuspenseFallback />}><TaskDetail /></Suspense>} />
-            <Route path="projects/:id/clusters" element={<Suspense fallback={<SuspenseFallback />}><Clusters /></Suspense>} />
-            <Route path="projects/:id/clusters/:clusterId" element={<Suspense fallback={<SuspenseFallback />}><ClusterDetail /></Suspense>} />
-            <Route path="projects/:id/credentials" element={<Suspense fallback={<SuspenseFallback />}><Credentials /></Suspense>} />
-            <Route path="projects/:id/knowledge" element={<Suspense fallback={<SuspenseFallback />}><Knowledge /></Suspense>} />
+            <Route path="projects/:id/clusters" element={<RequireManager><Suspense fallback={<SuspenseFallback />}><Clusters /></Suspense></RequireManager>} />
+            <Route path="projects/:id/clusters/:clusterId" element={<RequireManager><Suspense fallback={<SuspenseFallback />}><ClusterDetail /></Suspense></RequireManager>} />
+            <Route path="projects/:id/credentials" element={<RequireManager><Suspense fallback={<SuspenseFallback />}><Credentials /></Suspense></RequireManager>} />
+            <Route path="projects/:id/knowledge" element={<RequireManager><Suspense fallback={<SuspenseFallback />}><Knowledge /></Suspense></RequireManager>} />
             <Route path="tasks-view" element={<Suspense fallback={<SuspenseFallback />}><TaskView /></Suspense>} />
             <Route path="members" element={<RequireManager><Suspense fallback={<SuspenseFallback />}><Members /></Suspense></RequireManager>} />
             <Route path="calendar" element={<Suspense fallback={<SuspenseFallback />}><Calendar /></Suspense>} />

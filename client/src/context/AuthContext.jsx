@@ -1,8 +1,8 @@
 import {
   createContext,
   useContext,
-  useState,
   useEffect,
+  useState,
 } from "react";
 
 import api, {
@@ -16,6 +16,10 @@ import {
   setAccessToken,
   clearSession,
   getAccessToken,
+  getStoredRefreshToken,
+  getSessionId,
+  setRefreshToken,
+  setSessionId,
 } from "../api/tokenStore";
 
 const AuthContext =
@@ -33,8 +37,16 @@ export function AuthProvider({
   const [error, setError] =
     useState(null);
 
-  const [accessToken, setAccessTokenState] =
-    useState(null);
+  const [
+    accessToken,
+    setAccessTokenState,
+  ] = useState(null);
+
+  /*
+   * ==========================================================
+   * UPDATE USER
+   * ==========================================================
+   */
 
   const updateUser = (
     updatedData,
@@ -49,6 +61,19 @@ export function AuthProvider({
     );
   };
 
+  /*
+   * ==========================================================
+   * CLEAR CURRENT TAB AUTH
+   * ==========================================================
+   *
+   * IMPORTANT:
+   *
+   * This clears ONLY this browser tab.
+   *
+   * It does not touch another tab's
+   * sessionStorage.
+   */
+
   const clearClientSideAuth =
     () => {
       clearSession();
@@ -61,6 +86,26 @@ export function AuthProvider({
 
       setError(null);
     };
+
+  /*
+   * ==========================================================
+   * INITIAL AUTH RESTORE
+   * ==========================================================
+   *
+   * On page reload:
+   *
+   * accessToken -> gone because memory
+   *
+   * sessionStorage:
+   *   sessionId
+   *   refreshToken
+   *       ↓
+   * /auth/refresh
+   *       ↓
+   * new accessToken
+   *
+   * This works independently in every tab.
+   */
 
   useEffect(() => {
     let mounted = true;
@@ -90,15 +135,43 @@ export function AuthProvider({
     );
 
     /*
-     * On every full page reload:
+     * Check whether THIS TAB has
+     * an existing session.
      *
-     * memory access token is gone.
-     *
-     * Browser still has HttpOnly
-     * refresh cookie.
-     *
-     * Therefore restore session through
-     * /auth/refresh.
+     * If there is no sessionStorage
+     * auth state, don't call refresh.
+     */
+    const storedRefreshToken =
+      getStoredRefreshToken();
+
+    const storedSessionId =
+      getSessionId();
+
+    if (
+      !storedRefreshToken ||
+      !storedSessionId
+    ) {
+      if (mounted) {
+        setLoading(false);
+      }
+
+      return () => {
+        mounted = false;
+
+        window.removeEventListener(
+          "orbit:logout",
+          onLogout,
+        );
+
+        window.removeEventListener(
+          "orbit:auth-updated",
+          onAuthUpdated,
+        );
+      };
+    }
+
+    /*
+     * Restore THIS TAB's session.
      */
     refreshAccessToken()
       .then(async (token) => {
@@ -115,10 +188,10 @@ export function AuthProvider({
         }
 
         /*
-         * refresh response also contains user.
+         * Access token is restored.
          *
-         * refreshAccessToken() currently returns
-         * only token, so get current user through /me.
+         * Now get the current user's
+         * profile.
          */
         try {
           const {
@@ -149,17 +222,23 @@ export function AuthProvider({
         if (!mounted) return;
 
         /*
-         * No refresh cookie / expired session.
-         *
-         * This is normal when the user has
-         * never logged in.
+         * 401 means this tab's refresh
+         * session is no longer valid.
          */
         if (
           err.response?.status ===
-          401
+            401 ||
+          err.message ===
+            "No active Orbit session"
         ) {
           clearClientSideAuth();
         } else {
+          /*
+           * Network/server error.
+           *
+           * Don't unnecessarily destroy
+           * the stored session.
+           */
           setError(
             err.message ||
               "Authentication initialization failed",
@@ -187,13 +266,20 @@ export function AuthProvider({
     };
   }, []);
 
+  /*
+   * ==========================================================
+   * LOGIN
+   * ==========================================================
+   */
+
   const login = async (
-  email,
-  password,
-) => {
-  try {
-    const { data } =
-      await api.post(
+    email,
+    password,
+  ) => {
+    try {
+      const {
+        data,
+      } = await api.post(
         "/auth/login",
         {
           email,
@@ -201,11 +287,29 @@ export function AuthProvider({
         },
       );
 
-    /*
-     * Access token is returned by login
-     * and stored only in memory.
-     */
-    if (data.accessToken) {
+      /*
+       * Backend must return:
+       *
+       * accessToken
+       * refreshToken
+       * sessionId
+       * user
+       */
+
+      if (
+        !data.accessToken ||
+        !data.refreshToken ||
+        !data.sessionId
+      ) {
+        throw new Error(
+          "Invalid authentication response",
+        );
+      }
+
+      /*
+       * Store access token ONLY
+       * in memory.
+       */
       setAccessToken(
         data.accessToken,
       );
@@ -213,33 +317,71 @@ export function AuthProvider({
       setAccessTokenState(
         data.accessToken,
       );
+
+      /*
+       * Store refresh token ONLY
+       * in this tab's sessionStorage.
+       */
+      setRefreshToken(
+        data.refreshToken,
+      );
+
+      /*
+       * Store session ID ONLY
+       * in this tab's sessionStorage.
+       */
+      setSessionId(
+        data.sessionId,
+      );
+
+      /*
+       * Backend already returned the
+       * user, so use it immediately.
+       */
+      if (data.user) {
+        setUser(data.user);
+      } else {
+        /*
+         * Fallback for backend responses
+         * without user.
+         */
+        const {
+          data: profile,
+        } = await api.get(
+          "/auth/me",
+        );
+
+        setUser(profile);
+      }
+
+      setError(null);
+
+      return data.user;
+    } catch (err) {
+      const message =
+        err.response?.data
+          ?.error ||
+        err.message ||
+        "Login failed";
+
+      setError(message);
+
+      throw err;
     }
+  };
 
-    /*
-     * Get complete user profile separately.
-     */
-    const {
-      data: profile,
-    } = await api.get(
-      "/auth/me",
-    );
-
-    setUser(profile);
-
-    setError(null);
-
-    return profile;
-  } catch (err) {
-    const message =
-      err.response?.data
-        ?.error ||
-      "Login failed";
-
-    setError(message);
-
-    throw err;
-  }
-};
+  /*
+   * ==========================================================
+   * LOGOUT CURRENT SESSION
+   * ==========================================================
+   *
+   * IMPORTANT:
+   *
+   * Only the current tab/session is
+   * revoked.
+   *
+   * Other tabs/users are untouched.
+   */
 
   const logout = async () => {
     setLogoutInProgress(
@@ -248,7 +390,8 @@ export function AuthProvider({
 
     try {
       /*
-       * Wait for any active refresh request.
+       * Wait for any refresh currently
+       * running in this tab.
        */
       try {
         await waitForRefresh();
@@ -256,14 +399,41 @@ export function AuthProvider({
         // Continue logout.
       }
 
+      const refreshToken =
+        getStoredRefreshToken();
+
+      const sessionId =
+        getSessionId();
+
       /*
-       * Backend revokes refresh session
-       * and clears HttpOnly cookie.
+       * Only send logout request when
+       * this tab actually has a session.
        */
-      await api.post(
-        "/auth/logout",
-      );
+      if (
+        refreshToken &&
+        sessionId
+      ) {
+        await api.post(
+          "/auth/logout",
+          {
+            refreshToken,
+          },
+          {
+            headers: {
+              "X-Orbit-Session-Id":
+                sessionId,
+
+              "X-Orbit-Client":
+                "1",
+            },
+          },
+        );
+      }
     } catch (err) {
+      /*
+       * Even if the server request fails,
+       * clear the local session for this tab.
+       */
       console.error(
         "Logout request failed:",
         err.message,
@@ -275,6 +445,13 @@ export function AuthProvider({
         false,
       );
 
+      /*
+       * This event is LOCAL to this
+       * browser tab.
+       *
+       * It does not use localStorage
+       * or BroadcastChannel.
+       */
       window.dispatchEvent(
         new Event(
           "orbit:logout",
@@ -282,6 +459,12 @@ export function AuthProvider({
       );
     }
   };
+
+  /*
+   * ==========================================================
+   * CONTEXT
+   * ==========================================================
+   */
 
   return (
     <AuthContext.Provider

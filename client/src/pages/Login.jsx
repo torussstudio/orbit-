@@ -68,7 +68,7 @@ export default function Login() {
                   <input
                     className="w-full bg-[var(--bg-3)] border border-[var(--border)] rounded-xl pl-9 pr-3 py-[10px] text-[var(--text)] font-[var(--font-body)] text-sm outline-none transition-all focus:border-[var(--accent)] focus:ring-2 focus:ring-[var(--accent)]/25"
                     type="email"
-                    autoComplete="email"
+                    autoComplete="username"
                     autoFocus
                     value={email}
                     onChange={e => setEmail(e.target.value)}

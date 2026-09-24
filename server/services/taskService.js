@@ -2,7 +2,9 @@ const db = require("../db");
 const { assertProjectAccess } = require("./accessControl");
 const { createNotification } = require("../utils/pushNotify");
 
-const MANAGER_STAGES = ["Done"];
+// Stages a member can never set. "Done" needs manager approval, and
+// "Rework" is the manager's review decision (send back for rework).
+const MANAGER_STAGES = ["Done", "Rework"];
 
 const ASSIGNEE_JOIN = `
   LEFT JOIN LATERAL (
@@ -302,6 +304,12 @@ async function updateTask(taskId, data, user) {
   if (user.role === "member") {
     if (MANAGER_STAGES.includes(stage)) {
       const err = new Error("Manager approval required for this stage");
+      err.status = 403;
+      throw err;
+    }
+    // Once a manager has approved a task as Done, members can't reopen it.
+    if (task.rows[0].stage === "Done") {
+      const err = new Error("Only a manager can change a task that is marked Done");
       err.status = 403;
       throw err;
     }

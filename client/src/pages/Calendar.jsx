@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState, useRef } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import api from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import Modal from '../components/ui/Modal';
@@ -13,6 +14,9 @@ const COLORS = {
   deadline: '#a855f7',
   birthday: '#f59e0b',
 };
+
+// Order used when listing a day's items inside the day modal.
+const TYPE_ORDER = { event: 0, task: 1, deadline: 2, birthday: 3 };
 
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const MONTHS = [
@@ -30,8 +34,16 @@ const MONTHS = [
   'December',
 ];
 
+const EMPTY_CONFIRM = { show: false, title: '', message: '', action: null, loading: false, isDangerous: false };
+
 function normalizeEmail(email) {
   return String(email || '').trim().toLowerCase();
+}
+
+// Builds a value for <input type="datetime-local"> in the user's local time.
+function toInputValue(date, hour = 9) {
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(hour)}:00`;
 }
 
 function buildCalendarItems(data, currentYear) {
@@ -99,6 +111,14 @@ function formatDayMeta(item) {
   return '';
 }
 
+function sortDayItems(items) {
+  return [...items].sort((a, b) => {
+    const byType = TYPE_ORDER[a.itemType] - TYPE_ORDER[b.itemType];
+    if (byType !== 0) return byType;
+    return a.date - b.date;
+  });
+}
+
 // Shared responsive rules for this page. Kept in one place so every sub-view
 // (month/week/day) stays consistent across breakpoints without repeating
 // media queries inline (inline styles can't express them).
@@ -128,6 +148,7 @@ function CalendarResponsiveStyles() {
         border-right: 1px solid var(--border); border-bottom: 1px solid var(--border);
         cursor: pointer; transition: background 0.18s ease;
       }
+      .cal-cell:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
       .cal-cell-empty { min-height: 100px; border-right: 1px solid var(--border); border-bottom: 1px solid var(--border); background: var(--bg-3); }
       .cal-day-num {
         width: 26px; height: 26px; border-radius: 50%; display: flex; align-items: center;
@@ -150,6 +171,17 @@ function CalendarResponsiveStyles() {
 
       .cal-detail-item { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; padding: 10px 12px; border-radius: 8px; margin-bottom: 8px; background: var(--bg-3); flex-wrap: wrap; }
       .cal-detail-actions { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+      .cal-detail-item-click { cursor: pointer; transition: box-shadow 0.15s ease; }
+      .cal-detail-item-click:hover { box-shadow: 0 0 0 1px var(--accent); }
+      .cal-detail-item-click:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+      /* Day drill-down modal */
+      .cal-modal-nav { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 12px; }
+      .cal-modal-summary { font-size: 12px; color: var(--text-3); text-align: center; flex: 1; }
+      .cal-modal-list { max-height: 55vh; overflow-y: auto; padding-right: 2px; }
+      .cal-modal-footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; flex-wrap: wrap; }
+      .cal-empty { text-align: center; padding: 28px 12px; color: var(--text-3); font-size: 13px; }
+      .cal-empty-title { font-size: 14px; font-weight: 600; color: var(--text-2); margin-bottom: 4px; }
 
       @media (max-width: 640px) {
         .cal-nav-btn-label { display: none; }
@@ -175,35 +207,36 @@ function CalendarResponsiveStyles() {
 
 export default function Calendar() {
   const { isManager, user } = useAuth();
+  const navigate = useNavigate();
   const [data, setData] = useState({ events: [], tasks: [], projects: [], birthdays: [] });
   const [members, setMembers] = useState([]);
   const [loading, setLoading] = useState(true);
+  // Calendar (month grid) is the default view.
   const [view, setView] = useState('month');
   const [current, setCurrent] = useState(new Date());
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState(null);
+  // Start value (datetime-local format) used when creating an event from a day / time slot.
+  const [prefillStart, setPrefillStart] = useState('');
   const [selectedDay, setSelectedDay] = useState(null);
   const [selectedFilterMembers, setSelectedFilterMembers] = useState([]);
-  const [selectedTimeSlot, setSelectedTimeSlot] = useState(null);
-  const [confirmModal, setConfirmModal] = useState({ show: false, title: '', message: '', action: null, loading: false, isDangerous: false });
+  const [confirmModal, setConfirmModal] = useState(EMPTY_CONFIRM);
   const [saving, setSaving] = useState(false);
+
+  const memberParams = useMemo(() => {
+    const memberEmails = selectedFilterMembers
+      .map((member) => normalizeEmail(member.email))
+      .filter(Boolean);
+    return memberEmails.length > 0 ? { members: memberEmails.join(',') } : {};
+  }, [selectedFilterMembers]);
 
   useEffect(() => {
     async function load() {
       setLoading(true);
 
       try {
-        const params = {};
-        const memberEmails = selectedFilterMembers
-          .map((member) => normalizeEmail(member.email))
-          .filter(Boolean);
-
-        if (memberEmails.length > 0) {
-          params.members = memberEmails.join(',');
-        }
-
         const [calendarResponse, membersResponse] = await Promise.all([
-          api.get('/calendar', { params }),
+          api.get('/calendar', { params: memberParams }),
           api.get('/members'),
         ]);
 
@@ -217,7 +250,17 @@ export default function Calendar() {
     }
 
     load();
-  }, [selectedFilterMembers]);
+  }, [memberParams]);
+
+  // Silent refresh: keeps the page (and any open day modal) on screen instead of flashing the page loader.
+  const refreshCalendar = async () => {
+    try {
+      const response = await api.get('/calendar', { params: memberParams });
+      setData(response.data);
+    } catch (error) {
+      console.error('Error refreshing calendar:', error);
+    }
+  };
 
   const allItems = useMemo(
     () => buildCalendarItems(data, current.getFullYear()),
@@ -239,30 +282,49 @@ export default function Calendar() {
     `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`,
   ) || [];
 
+  const openNewEvent = (date, hour = 9) => {
+    setEditing(null);
+    setPrefillStart(date ? toInputValue(date, hour) : '');
+    setShowModal(true);
+  };
+
+  const openEdit = (item) => {
+    setEditing(item);
+    setPrefillStart('');
+    setShowModal(true);
+  };
+
+  const closeForm = () => {
+    setShowModal(false);
+    setEditing(null);
+    setPrefillStart('');
+  };
+
+  // Same target as clicking a row in Task View: the task's detail page.
+  const openTask = (task) => {
+    navigate(`/projects/${task.project_id}/tasks/${task.id}`);
+  };
+
+  const shiftSelectedDay = (delta) => {
+    setSelectedDay((previous) => {
+      const next = new Date(previous);
+      next.setDate(next.getDate() + delta);
+      return next;
+    });
+  };
+
   const handleSave = async (formData) => {
     setSaving(true);
     try {
-      if (editing) {
+      if (editing?.id) {
         await api.put(`/calendar/${editing.id}`, formData);
       } else {
         await api.post('/calendar', formData);
       }
 
-      setShowModal(false);
-      setEditing(null);
-      setSelectedDay(null);
-      setLoading(true);
-
-      try {
-        const memberEmails = selectedFilterMembers
-          .map((member) => normalizeEmail(member.email))
-          .filter(Boolean);
-        const params = memberEmails.length > 0 ? { members: memberEmails.join(',') } : {};
-        const response = await api.get('/calendar', { params });
-        setData(response.data);
-      } finally {
-        setLoading(false);
-      }
+      closeForm();
+      // selectedDay is intentionally kept, so the day modal reappears with the updated list.
+      await refreshCalendar();
     } finally {
       setSaving(false);
     }
@@ -275,31 +337,24 @@ export default function Calendar() {
       message: 'Delete this event?',
       isDangerous: true,
       action: async () => {
-        await api.delete(`/calendar/${id}`);
-        setSelectedDay(null);
-        setLoading(true);
         try {
-          const memberEmails = selectedFilterMembers
-            .map((member) => normalizeEmail(member.email))
-            .filter(Boolean);
-          const params = memberEmails.length > 0 ? { members: memberEmails.join(',') } : {};
-          const response = await api.get('/calendar', { params });
-          setData(response.data);
-        } finally {
-          setLoading(false);
+          await api.delete(`/calendar/${id}`);
+          await refreshCalendar();
+        } catch (error) {
+          console.error('Error deleting event:', error);
         }
       },
-      loading: false
+      loading: false,
     });
   };
 
   const executeConfirmAction = async () => {
     if (!confirmModal.action) return;
-    setConfirmModal(prev => ({ ...prev, loading: true }));
+    setConfirmModal((prev) => ({ ...prev, loading: true }));
     try {
       await confirmModal.action();
     } finally {
-      setConfirmModal({ show: false, title: '', message: '', action: null, loading: false, isDangerous: false });
+      setConfirmModal(EMPTY_CONFIRM);
     }
   };
 
@@ -340,14 +395,11 @@ export default function Calendar() {
               </button>
             ))}
           </div>
+          <button className="btn btn-ghost" onClick={() => setCurrent(new Date())}>
+            Today
+          </button>
           {isManager && (
-            <button
-              className="btn btn-primary"
-              onClick={() => {
-                setEditing(null);
-                setShowModal(true);
-              }}
-            >
+            <button className="btn btn-primary" onClick={() => openNewEvent(null)}>
               + New Event
             </button>
           )}
@@ -431,156 +483,64 @@ export default function Calendar() {
             <MonthView current={current} getItemsForDate={getItemsForDate} onDayClick={setSelectedDay} />
           )}
           {view === 'week' && (
-            <WeekView 
-              current={current} 
-              getItemsForDate={getItemsForDate} 
+            <WeekView
+              current={current}
+              getItemsForDate={getItemsForDate}
               onDayClick={setSelectedDay}
               isManager={isManager}
-              onClickEvent={(item) => {
-                setEditing(item);
-                setShowModal(true);
-              }}
-              onClickTimeSlot={(date, hour) => {
-                setSelectedTimeSlot({ date, hour });
-                const newDate = new Date(date);
-                newDate.setHours(hour, 0);
-                setEditing({ start_date: newDate.toISOString(), type: 'event' });
-                setShowModal(true);
-              }}
+              // Managers edit straight away; everyone else gets the read-only day modal.
+              onClickEvent={(item) => (isManager ? openEdit(item) : setSelectedDay(item.date))}
+              onClickTimeSlot={(date, hour) => openNewEvent(date, hour)}
             />
           )}
           {view === 'day' && (
             <DayView
-              current={current}
-              items={getItemsForDate(current)}
+              items={sortDayItems(getItemsForDate(current))}
               isManager={isManager}
-              onEdit={(item) => {
-                setEditing(item);
-                setShowModal(true);
-              }}
+              onEdit={openEdit}
               onDelete={handleDelete}
+              onOpenTask={openTask}
             />
           )}
         </div>
-
-        {selectedDay && (
-          <div style={{ marginTop: '20px' }}>
-            <div className="card">
-              <div
-                style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  marginBottom: '16px',
-                  gap: '8px',
-                  flexWrap: 'wrap',
-                }}
-              >
-                <h3 style={{ fontSize: '14px', fontWeight: 700, minWidth: 0 }}>
-                  {selectedDay.toLocaleDateString('en-US', {
-                    weekday: 'long',
-                    month: 'long',
-                    day: 'numeric',
-                  })}
-                </h3>
-                <button className="btn btn-ghost btn-sm" onClick={() => setSelectedDay(null)}>
-                  Close
-                </button>
-              </div>
-
-              {getItemsForDate(selectedDay).length === 0 ? (
-                <p style={{ color: 'var(--text-3)', fontSize: '13px' }}>No items on this day.</p>
-              ) : (
-                getItemsForDate(selectedDay).map((item, index) => (
-                  <div
-                    key={`${item.itemType}-${item.id || item.name || index}`}
-                    className="cal-detail-item"
-                    style={{ borderLeft: `3px solid ${COLORS[item.itemType]}` }}
-                  >
-                    <div style={{ minWidth: 0, flex: '1 1 160px' }}>
-                      <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text)', wordBreak: 'break-word' }}>
-                        {item.displayTitle}
-                      </div>
-                      {item.description && (
-                        <div style={{ fontSize: '12px', color: 'var(--text-2)', marginTop: '2px', wordBreak: 'break-word' }}>
-                          {item.description}
-                        </div>
-                      )}
-                      {formatDayMeta(item) && (
-                        <div style={{ fontSize: '11px', color: 'var(--text-3)', marginTop: '2px' }}>
-                          {formatDayMeta(item)}
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="cal-detail-actions">
-                      <span
-                        style={{
-                          fontSize: '11px',
-                          padding: '2px 8px',
-                          borderRadius: '12px',
-                          background: `${COLORS[item.itemType]}20`,
-                          color: COLORS[item.itemType],
-                          fontWeight: 600,
-                          whiteSpace: 'nowrap',
-                        }}
-                      >
-                        {item.itemType}
-                      </span>
-                      {isManager && item.itemType === 'event' && (
-                        <>
-                          <button
-                            className="btn btn-ghost btn-sm"
-                            onClick={() => {
-                              setEditing(item);
-                              setShowModal(true);
-                            }}
-                          >
-                            Edit
-                          </button>
-                          <button className="btn btn-danger btn-sm" onClick={() => handleDelete(item.id)}>
-                            Delete
-                          </button>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-        )}
       </div>
 
+      {/* Day drill-down. Hidden while the event form is open, and comes back afterwards. */}
+      {selectedDay && !showModal && (
+        <DayModal
+          date={selectedDay}
+          items={sortDayItems(getItemsForDate(selectedDay))}
+          isManager={isManager}
+          onClose={() => setSelectedDay(null)}
+          onShiftDay={shiftSelectedDay}
+          onAdd={() => openNewEvent(selectedDay)}
+          onOpenTask={openTask}
+          onEdit={openEdit}
+          onDelete={handleDelete}
+        />
+      )}
+
       {showModal && (
-        <Modal
-          title={editing ? 'Edit Event' : 'New Event'}
-          onClose={() => {
-            setShowModal(false);
-            setEditing(null);
-          }}
-        >
+        <Modal title={editing?.id ? 'Edit Event' : 'New Event'} onClose={closeForm}>
           <EventForm
             initial={editing}
+            prefillStart={prefillStart}
             members={members.filter((member) => member.active !== false)}
             onSave={handleSave}
             saving={saving}
-            onCancel={() => {
-              setShowModal(false);
-              setEditing(null);
-            }}
+            onCancel={closeForm}
           />
         </Modal>
       )}
 
-      <ConfirmModal 
+      <ConfirmModal
         isOpen={confirmModal.show}
         title={confirmModal.title}
         message={confirmModal.message}
         confirmText={confirmModal.isDangerous ? 'Delete' : 'Confirm'}
         isDangerous={confirmModal.isDangerous}
         onConfirm={executeConfirmAction}
-        onCancel={() => setConfirmModal({ show: false, title: '', message: '', action: null, loading: false, isDangerous: false })}
+        onCancel={() => setConfirmModal(EMPTY_CONFIRM)}
         loading={confirmModal.loading}
       />
     </>
@@ -630,7 +590,8 @@ function MonthView({ current, getItemsForDate, onDayClick }) {
               onClick={() => onDayClick(date)}
               role="button"
               tabIndex={0}
-              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') onDayClick(date); }}
+              aria-label={`${date.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}, ${items.length} ${items.length === 1 ? 'item' : 'items'}`}
+              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onDayClick(date); } }}
               style={{
                 background: baseBackground,
                 boxShadow: isToday ? 'inset 0 0 0 1px rgba(99,102,241,0.15)' : 'none',
@@ -701,10 +662,10 @@ function WeekView({ current, getItemsForDate, onDayClick, isManager, onClickEven
   });
 
   const hours = Array.from({ length: 24 }, (_, i) => i);
-  
+
   const getEventsForTimeSlot = (date, hour) => {
     const dateItems = getItemsForDate(date);
-    return dateItems.filter(item => {
+    return dateItems.filter((item) => {
       if (item.itemType === 'event' && item.start_date) {
         const eventDate = new Date(item.start_date);
         return eventDate.getHours() === hour;
@@ -718,7 +679,7 @@ function WeekView({ current, getItemsForDate, onDayClick, isManager, onClickEven
       {/* Time column on the left */}
       <div className="cal-week-timecol">
         <div style={{ height: '60px', display: 'flex', alignItems: 'flex-end', justifyContent: 'center', paddingBottom: '8px', fontWeight: 600, fontSize: '12px' }}></div>
-        {hours.map(hour => (
+        {hours.map((hour) => (
           <div key={hour} className="cal-week-hour">
             {String(hour).padStart(2, '0')}:00
           </div>
@@ -768,11 +729,11 @@ function WeekView({ current, getItemsForDate, onDayClick, isManager, onClickEven
         })}
 
         {/* Time slots grid */}
-        {hours.map(hour =>
+        {hours.map((hour) =>
           days.map((date, dayIndex) => {
             const isToday = date.toDateString() === today.toDateString();
             const slotEvents = getEventsForTimeSlot(date, hour);
-            
+
             return (
               <div
                 key={`slot-${date.toISOString()}-${hour}`}
@@ -808,57 +769,165 @@ function WeekView({ current, getItemsForDate, onDayClick, isManager, onClickEven
   );
 }
 
-function DayView({ current, items, isManager, onEdit, onDelete }) {
+// One row in a day's list. Shared by the day modal and the Day tab so both behave the same.
+function ItemRow({ item, isManager, onEdit, onDelete, onOpenTask, roomy = false }) {
+  const color = COLORS[item.itemType];
+  const meta = formatDayMeta(item);
+  const isEditable = isManager && item.itemType === 'event';
+  const isTask = item.itemType === 'task' && item.project_id != null && Boolean(onOpenTask);
+
+  return (
+    <div
+      className={isTask ? 'cal-detail-item cal-detail-item-click' : 'cal-detail-item'}
+      role={isTask ? 'button' : undefined}
+      tabIndex={isTask ? 0 : undefined}
+      onClick={isTask ? () => onOpenTask(item) : undefined}
+      onKeyDown={isTask ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpenTask(item); } } : undefined}
+      style={{
+        borderLeft: `${roomy ? 4 : 3}px solid ${color}`,
+        ...(roomy ? { padding: '14px 16px', borderRadius: '10px' } : null),
+      }}
+    >
+      <div style={{ minWidth: 0, flex: '1 1 160px' }}>
+        <div style={{ fontSize: roomy ? '14px' : '13px', fontWeight: 600, color: 'var(--text)', wordBreak: 'break-word' }}>
+          {item.displayTitle}
+        </div>
+        {item.itemType === 'task' && item.assignee_name && (
+          <div style={{ fontSize: '12px', color: 'var(--text-2)', marginTop: '2px' }}>
+            Assigned to {item.assignee_name}
+          </div>
+        )}
+        {item.description && (
+          <div style={{ fontSize: '12px', color: 'var(--text-2)', marginTop: '2px', wordBreak: 'break-word' }}>
+            {item.description}
+          </div>
+        )}
+        {meta && (
+          <div style={{ fontSize: '11px', color: 'var(--text-3)', marginTop: '2px' }}>{meta}</div>
+        )}
+      </div>
+
+      <div className="cal-detail-actions">
+        <span
+          style={{
+            fontSize: '11px',
+            padding: '2px 8px',
+            borderRadius: '12px',
+            background: `${color}20`,
+            color,
+            fontWeight: 600,
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {item.itemType}
+        </span>
+        {isTask && (
+          <span style={{ fontSize: '12px', color: 'var(--accent)', fontWeight: 600, whiteSpace: 'nowrap' }}>
+            Open task {'->'}
+          </span>
+        )}
+        {isEditable && (
+          <>
+            <button className="btn btn-ghost btn-sm" onClick={() => onEdit(item)}>
+              Edit
+            </button>
+            <button className="btn btn-danger btn-sm" onClick={() => onDelete(item.id)}>
+              Delete
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function DayModal({ date, items, isManager, onClose, onShiftDay, onAdd, onEdit, onDelete, onOpenTask }) {
+  const title = date.toLocaleDateString('en-US', {
+    weekday: 'long',
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric',
+  });
+  const summary = items.length === 0
+    ? 'Nothing scheduled'
+    : `${items.length} ${items.length === 1 ? 'item' : 'items'}`;
+
+  return (
+    <Modal title={title} onClose={onClose}>
+      <div className="cal-modal-nav">
+        <button className="btn btn-ghost btn-sm" onClick={() => onShiftDay(-1)} aria-label="Previous day">
+          {'<-'} <span className="cal-nav-btn-label">Prev day</span>
+        </button>
+        <span className="cal-modal-summary">{summary}</span>
+        <button className="btn btn-ghost btn-sm" onClick={() => onShiftDay(1)} aria-label="Next day">
+          <span className="cal-nav-btn-label">Next day</span> {'->'}
+        </button>
+      </div>
+
+      {items.length === 0 ? (
+        <div className="cal-empty">
+          <div className="cal-empty-title">No events, tasks or deadlines</div>
+          {isManager ? 'Add an event to get this day started.' : 'This day is free.'}
+        </div>
+      ) : (
+        <div className="cal-modal-list">
+          {items.map((item, index) => (
+            <ItemRow
+              key={`${item.itemType}-${item.id || item.name || index}`}
+              item={item}
+              isManager={isManager}
+              onEdit={onEdit}
+              onDelete={onDelete}
+              onOpenTask={onOpenTask}
+            />
+          ))}
+        </div>
+      )}
+
+      <div className="cal-modal-footer">
+        {isManager && (
+          <button className="btn btn-primary" onClick={onAdd}>
+            + Add event on this day
+          </button>
+        )}
+        <button className="btn btn-ghost" onClick={onClose}>
+          Close
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+function DayView({ items, isManager, onEdit, onDelete, onOpenTask }) {
   return (
     <div style={{ padding: '16px', minHeight: '300px' }}>
       {items.length === 0 ? (
-        <div style={{ textAlign: 'center', padding: '40px 12px', color: 'var(--text-3)' }}>
-          <div style={{ fontSize: '32px', marginBottom: '10px' }}>No items</div>
-          <p>No events on this day</p>
+        <div className="cal-empty" style={{ padding: '40px 12px' }}>
+          <div className="cal-empty-title">Nothing on this day</div>
+          No events, tasks or deadlines.
         </div>
       ) : (
         items.map((item, index) => (
-          <div
+          <ItemRow
             key={`${item.itemType}-${item.id || item.name || index}`}
-            className="cal-detail-item"
-            style={{ borderLeft: `4px solid ${COLORS[item.itemType]}`, padding: '14px 16px', borderRadius: '10px' }}
-          >
-            <div style={{ minWidth: 0, flex: '1 1 180px' }}>
-              <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text)', wordBreak: 'break-word' }}>{item.displayTitle}</div>
-              {item.description && (
-                <div style={{ fontSize: '12px', color: 'var(--text-2)', marginTop: '3px', wordBreak: 'break-word' }}>
-                  {item.description}
-                </div>
-              )}
-              {formatDayMeta(item) && (
-                <div style={{ fontSize: '11px', color: 'var(--text-3)', marginTop: '4px' }}>
-                  {formatDayMeta(item)}
-                </div>
-              )}
-            </div>
-
-            {isManager && item.itemType === 'event' && (
-              <div className="cal-detail-actions">
-                <button className="btn btn-ghost btn-sm" onClick={() => onEdit(item)}>
-                  Edit
-                </button>
-                <button className="btn btn-danger btn-sm" onClick={() => onDelete(item.id)}>
-                  Delete
-                </button>
-              </div>
-            )}
-          </div>
+            item={item}
+            isManager={isManager}
+            onEdit={onEdit}
+            onDelete={onDelete}
+            onOpenTask={onOpenTask}
+            roomy
+          />
         ))
       )}
     </div>
   );
 }
 
-function EventForm({ initial, members, onSave, onCancel, saving = false }) {
+function EventForm({ initial, prefillStart = '', members, onSave, onCancel, saving = false }) {
   const [form, setForm] = useState({
     title: initial?.title || '',
     description: initial?.description || '',
-    start_date: initial?.start_date ? new Date(initial.start_date).toISOString().slice(0, 16) : '',
+    start_date: initial?.start_date ? new Date(initial.start_date).toISOString().slice(0, 16) : prefillStart,
     end_date: initial?.end_date ? new Date(initial.end_date).toISOString().slice(0, 16) : '',
     type: initial?.type || 'event',
     member_ids: initial?.attendees?.map((attendee) => attendee.id) || [],
@@ -881,7 +950,7 @@ function EventForm({ initial, members, onSave, onCancel, saving = false }) {
 
   const handleAddGuest = async () => {
     if (!form.guest_email.trim()) return;
-    
+
     setInvitingGuest(true);
     try {
       await api.post('/calendar/notify-guest', {
@@ -987,9 +1056,9 @@ function EventForm({ initial, members, onSave, onCancel, saving = false }) {
             onKeyPress={(e) => e.key === 'Enter' && handleAddGuest()}
             style={{ flex: '1 1 180px', minWidth: 0 }}
           />
-          <button 
-            type="button" 
-            className="btn btn-primary" 
+          <button
+            type="button"
+            className="btn btn-primary"
             onClick={handleAddGuest}
             disabled={invitingGuest}
             style={{ whiteSpace: 'nowrap' }}

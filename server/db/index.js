@@ -7,9 +7,7 @@ const { Pool } = require("pg");
 // eat the whole budget on its own.
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: process.env.DB_SSL === "true"
-  ? { rejectUnauthorized: false }
-  : false,
+  ssl: process.env.DB_SSL === "true" ? { rejectUnauthorized: false } : false,
   max: 5,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 5000,
@@ -188,19 +186,22 @@ const initDB = async () => {
   await ensureColumn("members", "avatar_url TEXT");
 
   await pool.query(`
-    CREATE TABLE IF NOT EXISTS refresh_tokens (
-      id ${idDefinition(defaultIdType)},
-      member_id ${refType(memberIdType)} REFERENCES members(id) ON DELETE CASCADE,
-      jti TEXT UNIQUE NOT NULL,
-      expires_at TIMESTAMPTZ NOT NULL,
-      revoked_at TIMESTAMPTZ,
-      replaced_by TEXT,
-      revoke_reason TEXT,
-      user_agent TEXT,
-      ip_address TEXT,
-      created_at TIMESTAMPTZ DEFAULT NOW()
-    )
-  `);
+  CREATE TABLE IF NOT EXISTS refresh_tokens (
+    id ${idDefinition(defaultIdType)},
+    member_id ${refType(memberIdType)} REFERENCES members(id) ON DELETE CASCADE,
+    session_id UUID,
+    jti TEXT UNIQUE NOT NULL,
+    expires_at TIMESTAMPTZ NOT NULL,
+    revoked_at TIMESTAMPTZ,
+    replaced_by TEXT,
+    revoke_reason TEXT,
+    user_agent TEXT,
+    ip_address TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+  )
+`);
+
+  await ensureColumn("refresh_tokens", "session_id UUID");
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS projects (
@@ -278,7 +279,10 @@ const initDB = async () => {
     )
   `);
 
-  await ensureColumn("tasks", `parent_task_id ${refType(taskIdType)} REFERENCES tasks(id) ON DELETE CASCADE`);
+  await ensureColumn(
+    "tasks",
+    `parent_task_id ${refType(taskIdType)} REFERENCES tasks(id) ON DELETE CASCADE`,
+  );
 
   // Multi-assignee support: a task/subtask can now have several people
   // assigned. tasks.assignee_id is kept around (unused going forward) so
@@ -435,7 +439,10 @@ const initDB = async () => {
     )
   `);
 
-  await ensureColumn("calendar_attendees", "created_at TIMESTAMPTZ DEFAULT NOW()");
+  await ensureColumn(
+    "calendar_attendees",
+    "created_at TIMESTAMPTZ DEFAULT NOW()",
+  );
   await ensureConstraint(
     "calendar_attendees",
     "calendar_attendees_pkey",
@@ -511,6 +518,15 @@ const initDB = async () => {
     CREATE INDEX IF NOT EXISTS idx_refresh_tokens_member_id
     ON refresh_tokens (member_id)
   `);
+  await pool.query(`
+  CREATE INDEX IF NOT EXISTS idx_refresh_tokens_session_id
+  ON refresh_tokens (session_id)
+`);
+
+  await pool.query(`
+  CREATE INDEX IF NOT EXISTS idx_refresh_tokens_member_session
+  ON refresh_tokens (member_id, session_id)
+`);
   await pool.query(`
     CREATE INDEX IF NOT EXISTS idx_refresh_tokens_jti
     ON refresh_tokens (jti)

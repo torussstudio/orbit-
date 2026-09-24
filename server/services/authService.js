@@ -14,6 +14,7 @@ const {
   createRefreshToken,
   findValidRefreshToken,
   revokeRefreshToken,
+  revokeRefreshSession,
   revokeAllRefreshTokensForMember,
   rotateRefreshToken,
   findRefreshTokenByJti,
@@ -34,7 +35,10 @@ function publicUser(row) {
   };
 }
 
-function authError(message, status = 401) {
+function authError(
+  message,
+  status = 401,
+) {
   const err = new Error(message);
 
   err.status = status;
@@ -43,6 +47,12 @@ function authError(message, status = 401) {
   return err;
 }
 
+/**
+ * LOGIN
+ *
+ * Every successful login creates a completely
+ * independent browser session.
+ */
 async function loginWithPassword({
   email,
   password,
@@ -63,7 +73,9 @@ async function loginWithPassword({
   const member = rows[0];
 
   if (!member) {
-    throw authError("Invalid credentials");
+    throw authError(
+      "Invalid credentials",
+    );
   }
 
   const valid = await bcrypt.compare(
@@ -72,28 +84,36 @@ async function loginWithPassword({
   );
 
   if (!valid) {
-    throw authError("Invalid credentials");
+    throw authError(
+      "Invalid credentials",
+    );
   }
 
   const user = publicUser(member);
 
   /*
-   * Short-lived access token.
+   * One session per browser tab/window.
    */
-  const accessToken =
-    signAccessToken(user);
+  const sessionId =
+    crypto.randomUUID();
 
   /*
-   * Random refresh-token identifier.
-   * The raw JTI is never stored in DB.
+   * One refresh-token generation.
    */
   const refreshJti =
     crypto.randomUUID();
+
+  const accessToken =
+    signAccessToken(
+      user,
+      sessionId,
+    );
 
   const refreshToken =
     signRefreshToken(
       user,
       refreshJti,
+      sessionId,
     );
 
   const refreshExpiresAt =
@@ -108,24 +128,27 @@ async function loginWithPassword({
 
   await createRefreshToken({
     memberId: user.id,
-
+    sessionId,
     jti: refreshJti,
-
     expiresAt: refreshExpiresAt,
-
     userAgent,
-
     ipAddress,
   });
 
- return {
-  accessToken,
-  refreshToken,
-};
+  return {
+    accessToken,
+    refreshToken,
+    sessionId,
+    user,
+  };
 }
 
+/**
+ * REFRESH
+ */
 async function refreshSession({
   refreshToken,
+  sessionId,
   userAgent,
   ipAddress,
 }) {
@@ -142,7 +165,7 @@ async function refreshSession({
       verifyRefreshToken(
         refreshToken,
       );
-  } catch (err) {
+  } catch (_) {
     throw authError(
       "Invalid refresh token",
     );
@@ -150,11 +173,14 @@ async function refreshSession({
 
   const jti = payload?.jti;
   const memberId = payload?.sub;
+  const tokenSessionId =
+    payload?.sid;
 
   if (
     payload?.type !== "refresh" ||
     !jti ||
-    !memberId
+    !memberId ||
+    !tokenSessionId
   ) {
     throw authError(
       "Invalid refresh token",
@@ -162,15 +188,34 @@ async function refreshSession({
   }
 
   /*
-   * Find active DB session.
+   * The session ID supplied by the browser
+   * must match the session ID inside the JWT.
+   */
+  if (
+    !sessionId ||
+    String(sessionId) !==
+      String(tokenSessionId)
+  ) {
+    throw authError(
+      "Invalid refresh session",
+    );
+  }
+
+  /*
+   * Find the exact active refresh generation
+   * belonging to this browser session.
    */
   const session =
     await findValidRefreshToken(
       jti,
+      sessionId,
     );
 
   /*
    * Refresh-token reuse detection.
+   *
+   * IMPORTANT:
+   * Only revoke the affected session.
    */
   if (!session) {
     const stale =
@@ -180,10 +225,11 @@ async function refreshSession({
 
     if (
       stale?.revoked_at &&
-      stale?.replaced_by
+      stale?.replaced_by &&
+      stale?.session_id
     ) {
-      await revokeAllRefreshTokensForMember(
-        memberId,
+      await revokeRefreshSession(
+        stale.session_id,
         "refresh_token_reuse",
       );
     }
@@ -194,25 +240,18 @@ async function refreshSession({
   }
 
   /*
-   * IMPORTANT:
-   *
-   * Do NOT reject a valid refresh token merely
-   * because the client's IP changed.
-   *
-   * Mobile networks/VPN/proxies can legitimately
-   * change IP addresses.
-   *
-   * IP and User-Agent remain useful audit data.
+   * Database session must belong to
+   * the same member and session.
    */
-
   if (
-    session.member_id &&
     String(session.member_id) !==
-      String(memberId)
+      String(memberId) ||
+    String(session.session_id) !==
+      String(sessionId)
   ) {
-    await revokeRefreshToken(
-      jti,
-      "member_mismatch",
+    await revokeRefreshSession(
+      session.session_id,
+      "session_mismatch",
     );
 
     throw authError(
@@ -221,7 +260,13 @@ async function refreshSession({
   }
 
   /*
-   * Verify member still exists and is active.
+   * Do NOT reject merely because IP changed.
+   *
+   * IP/UA remain audit information.
+   */
+
+  /*
+   * Verify member is still active.
    */
   const { rows } = await db.query(
     `
@@ -247,8 +292,8 @@ async function refreshSession({
   const member = rows[0];
 
   if (!member || !member.active) {
-    await revokeRefreshToken(
-      jti,
+    await revokeRefreshSession(
+      sessionId,
       "user_inactive_or_missing",
     );
 
@@ -261,13 +306,16 @@ async function refreshSession({
     publicUser(member);
 
   /*
-   * New short-lived access token.
+   * Same session ID.
    */
   const accessToken =
-    signAccessToken(user);
+    signAccessToken(
+      user,
+      sessionId,
+    );
 
   /*
-   * New refresh session.
+   * New refresh generation.
    */
   const newJti =
     crypto.randomUUID();
@@ -285,11 +333,9 @@ async function refreshSession({
   /*
    * Atomic rotation.
    *
-   * Old JTI:
-   * revoked
-   *
-   * New JTI:
-   * active
+   * old JTI -> revoked
+   * new JTI -> active
+   * same sessionId
    */
   const rotated =
     await rotateRefreshToken(
@@ -302,10 +348,6 @@ async function refreshSession({
     );
 
   if (!rotated) {
-    /*
-     * Another request may have rotated
-     * the token before this request.
-     */
     throw authError(
       "Refresh token revoked or expired",
     );
@@ -315,23 +357,44 @@ async function refreshSession({
     signRefreshToken(
       user,
       newJti,
+      sessionId,
     );
 
   return {
     accessToken,
     refreshToken:
       refreshTokenOut,
+    sessionId,
+    user,
     rotated: true,
   };
 }
 
+/**
+ * LOGOUT CURRENT SESSION ONLY
+ */
 async function logoutSession({
   refreshToken,
   bearerToken,
+  sessionId,
 }) {
   /*
-   * Preferred path:
-   * revoke current refresh session.
+   * Preferred:
+   * sessionId is explicitly supplied by the
+   * current browser tab.
+   */
+  if (sessionId) {
+    await revokeRefreshSession(
+      sessionId,
+      "logout",
+    );
+
+    return;
+  }
+
+  /*
+   * Fallback for old clients:
+   * derive session from refresh JWT.
    */
   if (refreshToken) {
     try {
@@ -339,6 +402,18 @@ async function logoutSession({
         verifyRefreshToken(
           refreshToken,
         );
+
+      if (
+        payload?.type === "refresh" &&
+        payload?.sid
+      ) {
+        await revokeRefreshSession(
+          payload.sid,
+          "logout",
+        );
+
+        return;
+      }
 
       if (
         payload?.type === "refresh" &&
@@ -353,41 +428,48 @@ async function logoutSession({
       }
     } catch (_) {
       /*
-       * If refresh token is invalid/expired,
-       * continue and try access token.
+       * Continue to bearer fallback.
        */
     }
   }
 
   /*
-   * Fallback:
-   * revoke all sessions for this member.
+   * IMPORTANT:
+   *
+   * Do NOT revoke all sessions here.
+   *
+   * Old clients that have neither sessionId nor
+   * valid refresh token simply get an idempotent
+   * logout response.
    */
   if (bearerToken) {
     try {
-      const payload =
-        verifyAccessToken(
-          bearerToken,
-        );
-
-      const memberId =
-        payload?.sub;
-
-      if (memberId) {
-        await revokeAllRefreshTokensForMember(
-          memberId,
-          "logout_all",
-        );
-      }
+      verifyAccessToken(
+        bearerToken,
+      );
     } catch (_) {
       /*
-       * Logout should remain idempotent.
+       * Logout remains idempotent.
        */
     }
   }
 }
 
-async function getProfile(memberId) {
+/**
+ * Explicit "logout all devices".
+ */
+async function logoutAllSessions(
+  memberId,
+) {
+  await revokeAllRefreshTokensForMember(
+    memberId,
+    "logout_all",
+  );
+}
+
+async function getProfile(
+  memberId,
+) {
   const { rows } = await db.query(
     `
       SELECT
@@ -450,12 +532,18 @@ async function updateProfile(
   let idx = 1;
 
   if (name !== undefined) {
-    updates.push(`name = $${idx++}`);
+    updates.push(
+      `name = $${idx++}`,
+    );
+
     values.push(name);
   }
 
   if (email !== undefined) {
-    updates.push(`email = $${idx++}`);
+    updates.push(
+      `email = $${idx++}`,
+    );
+
     values.push(
       String(email)
         .trim()
@@ -464,33 +552,45 @@ async function updateProfile(
   }
 
   if (phone !== undefined) {
-    updates.push(`phone = $${idx++}`);
-    values.push(phone || null);
+    updates.push(
+      `phone = $${idx++}`,
+    );
+
+    values.push(
+      phone || null,
+    );
   }
 
   if (location !== undefined) {
     updates.push(
       `location = $${idx++}`,
     );
-    values.push(location || null);
+
+    values.push(
+      location || null,
+    );
   }
 
   if (bio !== undefined) {
-    updates.push(`bio = $${idx++}`);
-    values.push(bio || null);
+    updates.push(
+      `bio = $${idx++}`,
+    );
+
+    values.push(
+      bio || null,
+    );
   }
 
   if (avatar_base64) {
     updates.push(
       `avatar_url = $${idx++}`,
     );
-    values.push(avatar_base64);
+
+    values.push(
+      avatar_base64,
+    );
   }
 
-  /*
-   * Password change:
-   * revoke all refresh sessions.
-   */
   let passwordChanged = false;
 
   if (password) {
@@ -539,8 +639,10 @@ async function updateProfile(
     );
 
   /*
-   * Password change invalidates all
-   * existing refresh sessions.
+   * Password change intentionally logs
+   * the user out from every session.
+   *
+   * This is different from normal logout.
    */
   if (passwordChanged) {
     await revokeAllRefreshTokensForMember(
@@ -572,6 +674,7 @@ module.exports = {
   loginWithPassword,
   refreshSession,
   logoutSession,
+  logoutAllSessions,
   getProfile,
   updateProfile,
   deleteAccount,

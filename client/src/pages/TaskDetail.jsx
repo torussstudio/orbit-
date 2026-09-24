@@ -87,6 +87,8 @@ export default function TaskDetail() {
   }, [taskId]);
 
   const handleStageChange = async (stage) => {
+    // Members can't move a task out of Done — only a manager can reopen it.
+    if (!isManager && task.stage === "Done") return;
     // Only ever called for subtasks now — main task stage is read-only
     // and derived automatically from its subtasks.
     // For subtasks: members moving from In Progress → In Review must enter time taken
@@ -250,6 +252,8 @@ export default function TaskDetail() {
   const handleSubTaskStageSelect = async (st, chosenStage) => {
     setStageDropdown(null);
     if (!chosenStage || chosenStage === st.stage) return;
+    // Members can't reopen a Done sub task.
+    if (!isManager && st.stage === "Done") return;
     if (!isManager) {
       const memberStages = ["Todo", "In Progress", "In Review"];
       if (!memberStages.includes(chosenStage)) return;
@@ -281,7 +285,7 @@ export default function TaskDetail() {
     setStageLoading(st.id);
     try {
       await api.put(`/tasks/${st.id}`, { ...st, stage: chosenStage });
-      if (task.parent_task_id && subtask.id === task.id) {
+      if (st.id === task.id) {
         load();
       } else {
         loadTaskOnly();
@@ -490,9 +494,21 @@ export default function TaskDetail() {
       <div className="page-header">
         <div style={{ minWidth: 0 }}>
           <div className="breadcrumb td-breadcrumb">
-            <Link to="/projects">Projects</Link>
-            <span className="breadcrumb-sep">/</span>
-            <Link to={`/projects/${projectId}`}>{project?.name}</Link>
+            {/* Managers get clickable links to the projects list / project.
+                Members see the same trail as plain text (no navigation). */}
+            {isManager ? (
+              <>
+                <Link to="/projects">Projects</Link>
+                <span className="breadcrumb-sep">/</span>
+                <Link to={`/projects/${projectId}`}>{project?.name}</Link>
+              </>
+            ) : (
+              <>
+                <span>Projects</span>
+                <span className="breadcrumb-sep">/</span>
+                <span>{project?.name}</span>
+              </>
+            )}
             <span className="breadcrumb-sep">/</span>
             {task.parent_task_id ? (
               isManager ? (
@@ -658,15 +674,17 @@ export default function TaskDetail() {
                     </span>
                   )}
                 </h3>
-                <button
-                  className="btn btn-ghost btn-sm"
-                  onClick={() => {
-                    setEditingSubTask(null);
-                    setShowSubTaskModal(true);
-                  }}
-                >
-                  + Add Sub Task
-                </button>
+                {isManager && (
+                  <button
+                    className="btn btn-ghost btn-sm"
+                    onClick={() => {
+                      setEditingSubTask(null);
+                      setShowSubTaskModal(true);
+                    }}
+                  >
+                    + Add Sub Task
+                  </button>
+                )}
               </div>
 
               {task.subtasks?.length === 0 ? (
@@ -713,13 +731,15 @@ export default function TaskDetail() {
                               className={`badge badge-${st.stage?.toLowerCase().replace(/\s/g, "")}`}
                               onClick={() => {
                                 if (stageLoading === st.id) return;
+                                if (!isManager && st.stage === "Done") return;
                                 setStageDropdown((prev) =>
                                   prev === st.id ? null : st.id,
                                 );
                               }}
                               style={{
                                 cursor:
-                                  stageLoading === st.id
+                                  stageLoading === st.id ||
+                                  (!isManager && st.stage === "Done")
                                     ? "default"
                                     : "pointer",
                                 opacity: stageLoading === st.id ? 0.7 : 1,
@@ -727,7 +747,9 @@ export default function TaskDetail() {
                             >
                               {stageLoading === st.id
                                 ? "Moving..."
-                                : `${st.stage} ▾`}
+                                : !isManager && st.stage === "Done"
+                                  ? st.stage
+                                  : `${st.stage} ▾`}
                             </span>
                             {stageDropdown === st.id && (
                               <div
@@ -874,7 +896,10 @@ export default function TaskDetail() {
                   <button
                     key={s}
                     onClick={() => handleStageChange(s)}
-                    disabled={changingStage !== null}
+                    disabled={
+                      changingStage !== null ||
+                      (!isManager && task.stage === "Done")
+                    }
                     className={`btn ${task.stage === s ? "btn-primary" : "btn-ghost"} btn-sm`}
                   >
                     {changingStage === s ? "Moving..." : s}
@@ -889,7 +914,9 @@ export default function TaskDetail() {
                     marginTop: "8px",
                   }}
                 >
-                  Manager approval required to mark Done
+                  {task.stage === "Done"
+                    ? "Approved as Done — only a manager can move it back."
+                    : "Manager approval required to mark Done"}
                 </p>
               )}
             </div>

@@ -5,11 +5,11 @@ const taskController = require("../controllers/taskController");
 
 router.get("/project/:projectId", auth, requireProjectAccess("projectId"), taskController.getTasksByProject);
 
-router.put("/reorder", auth, taskController.reorderTasks);
+router.put("/reorder", auth, managerOnly, taskController.reorderTasks);
 
 router.get("/:id", auth, requireTaskProjectAccess(), taskController.getTaskById);
 
-router.post("/", auth, taskController.createTask);
+router.post("/", auth, managerOnly, taskController.createTask);
 
 router.put("/:id", auth, requireTaskProjectAccess(), taskController.updateTask);
 

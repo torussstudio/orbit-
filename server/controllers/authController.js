@@ -1,13 +1,31 @@
 const authService = require("../services/authService");
 
-const {
-  REFRESH_COOKIE_NAME,
-  getRefreshCookieOptions,
-  clearAuthCookies,
-} = require("../utils/cookies");
+const SESSION_HEADER = "X-Orbit-Session-Id";
+
+function readSessionId(req) {
+  const sessionId = req.get(SESSION_HEADER);
+
+  if (
+    typeof sessionId !== "string" ||
+    !sessionId.trim()
+  ) {
+    return null;
+  }
+
+  return sessionId.trim();
+}
 
 function readRefreshToken(req) {
-  return req.cookies?.[REFRESH_COOKIE_NAME] || null;
+  const refreshToken = req.body?.refreshToken;
+
+  if (
+    typeof refreshToken !== "string" ||
+    !refreshToken.trim()
+  ) {
+    return null;
+  }
+
+  return refreshToken.trim();
 }
 
 function readBearer(req) {
@@ -38,16 +56,31 @@ function logRefreshEvent(
       outcome,
       status: details.status,
       reason: details.reason,
-      hasRefreshCookie: Boolean(
-        req.cookies?.[REFRESH_COOKIE_NAME],
+      hasRefreshToken: Boolean(
+        readRefreshToken(req),
+      ),
+      hasSessionId: Boolean(
+        readSessionId(req),
       ),
     })}\n`,
   );
 }
 
+/*
+ * LOGIN
+ *
+ * Creates a completely independent
+ * authentication session for this tab/window.
+ *
+ * The frontend stores:
+ * - accessToken -> memory
+ * - refreshToken -> sessionStorage
+ * - sessionId -> sessionStorage
+ */
 async function login(req, res, next) {
   try {
-    const { email, password } = req.body || {};
+    const { email, password } =
+      req.body || {};
 
     if (!email || !password) {
       return res.status(400).json({
@@ -70,38 +103,55 @@ async function login(req, res, next) {
           req.ip || null,
       });
 
-    clearAuthCookies(res);
-
-    res.cookie(
-      REFRESH_COOKIE_NAME,
-      result.refreshToken,
-      getRefreshCookieOptions(),
-    );
-
-    /*
-     * Only access token is returned.
-     *
-     * Refresh token stays HttpOnly cookie.
-     * User profile is loaded through /auth/me.
-     */
     return res.json({
       accessToken: result.accessToken,
+      refreshToken: result.refreshToken,
+      sessionId: result.sessionId,
+      user: result.user,
     });
   } catch (err) {
     next(err);
   }
 }
 
+/*
+ * REFRESH
+ *
+ * No browser-wide cookie is used.
+ *
+ * The frontend sends:
+ * - refreshToken
+ * - X-Orbit-Session-Id
+ *
+ * This allows each browser tab/window
+ * to maintain its own authentication session.
+ */
 async function refresh(req, res, next) {
   try {
     const refreshToken =
       readRefreshToken(req);
 
+    const sessionId =
+      readSessionId(req);
+
     logRefreshEvent(req, "started");
+
+    if (!refreshToken) {
+      return res.status(401).json({
+        error: "Refresh token required",
+      });
+    }
+
+    if (!sessionId) {
+      return res.status(401).json({
+        error: "Session ID required",
+      });
+    }
 
     const result =
       await authService.refreshSession({
         refreshToken,
+        sessionId,
 
         userAgent:
           req.get("user-agent") || null,
@@ -110,61 +160,85 @@ async function refresh(req, res, next) {
           req.ip || null,
       });
 
-    /*
-     * Rotate cookie after successful refresh.
-     */
-    res.cookie(
-      REFRESH_COOKIE_NAME,
-      result.refreshToken,
-      getRefreshCookieOptions(),
-    );
-
     logRefreshEvent(req, "succeeded", {
       status: 200,
     });
 
     return res.json({
       accessToken: result.accessToken,
+      refreshToken: result.refreshToken,
+      sessionId: result.sessionId,
+      user: result.user,
     });
   } catch (err) {
-    /*
-     * Invalid/revoked refresh token means
-     * client session is no longer valid.
-     */
-    if (err.status === 401) {
-      clearAuthCookies(res);
-    }
-
     logRefreshEvent(req, "failed", {
       status: err.status || 500,
       reason: err.message,
     });
 
-    next(err);
+    return next(err);
   }
 }
 
+/*
+ * LOGOUT
+ *
+ * Only the CURRENT session is revoked.
+ *
+ * It does NOT revoke other users/tabs.
+ */
 async function logout(req, res, next) {
   try {
+    const refreshToken =
+      readRefreshToken(req);
+
+    const bearerToken =
+      readBearer(req);
+
+    const sessionId =
+      readSessionId(req);
+
     await authService.logoutSession({
-      refreshToken:
-        readRefreshToken(req),
-
-      bearerToken:
-        readBearer(req),
+      refreshToken,
+      bearerToken,
+      sessionId,
     });
-
-    clearAuthCookies(res);
 
     return res.json({
       success: true,
     });
   } catch (err) {
-    clearAuthCookies(res);
-    next(err);
+    return next(err);
   }
 }
 
+/*
+ * LOGOUT ALL
+ *
+ * Explicitly logs the current user out
+ * from every active Orbit session.
+ */
+async function logoutAll(
+  req,
+  res,
+  next,
+) {
+  try {
+    await authService.logoutAllSessions(
+      req.user.id,
+    );
+
+    return res.json({
+      success: true,
+    });
+  } catch (err) {
+    return next(err);
+  }
+}
+
+/*
+ * CURRENT USER
+ */
 async function me(req, res, next) {
   try {
     const profile =
@@ -184,6 +258,9 @@ async function me(req, res, next) {
   }
 }
 
+/*
+ * UPDATE PROFILE
+ */
 async function updateProfile(
   req,
   res,
@@ -205,6 +282,12 @@ async function updateProfile(
   }
 }
 
+/*
+ * DELETE ACCOUNT
+ *
+ * authService.deleteAccount()
+ * already revokes all sessions.
+ */
 async function deleteAccount(
   req,
   res,
@@ -214,8 +297,6 @@ async function deleteAccount(
     await authService.deleteAccount(
       req.user.id,
     );
-
-    clearAuthCookies(res);
 
     return res.json({
       success: true,
@@ -229,6 +310,7 @@ module.exports = {
   login,
   refresh,
   logout,
+  logoutAll,
   me,
   updateProfile,
   deleteAccount,

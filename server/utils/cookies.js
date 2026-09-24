@@ -1,48 +1,44 @@
-const { config, isProd } = require("../config/env");
-
 const REFRESH_COOKIE_NAME = "orbit_refresh";
 
-function baseCookieOptions() {
-  const options = {
-    httpOnly: true,
-
-    secure: isProd,
-
-    /*
-     * Production cross-origin SPA/API:
-     * SameSite=None requires Secure=true.
-     *
-     * Local development:
-     * SameSite=Lax works with localhost.
-     */
-    sameSite: isProd ? "none" : "lax",
-
-    path: "/api/auth",
-
-    overwrite: true,
-  };
-
-  /*
-   * Only set Domain when explicitly configured.
-   *
-   * Host-only cookies are safer and avoid
-   * accidental domain mismatch.
-   */
-  if (config.cookieDomain) {
-    options.domain = config.cookieDomain;
-  }
-
-  return options;
-}
+/*
+ * Orbit no longer uses browser-wide refresh
+ * cookies for authentication.
+ *
+ * Authentication is session-scoped:
+ *
+ * sessionStorage
+ * ├── orbit_session_id
+ * └── orbit_refresh_token
+ *
+ * These helpers are kept temporarily so that
+ * any legacy imports do not immediately crash.
+ *
+ * They should not be used by the new auth flow.
+ */
 
 function getRefreshCookieOptions() {
   return {
-    ...baseCookieOptions(),
-    maxAge: config.refreshCookieMaxAgeMs,
+    httpOnly: true,
+    secure: true,
+    sameSite: "none",
+    path: "/api/auth",
   };
 }
 
 function clearAuthCookies(res) {
+  /*
+   * IMPORTANT:
+   *
+   * Do not clear auth cookies during normal
+   * login/logout.
+   *
+   * Cookies are browser-wide and clearing them
+   * from one tab can affect another tab.
+   *
+   * This function is retained only for legacy
+   * compatibility.
+   */
+
   const names = [
     REFRESH_COOKIE_NAME,
     "orbit_token",
@@ -59,12 +55,12 @@ function clearAuthCookies(res) {
 
   for (const path of paths) {
     for (const name of names) {
-      const options = {
-        ...baseCookieOptions(),
+      res.clearCookie(name, {
+        httpOnly: true,
+        secure: true,
+        sameSite: "none",
         path,
-      };
-
-      res.clearCookie(name, options);
+      });
     }
   }
 }

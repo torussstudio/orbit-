@@ -1,14 +1,18 @@
 const router = require("express").Router();
 const { auth, managerOnly } = require("../middleware/auth");
+const { requireProjectAccess } = require("../middleware/projectAccess");
 const projectController = require("../controllers/projectController");
 
-router.get("/", auth, projectController.getAllProjects);
+// Members don't get the projects list. Managers only.
+router.get("/", auth, managerOnly, projectController.getAllProjects);
 
 // Drag-and-drop reordering. Registered before PUT /:id so Express
 // doesn't match "reorder" as an :id param.
 router.put("/reorder", auth, managerOnly, projectController.reorderProjects);
 
-router.get("/:id", auth, projectController.getProjectById);
+// Managers can open any project; members only projects they belong to
+// (TaskDetail still needs this for the project name and custom_stages).
+router.get("/:id", auth, requireProjectAccess("id"), projectController.getProjectById);
 
 router.post("/", auth, managerOnly, projectController.createProject);
 

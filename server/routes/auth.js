@@ -18,9 +18,11 @@ const authController =
   require("../controllers/authController");
 
 /*
- * Login
+ * LOGIN
  *
- * No access token required.
+ * Creates a new independent session.
+ *
+ * No authentication required.
  */
 router.post(
   "/login",
@@ -29,10 +31,15 @@ router.post(
 );
 
 /*
- * Refresh
+ * REFRESH
  *
- * Authentication comes from the
- * HttpOnly refresh cookie.
+ * Authentication is based on:
+ *
+ * - refreshToken
+ * - X-Orbit-Session-Id
+ *
+ * Both belong to the current
+ * browser tab/window.
  */
 router.post(
   "/refresh",
@@ -42,10 +49,10 @@ router.post(
 );
 
 /*
- * Logout
+ * LOGOUT CURRENT SESSION
  *
- * Uses refresh cookie and optionally
- * access token.
+ * Only the current tab/window session
+ * is revoked.
  */
 router.post(
   "/logout",
@@ -54,7 +61,22 @@ router.post(
 );
 
 /*
- * Protected routes.
+ * LOGOUT ALL SESSIONS
+ *
+ * Explicit action.
+ *
+ * Revokes all active sessions belonging
+ * to the authenticated user.
+ */
+router.post(
+  "/logout-all",
+  auth,
+  requireClientHeader,
+  authController.logoutAll,
+);
+
+/*
+ * CURRENT USER
  */
 router.get(
   "/me",
@@ -62,12 +84,18 @@ router.get(
   authController.me,
 );
 
+/*
+ * UPDATE PROFILE
+ */
 router.put(
   "/profile",
   auth,
   authController.updateProfile,
 );
 
+/*
+ * DELETE ACCOUNT
+ */
 router.delete(
   "/account",
   auth,
