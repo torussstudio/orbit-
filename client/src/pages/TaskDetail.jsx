@@ -316,28 +316,43 @@ export default function TaskDetail() {
   };
 
   const handleTimeTakenSubmit = async () => {
-    if (
-      !timeTakenInput ||
-      isNaN(timeTakenInput) ||
-      parseInt(timeTakenInput) <= 0
-    ) {
-      setTimeTakenError("Please enter a valid time in minutes.");
+    const minutes = Number(timeTakenInput);
+
+    if (!Number.isInteger(minutes) || minutes <= 0 || minutes > 100000) {
+      setTimeTakenError(
+        "Please enter a valid time between 1 and 100,000 minutes.",
+      );
       return;
     }
+
     const { subtask, nextStage } = timeTakenModal;
-    await api.put(`/tasks/${subtask.id}`, {
-      ...subtask,
-      stage: nextStage,
-      time_taken: parseInt(timeTakenInput),
-    });
-    setTimeTakenModal({ show: false, subtask: null, nextStage: null });
-    setTimeTakenInput("");
-    // If the modal was triggered from the subtask's own Move Stage pills (subtask.id === taskId),
-    // use load() so the page header badge and details also refresh
-    if (subtask.id === taskId || subtask.id === parseInt(taskId)) {
-      load();
-    } else {
-      loadTaskOnly();
+
+    try {
+     await api.put(`/tasks/${subtask.id}`, {
+  stage: nextStage,
+  time_taken: minutes,
+});
+
+      setTimeTakenModal({
+        show: false,
+        subtask: null,
+        nextStage: null,
+      });
+
+      setTimeTakenInput("");
+
+      if (subtask.id === taskId || subtask.id === parseInt(taskId)) {
+        load();
+      } else {
+        loadTaskOnly();
+      }
+    } catch (error) {
+      console.error("Failed to save time taken:", error);
+
+      setTimeTakenError(
+        error?.response?.data?.message ||
+          "Failed to save time taken. Please try again.",
+      );
     }
   };
 
@@ -363,10 +378,7 @@ export default function TaskDetail() {
     }
   };
 
-  if (loading)
-    return (
-      <Loader label="Loading task" size="lg" variant="page" />
-    );
+  if (loading) return <Loader label="Loading task" size="lg" variant="page" />;
   if (!task) return <div className="page-body">Task not found.</div>;
 
   const stages = project?.custom_stages || [
@@ -948,7 +960,11 @@ export default function TaskDetail() {
                 type="submit"
                 disabled={submitting}
               >
-                {submitting ? <Loader label="Posting..." size="sm" variant="button" /> : "Post Comment"}
+                {submitting ? (
+                  <Loader label="Posting..." size="sm" variant="button" />
+                ) : (
+                  "Post Comment"
+                )}
               </button>
             </form>
             {task.comments?.length === 0 && (
@@ -1123,6 +1139,8 @@ export default function TaskDetail() {
               className="form-input"
               type="number"
               min="1"
+              max="100000"
+              step="1"
               value={timeTakenInput}
               onChange={(e) => {
                 setTimeTakenInput(e.target.value);

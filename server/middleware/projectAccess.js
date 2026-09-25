@@ -1,4 +1,9 @@
-const { assertProjectAccess, getTaskProjectId, getClusterProjectId } = require("../services/accessControl");
+const {
+  assertProjectAccess,
+  assertTaskAccess,
+  getTaskProjectId,
+  getClusterProjectId,
+} = require("../services/accessControl");
 
 function requireProjectAccess(paramName = "projectId") {
   return async (req, res, next) => {
@@ -18,11 +23,24 @@ function requireProjectAccess(paramName = "projectId") {
 function requireTaskProjectAccess() {
   return async (req, res, next) => {
     try {
-      const projectId = await getTaskProjectId(req.params.id);
-      if (!projectId) {
-        return res.status(404).json({ error: "Not found" });
+      const taskId = req.params.id;
+
+      if (!taskId) {
+        return res.status(400).json({
+          error: "Task id required",
+        });
       }
-      await assertProjectAccess(req.user, projectId);
+
+      const projectId = await getTaskProjectId(taskId);
+
+      if (!projectId) {
+        return res.status(404).json({
+          error: "Not found",
+        });
+      }
+
+      await assertTaskAccess(req.user, taskId);
+
       next();
     } catch (err) {
       next(err);

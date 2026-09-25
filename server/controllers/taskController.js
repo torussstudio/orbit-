@@ -48,12 +48,36 @@ async function createTask(req, res, next) {
 
 async function updateTask(req, res, next) {
   try {
-    const task = await taskService.updateTask(req.params.id, req.body, req.user);
+    console.log("[TASK UPDATE] ENTERED", {
+      taskId: req.params.id,
+      userId: req.user?.id,
+      role: req.user?.role,
+      body: req.body,
+    });
+
+    const task = await taskService.updateTask(
+      req.params.id,
+      req.body,
+      req.user
+    );
+
+    console.log("[TASK UPDATE] SUCCESS");
+
     res.json(task);
   } catch (error) {
+    console.error("[TASK UPDATE ERROR]", {
+      status: error.status,
+      message: error.message,
+      name: error.name,
+      stack: error.stack,
+    });
+
     if (error.status) {
-      return res.status(error.status).json({ error: error.message });
+      return res.status(error.status).json({
+        error: error.message,
+      });
     }
+
     next(error);
   }
 }
