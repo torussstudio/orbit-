@@ -37,6 +37,17 @@ export default function TaskForm({ initial, members, allMembers, clusters, stage
     setAssigneeError('');
   };
 
+  // Flipping the subtask toggle changes which fields are "owned" by
+  // this form (see the render logic + handleSave below). Any assignee
+  // or due date picked under the old mode must not silently survive
+  // into the new one, so clear both here rather than only filtering
+  // them out at save time.
+  const handleToggleSubtasks = () => {
+    setHasSubtasks(v => !v);
+    setForm(f => ({ ...f, assignee_ids: [], due_date: '' }));
+    setAssigneeError('');
+  };
+
   const handleSave = () => {
     // Sub tasks, and simple main tasks (subtasks disabled), must have
     // at least one assignee — there's no one to do the work otherwise.
@@ -49,15 +60,20 @@ export default function TaskForm({ initial, members, allMembers, clusters, stage
       setTimeTakenError('Please enter time taken before moving to In Review.');
       return;
     }
-    // Due date is sent for sub tasks, for simple main tasks with
-    // subtasks disabled, and when editing an existing main task
-    // (its due date field is shown then too) — a *new* main task
-    // with subtasks enabled still derives its due date server-side
-    // from its sub tasks, so it's excluded here.
-    const { due_date, ...rest } = form;
+
+    // assignee_ids and due_date are only "owned" by this form for:
+    // sub tasks, simple main tasks (subtasks disabled), and existing
+    // main tasks being edited (their assignee/due date fields are
+    // shown then too). A *new* main task with subtasks enabled derives
+    // both server-side from its sub tasks, so they must be excluded
+    // here — even if a value lingers in state from before the toggle
+    // was flipped. Keep this condition identical to the one guarding
+    // the toggle's own field block above.
+    const { due_date, assignee_ids, ...rest } = form;
     const payload = { ...rest, time_taken: form.time_taken ? parseInt(form.time_taken) : null };
-    if ((isSubtaskForm || !hasSubtasks || initial) && due_date) {
-      payload.due_date = due_date;
+    if (isSubtaskForm || !hasSubtasks || initial) {
+      payload.assignee_ids = assignee_ids;
+      if (due_date) payload.due_date = due_date;
     }
     onSave(payload);
   };
@@ -121,7 +137,7 @@ export default function TaskForm({ initial, members, allMembers, clusters, stage
           </div>
           <button
             type="button"
-            onClick={() => setHasSubtasks(v => !v)}
+            onClick={handleToggleSubtasks}
             className={`btn btn-sm ${hasSubtasks ? 'btn-primary' : 'btn-ghost'}`}
           >
             {hasSubtasks ? 'On' : 'Off'}

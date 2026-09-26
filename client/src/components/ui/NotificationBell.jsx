@@ -22,9 +22,44 @@ import { LoadingSkeleton } from './Loader';
 
 // ── VAPID key decoder ─────────────────────────────────────────────
 function urlBase64ToUint8Array(base64String) {
-  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
-  const base64  = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
-  return Uint8Array.from([...atob(base64)].map((c) => c.charCodeAt(0)));
+  if (
+    typeof base64String !== "string" ||
+    !base64String.trim()
+  ) {
+    throw new Error(
+      "Invalid VAPID public key."
+    );
+  }
+
+  const normalized =
+    base64String.trim();
+
+  const padding =
+    "=".repeat(
+      (4 - (normalized.length % 4)) % 4
+    );
+
+  const base64 = (
+    normalized + padding
+  )
+    .replace(/-/g, "+")
+    .replace(/_/g, "/");
+
+  let binary;
+
+  try {
+    binary = atob(base64);
+  } catch {
+    throw new Error(
+      "Invalid VAPID public key encoding."
+    );
+  }
+
+  return Uint8Array.from(
+    [...binary].map((char) =>
+      char.charCodeAt(0)
+    )
+  );
 }
 
 // ── Push subscription save ────────────────────────────────────────
@@ -54,81 +89,328 @@ export default function NotificationBell() {
 
   // ── Load notifications ──────────────────────────────────────────
   const loadNotifications = useCallback(async () => {
+  try {
+    setLoading(true);
+    setLoadError('');
+
+    const notificationsResponse =
+      await api.get('/notifications');
+
+    const notifs = Array.isArray(
+      notificationsResponse.data,
+    )
+      ? notificationsResponse.data
+      : [];
+
+    setNotifications(notifs);
+
+    // Count is secondary.
+    // Even if unread-count fails, notification list
+    // should still work.
     try {
-      setLoading(true);
-      setLoadError('');
-      const [{ data }, { data: countData }] = await Promise.all([
-        api.get('/notifications'),
-        api.get('/notifications/unread-count'),
-      ]);
-      const notifs = Array.isArray(data) ? data : [];
-      setNotifications(notifs);
-      setUnreadCount(Number.isInteger(countData?.count)
-        ? countData.count
-        : notifs.filter((n) => !n.read).length);
-    } catch (err) {
-      setLoadError(err.response?.data?.error || 'Notifications could not be loaded.');
-      console.error('[NotificationBell] Failed to load notifications:', err);
-    } finally {
-      setLoading(false);
+      const countResponse =
+        await api.get('/notifications/unread-count');
+
+      const count =
+        Number(countResponse.data?.count);
+
+      if (Number.isInteger(count) && count >= 0) {
+        setUnreadCount(count);
+      } else {
+        setUnreadCount(
+          notifs.filter(
+            (notification) => !notification.read,
+          ).length,
+        );
+      }
+    } catch (countError) {
+      console.warn(
+        '[NotificationBell] Failed to load unread count:',
+        countError,
+      );
+
+      setUnreadCount(
+        notifs.filter(
+          (notification) => !notification.read,
+        ).length,
+      );
     }
-  }, []);
+  } catch (err) {
+    const serverMessage =
+      err?.response?.data?.error ||
+      err?.response?.data?.message;
+
+    setLoadError(
+      serverMessage ||
+        'Notifications could not be loaded.',
+    );
+
+    console.error(
+      '[NotificationBell] Failed to load notifications:',
+      err,
+    );
+  } finally {
+    setLoading(false);
+  }
+}, []);
 
   // ── Register SW + subscribe to push ────────────────────────────
-  const setupPush = useCallback(async () => {
-    if (subscribedRef.current && setupUserRef.current === user?.id) return;
+const setupPush = useCallback(async () => {
+  if (
+    subscribedRef.current &&
+    setupUserRef.current === user?.id
+  ) {
+    return;
+  }
 
-    // Guard: browser support
-    if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) {
-      setPushStatus('unsupported');
-      return;
-    }
+  // ==========================================================
+  // 1. BROWSER SUPPORT
+  // ==========================================================
 
-    // Guard: already denied
-    if (Notification.permission === 'denied') {
-      setPushStatus('denied');
-      return;
-    }
+  if (
+    !("serviceWorker" in navigator) ||
+    !("PushManager" in window) ||
+    !("Notification" in window)
+  ) {
+    console.warn(
+      "[NotificationBell] Web Push is not supported by this browser."
+    );
 
-    try {
-      // 1. Register the service worker
-      const reg = await navigator.serviceWorker.register('/sw.js', { scope: '/' });
-      swRegRef.current = reg;
+    setPushStatus("unsupported");
+    return;
+  }
 
-      // Wait for the SW to be ready (handles pending installs)
+  // ==========================================================
+  // 2. PERMISSION ALREADY DENIED
+  // ==========================================================
+
+  if (Notification.permission === "denied") {
+    console.warn(
+      "[NotificationBell] Browser notification permission is denied."
+    );
+
+    setPushStatus("denied");
+    return;
+  }
+
+  try {
+    // ========================================================
+    // 3. REGISTER SERVICE WORKER
+    // ========================================================
+
+    console.log(
+      "[NotificationBell] Registering /sw.js..."
+    );
+
+    const registration =
+      await navigator.serviceWorker.register(
+        "/sw.js",
+        {
+          scope: "/",
+          updateViaCache: "none",
+        }
+      );
+
+    swRegRef.current = registration;
+
+    console.log(
+      "[NotificationBell] ✅ Service worker registered:",
+      registration.scope
+    );
+
+    // ========================================================
+    // 4. WAIT FOR SERVICE WORKER
+    // ========================================================
+
+    const readyRegistration =
       await navigator.serviceWorker.ready;
 
-      // 2. Request browser permission
-      setPushStatus('pending');
-      const permission = await Notification.requestPermission();
-      setPushStatus(permission);
+    swRegRef.current = readyRegistration;
 
-      if (permission !== 'granted') return;
+    console.log(
+      "[NotificationBell] ✅ Service worker ready"
+    );
 
-      // 3. Fetch VAPID public key from server
-      const { data: vapidData } = await api.get('/notifications/vapid-public-key');
-      if (!vapidData?.publicKey) {
-        console.warn('[NotificationBell] Server returned no VAPID public key; push disabled.');
-        return;
+    // ========================================================
+    // 5. REQUEST NOTIFICATION PERMISSION
+    // ========================================================
+
+    setPushStatus("pending");
+
+    const permission =
+      await Notification.requestPermission();
+
+    setPushStatus(permission);
+
+    console.log(
+      "[NotificationBell] Notification permission:",
+      permission
+    );
+
+    if (permission !== "granted") {
+      return;
+    }
+
+    // ========================================================
+    // 6. GET VAPID PUBLIC KEY
+    // ========================================================
+
+    console.log(
+      "[NotificationBell] Fetching VAPID public key..."
+    );
+
+    const vapidResponse =
+      await api.get(
+        "/notifications/vapid-public-key"
+      );
+
+    const publicKey =
+      vapidResponse.data?.publicKey;
+
+    if (
+      typeof publicKey !== "string" ||
+      !publicKey.trim()
+    ) {
+      console.warn(
+        "[NotificationBell] Server returned no VAPID public key."
+      );
+
+      return;
+    }
+
+    console.log(
+      "[NotificationBell] ✅ VAPID public key received."
+    );
+
+    // ========================================================
+    // 7. GET EXISTING PUSH SUBSCRIPTION
+    // ========================================================
+
+    let subscription =
+      await readyRegistration.pushManager.getSubscription();
+
+    if (subscription) {
+      console.log(
+        "[NotificationBell] ✅ Existing push subscription found."
+      );
+    }
+
+    // ========================================================
+    // 8. CREATE NEW PUSH SUBSCRIPTION
+    // ========================================================
+
+    if (!subscription) {
+      console.log(
+        "[NotificationBell] Creating new push subscription..."
+      );
+
+      const applicationServerKey =
+        urlBase64ToUint8Array(publicKey);
+
+      console.log(
+        "[NotificationBell] VAPID key byte length:",
+        applicationServerKey.length
+      );
+
+      /*
+       * A valid VAPID P-256 public key
+       * should decode to 65 bytes.
+       */
+
+      if (
+        !(applicationServerKey instanceof Uint8Array) ||
+        applicationServerKey.length !== 65
+      ) {
+        throw new Error(
+          `Invalid VAPID public key. Expected 65 bytes, received ${applicationServerKey.length}.`
+        );
       }
 
-      // Reuse the browser subscription when possible so other devices remain active.
-      const existing = await reg.pushManager.getSubscription();
-      const subscription = existing || await reg.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey: urlBase64ToUint8Array(vapidData.publicKey),
-      });
+      try {
+        subscription =
+          await readyRegistration.pushManager.subscribe({
+            userVisibleOnly: true,
+            applicationServerKey,
+          });
 
-      // 5. Save to server
-      await savePushSubscription(subscription);
-      subscribedRef.current = true;
-      setupUserRef.current = user?.id;
+        console.log(
+          "[NotificationBell] ✅ PushManager.subscribe() succeeded."
+        );
+      } catch (subscribeError) {
+        console.error(
+          "[NotificationBell] ❌ PushManager.subscribe() failed:",
+          {
+            name: subscribeError?.name,
+            message: subscribeError?.message,
+            code: subscribeError?.code,
+          },
+          subscribeError
+        );
 
-      console.log('[NotificationBell] ✅ Push subscribed for', user?.name);
-    } catch (err) {
-      console.error('[NotificationBell] Push setup failed:', err);
+        throw subscribeError;
+      }
     }
-  }, [user]);
+
+    // ========================================================
+    // 9. VALIDATE SUBSCRIPTION
+    // ========================================================
+
+    if (!subscription) {
+      throw new Error(
+        "Browser did not return a push subscription."
+      );
+    }
+
+    console.log(
+      "[NotificationBell] ✅ Browser push subscription ready."
+    );
+
+    // ========================================================
+    // 10. SAVE SUBSCRIPTION TO BACKEND
+    // ========================================================
+
+    console.log(
+      "[NotificationBell] Saving push subscription to server..."
+    );
+
+    await savePushSubscription(subscription);
+
+    console.log(
+      "[NotificationBell] ✅ Push subscription saved to server."
+    );
+
+    // ========================================================
+    // 11. MARK PUSH AS READY
+    // ========================================================
+
+    subscribedRef.current = true;
+    setupUserRef.current = user?.id;
+
+    setPushStatus("granted");
+
+    console.log(
+      "[NotificationBell] ✅ Push subscribed for:",
+      user?.name
+    );
+  } catch (err) {
+    console.error(
+      "[NotificationBell] ❌ Push setup failed:",
+      {
+        name: err?.name,
+        message: err?.message,
+        code: err?.code,
+      },
+      err
+    );
+
+    if (
+      typeof Notification !== "undefined" &&
+      Notification.permission === "denied"
+    ) {
+      setPushStatus("denied");
+    }
+  }
+}, [user]);
 
   // ── Handle SW → app "subscription changed" message ─────────────
   useEffect(() => {
@@ -147,24 +429,24 @@ export default function NotificationBell() {
   }, []);
 
   // ── Main effect: load + poll + subscribe (runs when user logs in) ─
-  useEffect(() => {
-    if (!user) {
-      subscribedRef.current = false;
-      setupUserRef.current = null;
-      return undefined;
-    }
+ useEffect(() => {
+  if (!user) {
+    subscribedRef.current = false;
+    setupUserRef.current = null;
+    return undefined;
+  }
 
-    loadNotifications();
-    const interval = setInterval(loadNotifications, 30_000);
+  loadNotifications();
 
-    // Small delay: let the page finish rendering before the permission prompt
-    const timer = setTimeout(() => setupPush(), 1500);
+  const interval = setInterval(
+    loadNotifications,
+    30_000
+  );
 
-    return () => {
-      clearInterval(interval);
-      clearTimeout(timer);
-    };
-  }, [user, loadNotifications, setupPush]);
+  return () => {
+    clearInterval(interval);
+  };
+}, [user, loadNotifications]);
 
   useEffect(() => {
     const refresh = () => loadNotifications();
@@ -240,10 +522,20 @@ export default function NotificationBell() {
 
       {/* Bell button */}
       <button
-        onClick={() => {
-          setShowDropdown((v) => !v);
-          if (!showDropdown) loadNotifications(); // refresh on open
-        }}
+  onClick={async () => {
+    setShowDropdown((v) => !v);
+
+    if (!showDropdown) {
+      loadNotifications();
+
+      if (
+        !subscribedRef.current ||
+        setupUserRef.current !== user?.id
+      ) {
+        await setupPush();
+      }
+    }
+  }}
         title="Notifications"
         style={{
           position: 'relative',
@@ -368,10 +660,25 @@ export default function NotificationBell() {
                       }}>
                         {n.message}
                       </span>
-                      <div style={{ fontSize: '11px', color: 'var(--text-3)', marginTop: '4px' }}>
-                        {new Date(n.created_at).toLocaleDateString()}{' '}
-                        {new Date(n.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                      </div>
+                      <div
+  style={{
+    fontSize: '11px',
+    color: 'var(--text-3)',
+    marginTop: '4px',
+  }}
+>
+  {new Date(n.created_at).toLocaleDateString('en-IN', {
+    timeZone: 'Asia/Kolkata',
+    day: 'numeric',
+    month: 'numeric',
+    year: 'numeric',
+  })}{' '}
+  {new Date(n.created_at).toLocaleTimeString('en-IN', {
+    timeZone: 'Asia/Kolkata',
+    hour: '2-digit',
+    minute: '2-digit',
+  })}
+</div>
                     </div>
 
                     {/* Delete button */}

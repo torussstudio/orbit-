@@ -16,6 +16,14 @@ const PRIORITY_COLORS = {
   critical: "var(--critical)",
 };
 
+// A main task has no stage of its own (see the "Main tasks no longer
+// use/display a status/stage" note below) — its "Done" status is
+// derived entirely from its sub tasks: Done only once every sub task
+// is Done, and only when it actually has sub tasks (no sub tasks means
+// there's nothing to derive a status from, so it stays unmarked).
+const allSubtasksDone = (subtasks) =>
+  subtasks.length > 0 && subtasks.every((st) => st.stage === "Done");
+
 export default function Tasks({ project: propProject }) {
   const params = useParams();
   const projectId = propProject?.id || params.id;
@@ -760,26 +768,28 @@ function BoardView({
 }) {
   return (
     <div className="card-grid">
-      {tasks.map((t) => (
-        <TaskCard
-          key={t.id}
-          task={t}
-          subtaskCount={
-            (
-              subtasksByParent[
-                t.id
-              ] || []
-            ).length
-          }
-          projectId={projectId}
-          onEdit={onEdit}
-          onDelete={onDelete}
-          isManager={isManager}
-          onAddSubTask={
-            onAddSubTask
-          }
-        />
-      ))}
+      {tasks.map((t) => {
+        const subtasks =
+          subtasksByParent[t.id] || [];
+
+        return (
+          <TaskCard
+            key={t.id}
+            task={t}
+            subtaskCount={subtasks.length}
+            mainTaskDone={allSubtasksDone(
+              subtasks
+            )}
+            projectId={projectId}
+            onEdit={onEdit}
+            onDelete={onDelete}
+            isManager={isManager}
+            onAddSubTask={
+              onAddSubTask
+            }
+          />
+        );
+      })}
     </div>
   );
 }
@@ -790,12 +800,15 @@ function BoardView({
  * ============================================================
  *
  * IMPORTANT:
- * Main Task has NO Stage/Status display.
+ * Main Task has no stage field of its own, but it DOES show a
+ * "Done" badge once every one of its sub tasks is Done (see
+ * allSubtasksDone above).
  */
 
 function TaskCard({
   task,
   subtaskCount,
+  mainTaskDone,
   projectId,
   onEdit,
   onDelete,
@@ -858,7 +871,20 @@ function TaskCard({
         />
       </div>
 
-      {/* NO MAIN TASK STAGE HERE */}
+      {/* Derived "Done" badge — shown once every sub task is Done */}
+
+      {mainTaskDone && (
+        <div
+          className="badge badge-done"
+          style={{
+            display: "inline-block",
+            fontSize: "10px",
+            marginBottom: "4px",
+          }}
+        >
+          ✓ Done
+        </div>
+      )}
 
       {subtaskCount > 0 && (
         <div
@@ -986,7 +1012,7 @@ function TaskCard({
  * ============================================================
  *
  * Main Task:
- *   Task | Priority | Due | Actions
+ *   Task (+ derived Done badge when all sub tasks are Done) | Priority | Due | Actions
  *
  * Sub Task:
  *   Task | Priority | Stage | Due | Actions
@@ -1089,6 +1115,11 @@ function ListView({
                   t.id
                 );
 
+              const mainDone =
+                allSubtasksDone(
+                  subtasks
+                );
+
               return (
                 <Fragment
                   key={t.id}
@@ -1154,6 +1185,22 @@ function ListView({
                       >
                         {t.title}
                       </Link>
+
+                      {mainDone && (
+                        <span
+                          className="badge badge-done"
+                          style={{
+                            fontSize:
+                              "9px",
+                            marginLeft:
+                              "6px",
+                            verticalAlign:
+                              "middle",
+                          }}
+                        >
+                          ✓ Done
+                        </span>
+                      )}
 
                       {subtasks.length >
                         0 && (
