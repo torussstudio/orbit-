@@ -31,6 +31,21 @@
 //   );
 // }
 
+// // Small eye / eye-off icon used for the password visibility toggle
+// function EyeIcon({ open }) {
+//   return open ? (
+//     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+//       <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+//       <circle cx="12" cy="12" r="3" />
+//     </svg>
+//   ) : (
+//     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+//       <path d="M17.94 17.94A10.94 10.94 0 0112 20c-7 0-11-8-11-8a19.4 19.4 0 015.06-5.94M9.9 4.24A10.58 10.58 0 0112 4c7 0 11 8 11 8a19.5 19.5 0 01-2.16 3.19m-6.72-1.07a3 3 0 11-4.24-4.24" />
+//       <line x1="1" y1="1" x2="23" y2="23" />
+//     </svg>
+//   );
+// }
+
 // export default function AccountSettings() {
 //   const { user, logout, updateUser } = useAuth();
 
@@ -45,6 +60,8 @@
 //   });
 //   const [newPassword, setNewPassword] = useState('');
 //   const [confirmPassword, setConfirmPassword] = useState('');
+//   const [showNewPassword, setShowNewPassword] = useState(false);
+//   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
 //   // ── UI ─────────────────────────────────────────────────────
 //   const [saving, setSaving] = useState(false);
@@ -81,7 +98,10 @@
 //   const handleChange = (field) => (e) =>
 //     setForm((prev) => ({ ...prev, [field]: e.target.value }));
 
-//   const handleSave = async () => {
+//   // handleSave now also serves as the form's onSubmit handler
+//   const handleSave = async (e) => {
+//     if (e && e.preventDefault) e.preventDefault();
+
 //     if (newPassword && newPassword !== confirmPassword) {
 //       setSaveMsg({ type: 'error', text: 'Passwords do not match.' });
 //       return;
@@ -155,6 +175,12 @@
 //     display: 'block', fontSize: '11px', fontWeight: 600,
 //     color: 'var(--text-2)', marginBottom: '6px', letterSpacing: '0.2px',
 //   };
+//   const eyeToggleStyle = {
+//     position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)',
+//     background: 'none', border: 'none', padding: 0, margin: 0,
+//     display: 'flex', alignItems: 'center', justifyContent: 'center',
+//     color: 'var(--text-3)', cursor: 'pointer', lineHeight: 0,
+//   };
 
 //   // Format dob for display in left panel
 //   const formatDob = (val) => {
@@ -202,6 +228,7 @@
 //                 }
 //               </div>
 //               <button
+//                 type="button"
 //                 onClick={() => fileInputRef.current?.click()}
 //                 title="Change profile photo"
 //                 style={{
@@ -228,6 +255,7 @@
 //             </div>
 
 //             <button
+//               type="button"
 //               onClick={() => fileInputRef.current?.click()}
 //               style={{
 //                 width: '100%', padding: '7px', borderRadius: '8px',
@@ -276,14 +304,33 @@
 //         {/* ══ RIGHT PANEL ═════════════════════════════════════ */}
 //         <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
 
-//           {/* Account Settings card */}
-//           <div style={{
-//             background: 'var(--bg-2)', border: '1px solid var(--border)',
-//             borderRadius: '14px', padding: '24px', boxShadow: 'var(--shadow)',
-//           }}>
+//           {/* Account Settings card — wrapped in a <form> so the password
+//               fields are properly associated with a form (fixes the Chrome
+//               DevTools "Password field is not contained in a form" warning
+//               and lets browser password managers work correctly). */}
+//           <form
+//             onSubmit={handleSave}
+//             style={{
+//               background: 'var(--bg-2)', border: '1px solid var(--border)',
+//               borderRadius: '14px', padding: '24px', boxShadow: 'var(--shadow)',
+//             }}
+//           >
 //             <h2 style={{ fontSize: '15px', fontWeight: 700, color: 'var(--text)', marginBottom: '20px' }}>
 //               Account Settings
 //             </h2>
+
+//             {/* Hidden username field helps password managers associate the
+//                 credentials with the right account (accessibility best practice) */}
+//             <input
+//               type="text"
+//               name="username"
+//               autoComplete="username"
+//               value={form.email}
+//               readOnly
+//               style={{ display: 'none' }}
+//               tabIndex={-1}
+//               aria-hidden="true"
+//             />
 
 //             {/* Name + Email */}
 //             <div className="account-settings-form-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '16px' }}>
@@ -295,7 +342,7 @@
 //               </div>
 //               <div>
 //                 <label style={labelStyle}>Email</label>
-//                 <input style={inputStyle} value={form.email} type="email" onChange={handleChange('email')} placeholder="your@email.com"
+//                 <input style={inputStyle} value={form.email} type="email" autoComplete="email" onChange={handleChange('email')} placeholder="your@email.com"
 //                   onFocus={e => e.target.style.borderColor = 'var(--accent)'}
 //                   onBlur={e => e.target.style.borderColor = 'var(--border)'} />
 //               </div>
@@ -334,15 +381,35 @@
 //             <div className="account-settings-form-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '16px' }}>
 //               <div>
 //                 <label style={labelStyle}>New Password</label>
-//                 <input style={inputStyle} value={newPassword} type="password" onChange={e => setNewPassword(e.target.value)} placeholder="Leave blank to keep current"
-//                   onFocus={e => e.target.style.borderColor = 'var(--accent)'}
-//                   onBlur={e => e.target.style.borderColor = 'var(--border)'} />
+//                 <div style={{ position: 'relative' }}>
+//                   <input style={{ ...inputStyle, paddingRight: '38px' }} value={newPassword}
+//                     type={showNewPassword ? 'text' : 'password'} autoComplete="new-password"
+//                     onChange={e => setNewPassword(e.target.value)} placeholder="Leave blank to keep current"
+//                     onFocus={e => e.target.style.borderColor = 'var(--accent)'}
+//                     onBlur={e => e.target.style.borderColor = 'var(--border)'} />
+//                   <button type="button" style={eyeToggleStyle}
+//                     onClick={() => setShowNewPassword(v => !v)}
+//                     title={showNewPassword ? 'Hide password' : 'Show password'}
+//                     aria-label={showNewPassword ? 'Hide password' : 'Show password'}>
+//                     <EyeIcon open={showNewPassword} />
+//                   </button>
+//                 </div>
 //               </div>
 //               <div>
 //                 <label style={labelStyle}>Confirm Password</label>
-//                 <input style={inputStyle} value={confirmPassword} type="password" onChange={e => setConfirmPassword(e.target.value)} placeholder="Confirm new password"
-//                   onFocus={e => e.target.style.borderColor = 'var(--accent)'}
-//                   onBlur={e => e.target.style.borderColor = 'var(--border)'} />
+//                 <div style={{ position: 'relative' }}>
+//                   <input style={{ ...inputStyle, paddingRight: '38px' }} value={confirmPassword}
+//                     type={showConfirmPassword ? 'text' : 'password'} autoComplete="new-password"
+//                     onChange={e => setConfirmPassword(e.target.value)} placeholder="Confirm new password"
+//                     onFocus={e => e.target.style.borderColor = 'var(--accent)'}
+//                     onBlur={e => e.target.style.borderColor = 'var(--border)'} />
+//                   <button type="button" style={eyeToggleStyle}
+//                     onClick={() => setShowConfirmPassword(v => !v)}
+//                     title={showConfirmPassword ? 'Hide password' : 'Show password'}
+//                     aria-label={showConfirmPassword ? 'Hide password' : 'Show password'}>
+//                     <EyeIcon open={showConfirmPassword} />
+//                   </button>
+//                 </div>
 //               </div>
 //             </div>
 
@@ -366,7 +433,7 @@
 //                   {saveMsg.type === 'success' ? '✓' : '✕'} {saveMsg.text}
 //                 </div>
 //               )}
-//               <button onClick={handleSave} disabled={saving} style={{
+//               <button type="submit" disabled={saving} style={{
 //                 marginLeft: 'auto', padding: '9px 22px', borderRadius: '8px',
 //                 background: 'linear-gradient(135deg, var(--accent), var(--accent-2))',
 //                 color: '#fff', border: 'none', fontSize: '13px', fontWeight: 600,
@@ -377,7 +444,7 @@
 //                 {saving ? <Loader label="Saving..." size="sm" variant="button" /> : 'Save Changes'}
 //               </button>
 //             </div>
-//           </div>
+//           </form>
 
 //           {/* Danger Zone */}
 //           <div style={{
@@ -430,23 +497,82 @@
 
 
 import { useState, useRef, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { useAuth } from '../context/AuthContext';
 import api from '../api/client';
 import DatePicker from '../components/ui/DatePicker';
 import Loader from '../components/ui/Loader';
 
-// Reusable avatar renderer — shows image if url exists, else initial letter
-export function UserAvatar({ avatarUrl, name, size = 34, fontSize = 13 }) {
-  if (avatarUrl) {
-    return (
-      <img
-        src={avatarUrl}
-        alt={name || 'avatar'}
+// Full-size avatar preview shown in a modal overlay. Shared by the top-bar
+// avatar and the details-page avatar so both "click to expand" the same way.
+function AvatarLightbox({ src, name, onClose }) {
+  useEffect(() => {
+    const handleKey = (e) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', handleKey);
+    return () => document.removeEventListener('keydown', handleKey);
+  }, [onClose]);
+
+  return createPortal(
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        zIndex: 1000, padding: '24px', cursor: 'zoom-out',
+      }}
+    >
+      <button
+        type="button"
+        onClick={onClose}
+        aria-label="Close"
         style={{
-          width: size, height: size, borderRadius: '50%',
-          objectFit: 'cover', display: 'block',
+          position: 'absolute', top: '20px', right: '24px',
+          width: '36px', height: '36px', borderRadius: '50%',
+          background: 'rgba(255,255,255,0.15)', border: 'none',
+          color: '#fff', fontSize: '18px', cursor: 'pointer',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}
+      >
+        ✕
+      </button>
+      <img
+        src={src}
+        alt={name || 'avatar'}
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          maxWidth: 'min(80vw, 480px)', maxHeight: '80vh',
+          borderRadius: '16px', objectFit: 'cover',
+          boxShadow: '0 20px 60px rgba(0,0,0,0.5)', cursor: 'default',
         }}
       />
+    </div>,
+    document.body
+  );
+}
+
+// Reusable avatar renderer — shows image if url exists, else initial letter.
+// Clicking an image avatar opens it full-size in a lightbox (initials-only
+// avatars aren't clickable since there's nothing to expand).
+export function UserAvatar({ avatarUrl, name, size = 34, fontSize = 13 }) {
+  const [expanded, setExpanded] = useState(false);
+
+  if (avatarUrl) {
+    return (
+      <>
+        <img
+          src={avatarUrl}
+          alt={name || 'avatar'}
+          onClick={() => setExpanded(true)}
+          title="View photo"
+          style={{
+            width: size, height: size, borderRadius: '50%',
+            objectFit: 'cover', display: 'block', cursor: 'pointer',
+          }}
+        />
+        {expanded && (
+          <AvatarLightbox src={avatarUrl} name={name} onClose={() => setExpanded(false)} />
+        )}
+      </>
     );
   }
   return (
@@ -483,6 +609,7 @@ export default function AccountSettings() {
   // ── Avatar ─────────────────────────────────────────────────
   const [avatarPreview, setAvatarPreview] = useState(null);
   const [avatarFile, setAvatarFile] = useState(null);
+  const [avatarExpanded, setAvatarExpanded] = useState(false);
   const fileInputRef = useRef(null);
 
   // ── Form (right side) — these drive left side too ──────────
@@ -654,7 +781,13 @@ export default function AccountSettings() {
                 fontSize: '30px', fontWeight: 700, color: 'white',
               }}>
                 {avatarPreview
-                  ? <img src={avatarPreview} alt="avatar" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                  ? <img
+                      src={avatarPreview}
+                      alt="avatar"
+                      onClick={() => setAvatarExpanded(true)}
+                      title="View photo"
+                      style={{ width: '100%', height: '100%', objectFit: 'cover', cursor: 'pointer' }}
+                    />
                   : form.name?.[0]?.toUpperCase() || user?.name?.[0]?.toUpperCase()
                 }
               </div>
@@ -922,6 +1055,14 @@ export default function AccountSettings() {
 
         </div>
       </div>
+
+      {avatarExpanded && avatarPreview && (
+        <AvatarLightbox
+          src={avatarPreview}
+          name={form.name || user?.name}
+          onClose={() => setAvatarExpanded(false)}
+        />
+      )}
     </div>
   );
 }
