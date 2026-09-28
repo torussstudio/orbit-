@@ -6,6 +6,7 @@ import ConfirmModal from '../ui/ConfirmModal';
 import api from '../../api/client';
 import { animateEntrance } from '../../utils/entranceAnimation';
 import Loader from '../ui/Loader';
+import { UserAvatar } from '../../pages/AccountSettings';
 
 const Icon = ({ d }) => (
   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -411,7 +412,7 @@ export default function Layout() {
               {profileDropdownOpen && (
                 <div className="absolute top-[calc(100%+8px)] right-0 bg-[var(--bg-2)] rounded-xl border border-[var(--border)] shadow-[0_8px_32px_rgba(0,0,0,0.14)] w-[220px] max-w-[calc(100vw-24px)] overflow-hidden z-[2000]">
                   <div className="px-4 py-3.5 border-b border-[var(--border)] flex items-center gap-2.5">
-                    <Avatar user={user} />
+                   <UserAvatar avatarUrl={user?.avatar_url} name={user?.name} size={36} fontSize={14} />
                     <div className="min-w-0">
                       <div className="text-[13px] font-semibold text-[var(--text)] leading-tight truncate">{user?.name}</div>
                       <div className="text-[11px] text-[var(--text-3)] leading-tight capitalize truncate">{user?.role}</div>
