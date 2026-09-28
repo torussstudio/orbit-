@@ -16,13 +16,27 @@ const PRIORITY_COLORS = {
   critical: "var(--critical)",
 };
 
-// A main task has no stage of its own (see the "Main tasks no longer
-// use/display a status/stage" note below) — its "Done" status is
-// derived entirely from its sub tasks: Done only once every sub task
-// is Done, and only when it actually has sub tasks (no sub tasks means
-// there's nothing to derive a status from, so it stays unmarked).
+// A main task has no stage of its own — its "Done" status is derived
+// entirely from its sub tasks: Done only once every sub task is Done,
+// and only when it actually has sub tasks.
 const allSubtasksDone = (subtasks) =>
   subtasks.length > 0 && subtasks.every((st) => st.stage === "Done");
+
+const gradientBtn = {
+  width: "24px",
+  height: "24px",
+  borderRadius: "8px",
+  border: "none",
+  background: "linear-gradient(135deg, var(--accent), var(--accent-2))",
+  color: "#fff",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  fontSize: "16px",
+  fontWeight: 600,
+  transition: "all 0.15s",
+  flexShrink: 0,
+};
 
 export default function Tasks({ project: propProject }) {
   const params = useParams();
@@ -48,21 +62,13 @@ export default function Tasks({ project: propProject }) {
   });
 
   const now = new Date();
-
   const currentMonthKey = `${now.getFullYear()}-${String(
-    now.getMonth() + 1
+    now.getMonth() + 1,
   ).padStart(2, "0")}`;
 
-  const [selectedMonth, setSelectedMonth] =
-    useState(currentMonthKey);
+  const [selectedMonth, setSelectedMonth] = useState(currentMonthKey);
 
-  /*
-   * IMPORTANT:
-   *
-   * Main tasks no longer use/display a status/stage.
-   *
-   * Stages are still available for SUB TASKS.
-   */
+  // Main tasks do not use stages. Stages are still available for SUB TASKS.
   const stages = propProject?.custom_stages || [
     "Todo",
     "In Progress",
@@ -85,13 +91,8 @@ export default function Tasks({ project: propProject }) {
         setTasks(t.data);
         setMembers(m.data);
         setClusters(c.data);
-
         setProjectMemberIds(
-          new Set(
-            (proj.data?.members || []).map(
-              (x) => x.id
-            )
-          )
+          new Set((proj.data?.members || []).map((x) => x.id)),
         );
       })
       .finally(() => setLoading(false));
@@ -103,27 +104,19 @@ export default function Tasks({ project: propProject }) {
     }
   }, [projectId]);
 
-  /*
-   * MAIN TASK CREATE / EDIT
-   *
-   * Main tasks no longer receive stage options.
-   */
+  // MAIN TASK CREATE / EDIT
   const handleSave = async (data) => {
     setSavingTask(true);
 
     try {
       const mainTaskData = {
         ...data,
-
         // Main tasks do not use status/stage.
         stage: undefined,
       };
 
       if (editing) {
-        await api.put(
-          `/tasks/${editing.id}`,
-          mainTaskData
-        );
+        await api.put(`/tasks/${editing.id}`, mainTaskData);
       } else {
         await api.post("/tasks", {
           ...mainTaskData,
@@ -133,18 +126,13 @@ export default function Tasks({ project: propProject }) {
 
       setShowModal(false);
       setEditing(null);
-
       load();
     } finally {
       setSavingTask(false);
     }
   };
 
-  /*
-   * SUB TASK CREATE
-   *
-   * Sub tasks continue to support stages.
-   */
+  // SUB TASK CREATE (sub tasks keep stages)
   const handleSubTaskSave = async (data) => {
     setSavingTask(true);
 
@@ -157,7 +145,6 @@ export default function Tasks({ project: propProject }) {
 
       setShowSubTaskModal(false);
       setSubTaskParent(null);
-
       load();
     } finally {
       setSavingTask(false);
@@ -165,310 +152,164 @@ export default function Tasks({ project: propProject }) {
   };
 
   const handleDelete = (id) => {
-    setDeleteConfirm({
-      show: true,
-      id,
-      loading: false,
-    });
+    setDeleteConfirm({ show: true, id, loading: false });
   };
 
   const confirmDelete = async () => {
-    setDeleteConfirm((prev) => ({
-      ...prev,
-      loading: true,
-    }));
+    setDeleteConfirm((prev) => ({ ...prev, loading: true }));
 
     try {
-      await api.delete(
-        `/tasks/${deleteConfirm.id}`
-      );
-
+      await api.delete(`/tasks/${deleteConfirm.id}`);
       load();
     } finally {
-      setDeleteConfirm({
-        show: false,
-        id: null,
-        loading: false,
-      });
+      setDeleteConfirm({ show: false, id: null, loading: false });
     }
   };
 
-  /*
-   * MONTH FILTER
-   */
+  // MONTH FILTER
   const getMonthKey = (t) => {
-    const dateStr =
-      t?.due_date || t?.created_at;
-
-    return dateStr
-      ? dateStr.slice(0, 7)
-      : null;
+    const dateStr = t?.due_date || t?.created_at;
+    return dateStr ? dateStr.slice(0, 7) : null;
   };
 
   const allMonthKeys = useMemo(
-    () => [
-      ...new Set([
-        ...tasks
-          .map((t) => getMonthKey(t))
-          .filter(Boolean),
-        currentMonthKey,
-      ]),
-    ].sort((a, b) =>
-      a.localeCompare(b)
-    ),
-    [tasks, currentMonthKey]
+    () =>
+      [
+        ...new Set([
+          ...tasks.map((t) => getMonthKey(t)).filter(Boolean),
+          currentMonthKey,
+        ]),
+      ].sort((a, b) => a.localeCompare(b)),
+    [tasks, currentMonthKey],
   );
 
   const filteredTasks = useMemo(
-    () =>
-      tasks.filter(
-        (t) =>
-          getMonthKey(t) === selectedMonth
-      ),
-    [tasks, selectedMonth]
+    () => tasks.filter((t) => getMonthKey(t) === selectedMonth),
+    [tasks, selectedMonth],
   );
 
-  /*
-   * MAIN TASKS
-   *
-   * Main task = no parent_task_id.
-   */
+  // MAIN TASKS (no parent_task_id), newest first
   const mainTasks = useMemo(
     () =>
       filteredTasks
         .filter((t) => !t.parent_task_id)
         .sort((a, b) => {
-          const bTime = b.created_at
-            ? new Date(
-                b.created_at
-              ).getTime()
-            : b.id;
-
-          const aTime = a.created_at
-            ? new Date(
-                a.created_at
-              ).getTime()
-            : a.id;
-
+          const bTime = b.created_at ? new Date(b.created_at).getTime() : b.id;
+          const aTime = a.created_at ? new Date(a.created_at).getTime() : a.id;
           return bTime - aTime;
         }),
-    [filteredTasks]
+    [filteredTasks],
   );
 
-  /*
-   * SUB TASKS GROUPED BY PARENT
-   */
+  // SUB TASKS GROUPED BY PARENT
   const subtasksByParent = useMemo(
     () =>
-      filteredTasks.reduce(
-        (acc, t) => {
-          if (t.parent_task_id) {
-            if (!acc[t.parent_task_id]) {
-              acc[t.parent_task_id] = [];
-            }
-
-            acc[t.parent_task_id].push(t);
+      filteredTasks.reduce((acc, t) => {
+        if (t.parent_task_id) {
+          if (!acc[t.parent_task_id]) {
+            acc[t.parent_task_id] = [];
           }
-
-          return acc;
-        },
-        {}
-      ),
-    [filteredTasks]
+          acc[t.parent_task_id].push(t);
+        }
+        return acc;
+      }, {}),
+    [filteredTasks],
   );
 
   const formatMonthLabel = (key) => {
-    const [year, month] =
-      key.split("-");
-
-    return new Date(
-      year,
-      month - 1
-    ).toLocaleString(
-      "default",
-      {
-        month: "long",
-        year: "numeric",
-      }
-    );
+    const [year, month] = key.split("-");
+    return new Date(year, month - 1).toLocaleString("default", {
+      month: "long",
+      year: "numeric",
+    });
   };
 
-  /*
-   * MAIN TASK COUNT
-   *
-   * Since Main Tasks no longer have a status,
-   * simply show the total number of main tasks.
-   */
   const taskCount = mainTasks.length;
-
-  const currentIdx =
-    allMonthKeys.indexOf(
-      selectedMonth
-    );
+  const currentIdx = allMonthKeys.indexOf(selectedMonth);
 
   if (loading) {
     return (
-      <div
-        style={{
-          padding: "24px",
-        }}
-      >
-        <Loader
-          label="Loading tasks"
-          size="lg"
-          variant="page"
-        />
+      <div style={{ padding: "24px" }}>
+        <Loader label="Loading tasks" size="lg" variant="page" />
       </div>
     );
   }
 
-  return (
-    <div
-      className="tasks-page"
-      style={{
-        padding: "24px 32px",
-      }}
-    >
-      {/* TOOLBAR */}
+  const activeViewStyle = {
+    borderColor: "var(--accent)",
+    color: "var(--accent)",
+  };
 
+  return (
+    <div className="tasks-page" style={{ padding: "24px 32px" }}>
+      {/* TOOLBAR */}
       <div
         className="tasks-toolbar"
         style={{
           display: "flex",
           flexWrap: "wrap",
-          justifyContent:
-            "space-between",
+          justifyContent: "space-between",
           alignItems: "center",
           rowGap: "12px",
           position: "sticky",
           top: 0,
           zIndex: 30,
           background: "var(--bg)",
-          padding:
-            "24px 32px 20px",
-          margin:
-            "-24px -32px 0",
+          padding: "24px 32px 20px",
+          margin: "-24px -32px 0",
         }}
       >
         {/* LIST / BOARD */}
-
-        <div
-          style={{
-            display: "flex",
-            gap: "8px",
-            flexShrink: 0,
-          }}
-        >
+        <div style={{ display: "flex", gap: "8px", flexShrink: 0 }}>
           <button
-            className={`btn btn-ghost btn-sm ${
-              view === "list"
-                ? "active"
-                : ""
-            }`}
-            onClick={() =>
-              setView("list")
-            }
-            style={
-              view === "list"
-                ? {
-                    borderColor:
-                      "var(--accent)",
-                    color:
-                      "var(--accent)",
-                  }
-                : {}
-            }
+            className={`btn btn-ghost btn-sm ${view === "list" ? "active" : ""}`}
+            onClick={() => setView("list")}
+            style={view === "list" ? activeViewStyle : {}}
           >
             List
           </button>
 
           <button
-            className={`btn btn-ghost btn-sm ${
-              view === "board"
-                ? "active"
-                : ""
-            }`}
-            onClick={() =>
-              setView("board")
-            }
-            style={
-              view === "board"
-                ? {
-                    borderColor:
-                      "var(--accent)",
-                    color:
-                      "var(--accent)",
-                  }
-                : {}
-            }
+            className={`btn btn-ghost btn-sm ${view === "board" ? "active" : ""}`}
+            onClick={() => setView("board")}
+            style={view === "board" ? activeViewStyle : {}}
           >
             Board
           </button>
         </div>
 
         {/* MONTH + TASK COUNT + ADD TASK */}
-
         <div
           style={{
             display: "flex",
             flexWrap: "wrap",
             alignItems: "center",
-            justifyContent:
-              "flex-end",
+            justifyContent: "flex-end",
             gap: "10px",
             rowGap: "8px",
           }}
         >
           {/* PREVIOUS MONTH */}
-
           <button
             onClick={() => {
               if (currentIdx > 0) {
-                setSelectedMonth(
-                  allMonthKeys[
-                    currentIdx - 1
-                  ]
-                );
+                setSelectedMonth(allMonthKeys[currentIdx - 1]);
               }
             }}
             disabled={currentIdx === 0}
             style={{
-              width: "24px",
-              height: "24px",
-              borderRadius: "8px",
-              border: "none",
-              background:
-                "linear-gradient(135deg, var(--accent), var(--accent-2))",
-              color: "#fff",
-              cursor:
-                currentIdx === 0
-                  ? "not-allowed"
-                  : "pointer",
-              opacity:
-                currentIdx === 0
-                  ? 0.4
-                  : 1,
-              display: "flex",
-              alignItems: "center",
-              justifyContent:
-                "center",
-              fontSize: "16px",
-              fontWeight: 600,
-              transition:
-                "all 0.15s",
-              flexShrink: 0,
+              ...gradientBtn,
+              cursor: currentIdx === 0 ? "not-allowed" : "pointer",
+              opacity: currentIdx === 0 ? 0.4 : 1,
             }}
           >
             ‹
           </button>
 
           {/* MONTH */}
-
           <Select
             value={selectedMonth}
-            onChange={(val) =>
-              setSelectedMonth(val)
-            }
+            onChange={(val) => setSelectedMonth(val)}
             arrowColor="#fff"
             labelColor="#fff"
             style={{
@@ -483,121 +324,65 @@ export default function Tasks({ project: propProject }) {
               flexShrink: 0,
             }}
           >
-            {allMonthKeys.map(
-              (key) => (
-                <option
-                  key={key}
-                  value={key}
-                >
-                  {formatMonthLabel(
-                    key
-                  )}
-                </option>
-              )
-            )}
+            {allMonthKeys.map((key) => (
+              <option key={key} value={key}>
+                {formatMonthLabel(key)}
+              </option>
+            ))}
           </Select>
 
           {/* NEXT MONTH */}
-
           <button
             onClick={() => {
-              if (
-                currentIdx <
-                allMonthKeys.length -
-                  1
-              ) {
-                setSelectedMonth(
-                  allMonthKeys[
-                    currentIdx + 1
-                  ]
-                );
+              if (currentIdx < allMonthKeys.length - 1) {
+                setSelectedMonth(allMonthKeys[currentIdx + 1]);
               }
             }}
-            disabled={
-              currentIdx ===
-              allMonthKeys.length -
-                1
-            }
+            disabled={currentIdx === allMonthKeys.length - 1}
             style={{
-              width: "24px",
-              height: "24px",
-              borderRadius: "8px",
-              border: "none",
-              background:
-                "linear-gradient(135deg, var(--accent), var(--accent-2))",
-              color: "#fff",
+              ...gradientBtn,
               cursor:
-                currentIdx ===
-                allMonthKeys.length -
-                  1
+                currentIdx === allMonthKeys.length - 1
                   ? "not-allowed"
                   : "pointer",
-              opacity:
-                currentIdx ===
-                allMonthKeys.length -
-                  1
-                  ? 0.4
-                  : 1,
-              display: "flex",
-              alignItems: "center",
-              justifyContent:
-                "center",
-              fontSize: "16px",
-              fontWeight: 600,
-              transition:
-                "all 0.15s",
-              flexShrink: 0,
+              opacity: currentIdx === allMonthKeys.length - 1 ? 0.4 : 1,
             }}
           >
             ›
           </button>
 
           {/* TASK COUNT */}
-
           <span
             style={{
               fontSize: "11px",
-              background:
-                "var(--bg-4)",
+              background: "var(--bg-4)",
               borderRadius: "10px",
               padding: "2px 8px",
-              color:
-                "var(--text-3)",
-              whiteSpace:
-                "nowrap",
+              color: "var(--text-3)",
+              whiteSpace: "nowrap",
               flexShrink: 0,
             }}
           >
-            {taskCount} task
-            {taskCount !== 1
-              ? "s"
-              : ""}
+            {taskCount} task{taskCount !== 1 ? "s" : ""}
           </span>
 
           {/* DIVIDER */}
-
           {isManager && (
             <div
               style={{
                 width: "1px",
                 height: "20px",
-                background:
-                  "var(--border)",
+                background: "var(--border)",
                 flexShrink: 0,
               }}
             />
           )}
 
           {/* ADD TASK */}
-
           {isManager && (
             <button
               className="btn btn-primary btn-sm"
-              style={{
-                whiteSpace:
-                  "nowrap",
-                flexShrink: 0,
-              }}
+              style={{ whiteSpace: "nowrap", flexShrink: 0 }}
               onClick={() => {
                 setEditing(null);
                 setShowModal(true);
@@ -610,13 +395,10 @@ export default function Tasks({ project: propProject }) {
       </div>
 
       {/* BOARD / LIST */}
-
       {view === "board" ? (
         <BoardView
           tasks={mainTasks}
-          subtasksByParent={
-            subtasksByParent
-          }
+          subtasksByParent={subtasksByParent}
           projectId={projectId}
           onEdit={(t) => {
             setEditing(t);
@@ -632,9 +414,7 @@ export default function Tasks({ project: propProject }) {
       ) : (
         <ListView
           tasks={mainTasks}
-          subtasksByParent={
-            subtasksByParent
-          }
+          subtasksByParent={subtasksByParent}
           projectId={projectId}
           onEdit={(t) => {
             setEditing(t);
@@ -650,14 +430,9 @@ export default function Tasks({ project: propProject }) {
       )}
 
       {/* MAIN TASK MODAL */}
-
       {showModal && (
         <Modal
-          title={
-            editing
-              ? "Edit Task"
-              : "New Task"
-          }
+          title={editing ? "Edit Task" : "New Task"}
           onClose={() => {
             setShowModal(false);
             setEditing(null);
@@ -665,20 +440,11 @@ export default function Tasks({ project: propProject }) {
         >
           <TaskForm
             initial={editing}
-            members={members.filter(
-              (m) =>
-                projectMemberIds.has(
-                  m.id
-                )
-            )}
+            members={members.filter((m) => projectMemberIds.has(m.id))}
             allMembers={members}
             clusters={clusters}
-
-            /*
-             * Main tasks do NOT use stages.
-             */
+            // Main tasks do NOT use stages.
             stages={[]}
-
             onSave={handleSave}
             saving={savingTask}
             emptyMembersMessage="No members are assigned to this project yet — assign members on the project first."
@@ -691,61 +457,42 @@ export default function Tasks({ project: propProject }) {
       )}
 
       {/* SUB TASK MODAL */}
-
-      {showSubTaskModal &&
-        subTaskParent && (
-          <Modal
-            title={`Sub Task — ${subTaskParent.title}`}
-            onClose={() => {
+      {showSubTaskModal && subTaskParent && (
+        <Modal
+          title={`Sub Task — ${subTaskParent.title}`}
+          onClose={() => {
+            setShowSubTaskModal(false);
+            setSubTaskParent(null);
+          }}
+        >
+          <TaskForm
+            members={members}
+            clusters={clusters}
+            // Sub tasks KEEP stages.
+            stages={stages}
+            onSave={handleSubTaskSave}
+            saving={savingTask}
+            onCancel={() => {
               setShowSubTaskModal(false);
               setSubTaskParent(null);
             }}
-          >
-            <TaskForm
-              members={members}
-              clusters={clusters}
-
-              /*
-               * Sub tasks KEEP stages.
-               */
-              stages={stages}
-
-              onSave={
-                handleSubTaskSave
-              }
-              saving={savingTask}
-              onCancel={() => {
-                setShowSubTaskModal(false);
-                setSubTaskParent(null);
-              }}
-              hideCluster
-              isSubtaskForm
-            />
-          </Modal>
-        )}
+            hideCluster
+            isSubtaskForm
+          />
+        </Modal>
+      )}
 
       {/* DELETE CONFIRM */}
-
       <ConfirmModal
-        isOpen={
-          deleteConfirm.show
-        }
+        isOpen={deleteConfirm.show}
         title="Delete Task"
         message="Are you sure you want to delete this task? This action cannot be undone."
         confirmText="Delete"
-        onConfirm={
-          confirmDelete
-        }
+        onConfirm={confirmDelete}
         onCancel={() =>
-          setDeleteConfirm({
-            show: false,
-            id: null,
-            loading: false,
-          })
+          setDeleteConfirm({ show: false, id: null, loading: false })
         }
-        loading={
-          deleteConfirm.loading
-        }
+        loading={deleteConfirm.loading}
       />
     </div>
   );
@@ -769,24 +516,19 @@ function BoardView({
   return (
     <div className="card-grid">
       {tasks.map((t) => {
-        const subtasks =
-          subtasksByParent[t.id] || [];
+        const subtasks = subtasksByParent[t.id] || [];
 
         return (
           <TaskCard
             key={t.id}
             task={t}
             subtaskCount={subtasks.length}
-            mainTaskDone={allSubtasksDone(
-              subtasks
-            )}
+            mainTaskDone={allSubtasksDone(subtasks)}
             projectId={projectId}
             onEdit={onEdit}
             onDelete={onDelete}
             isManager={isManager}
-            onAddSubTask={
-              onAddSubTask
-            }
+            onAddSubTask={onAddSubTask}
           />
         );
       })}
@@ -799,10 +541,9 @@ function BoardView({
  * MAIN TASK CARD
  * ============================================================
  *
- * IMPORTANT:
- * Main Task has no stage field of its own, but it DOES show a
- * "Done" badge once every one of its sub tasks is Done (see
- * allSubtasksDone above).
+ * Main Task has no stage field of its own, but shows a "Done"
+ * badge once every sub task is Done. When Done, the priority dot
+ * and due date are hidden (they no longer matter).
  */
 
 function TaskCard({
@@ -815,27 +556,21 @@ function TaskCard({
   isManager,
   onAddSubTask,
 }) {
-  const overdue = isOverdue(
-    task.due_date
-  );
+  const overdue = isOverdue(task.due_date, mainTaskDone ? "Done" : undefined);
 
   return (
     <div
       className="card"
       style={{
         padding: "12px",
-        borderColor: overdue
-          ? "rgba(248,113,113,0.3)"
-          : undefined,
+        borderColor: overdue ? "rgba(248,113,113,0.3)" : undefined,
       }}
     >
       <div
         style={{
           display: "flex",
-          justifyContent:
-            "space-between",
-          alignItems:
-            "flex-start",
+          justifyContent: "space-between",
+          alignItems: "flex-start",
           marginBottom: "6px",
         }}
       >
@@ -844,8 +579,7 @@ function TaskCard({
           style={{
             fontSize: "13px",
             color: "var(--text)",
-            textDecoration:
-              "none",
+            textDecoration: "none",
             fontWeight: 500,
             lineHeight: 1.4,
             flex: 1,
@@ -854,25 +588,24 @@ function TaskCard({
           {task.title}
         </Link>
 
-        <div
-          style={{
-            width: "8px",
-            height: "8px",
-            borderRadius: "50%",
-            background:
-              PRIORITY_COLORS[
-                task.priority
-              ],
-            marginLeft: "8px",
-            flexShrink: 0,
-            marginTop: "3px",
-          }}
-          title={task.priority}
-        />
+        {/* Priority dot — hidden once the task is Done */}
+        {!mainTaskDone && (
+          <div
+            style={{
+              width: "8px",
+              height: "8px",
+              borderRadius: "50%",
+              background: PRIORITY_COLORS[task.priority],
+              marginLeft: "8px",
+              flexShrink: 0,
+              marginTop: "3px",
+            }}
+            title={task.priority}
+          />
+        )}
       </div>
 
       {/* Derived "Done" badge — shown once every sub task is Done */}
-
       {mainTaskDone && (
         <div
           className="badge badge-done"
@@ -890,15 +623,11 @@ function TaskCard({
         <div
           style={{
             fontSize: "10px",
-            color:
-              "var(--text-3)",
+            color: "var(--text-3)",
             marginBottom: "4px",
           }}
         >
-          {subtaskCount} sub-task
-          {subtaskCount !== 1
-            ? "s"
-            : ""}
+          {subtaskCount} sub-task{subtaskCount !== 1 ? "s" : ""}
         </div>
       )}
 
@@ -906,40 +635,31 @@ function TaskCard({
         <div
           style={{
             fontSize: "10px",
-            color:
-              "var(--accent)",
+            color: "var(--accent)",
             marginBottom: "4px",
           }}
         >
-          📦{" "}
-          {task.cluster_name}
+          📦 {task.cluster_name}
         </div>
       )}
 
       <div
         style={{
           display: "flex",
-          justifyContent:
-            "flex-end",
+          justifyContent: "flex-end",
           alignItems: "center",
           marginTop: "8px",
         }}
       >
-        {task.due_date && (
+        {task.due_date && !mainTaskDone && (
           <span
             style={{
               fontSize: "10px",
-              color: overdue
-                ? "var(--danger)"
-                : "var(--text-3)",
+              color: overdue ? "var(--danger)" : "var(--text-3)",
             }}
           >
-            {overdue
-              ? "⚠ "
-              : ""}
-            {formatDate(
-              task.due_date
-            )}
+            {overdue ? "⚠ " : ""}
+            {formatDate(task.due_date)}
           </span>
         )}
       </div>
@@ -950,21 +670,14 @@ function TaskCard({
             display: "flex",
             gap: "4px",
             marginTop: "8px",
-            borderTop:
-              "1px solid var(--border)",
+            borderTop: "1px solid var(--border)",
             paddingTop: "8px",
           }}
         >
           <button
             className="btn btn-ghost btn-sm"
-            style={{
-              fontSize: "11px",
-              padding:
-                "2px 8px",
-            }}
-            onClick={() =>
-              onEdit(task)
-            }
+            style={{ fontSize: "11px", padding: "2px 8px" }}
+            onClick={() => onEdit(task)}
           >
             Edit
           </button>
@@ -973,14 +686,10 @@ function TaskCard({
             className="btn btn-ghost btn-sm"
             style={{
               fontSize: "11px",
-              padding:
-                "2px 8px",
-              color:
-                "var(--accent)",
+              padding: "2px 8px",
+              color: "var(--accent)",
             }}
-            onClick={() =>
-              onAddSubTask(task)
-            }
+            onClick={() => onAddSubTask(task)}
           >
             Sub Task
           </button>
@@ -989,14 +698,10 @@ function TaskCard({
             className="btn btn-ghost btn-sm"
             style={{
               fontSize: "11px",
-              padding:
-                "2px 8px",
-              color:
-                "var(--danger)",
+              padding: "2px 8px",
+              color: "var(--danger)",
             }}
-            onClick={() =>
-              onDelete(task.id)
-            }
+            onClick={() => onDelete(task.id)}
           >
             Del
           </button>
@@ -1011,11 +716,14 @@ function TaskCard({
  * LIST VIEW
  * ============================================================
  *
- * Main Task:
- *   Task (+ derived Done badge when all sub tasks are Done) | Priority | Due | Actions
+ * Columns: (expand) | Task | Priority | Stage | Due | Actions
  *
- * Sub Task:
- *   Task | Priority | Stage | Due | Actions
+ * Main Task: Stage column shows a derived "Done" badge once all
+ *            sub tasks are Done (otherwise empty).
+ * Sub Task:  Stage column shows its own stage.
+ *
+ * Once a task (main or sub) is Done, its Priority and Due date
+ * are hidden — only the Done badge is shown.
  */
 
 function ListView({
@@ -1027,8 +735,7 @@ function ListView({
   isManager,
   onAddSubTask,
 }) {
-  const [expanded, setExpanded] =
-    useState(new Set());
+  const [expanded, setExpanded] = useState(new Set());
 
   const toggleExpand = (id) => {
     setExpanded((prev) => {
@@ -1045,34 +752,17 @@ function ListView({
   };
 
   return (
-    <div
-      className="card"
-      style={{
-        padding: 0,
-        overflow: "hidden",
-      }}
-    >
+    <div className="card" style={{ padding: 0, overflow: "hidden" }}>
       <div className="table-wrap">
         <table>
           <thead>
             <tr>
-              <th
-                style={{
-                  width: "28px",
-                }}
-              />
-
+              <th style={{ width: "28px" }} />
               <th>Task</th>
-
               <th>Priority</th>
-
-              {/* Main Task Stage removed */}
-
+              <th>Stage</th>
               <th>Due</th>
-
-              {isManager && (
-                <th>Actions</th>
-              )}
+              {isManager && <th>Actions</th>}
             </tr>
           </thead>
 
@@ -1080,18 +770,11 @@ function ListView({
             {tasks.length === 0 && (
               <tr>
                 <td
-                  colSpan={
-                    isManager
-                      ? 5
-                      : 4
-                  }
+                  colSpan={isManager ? 6 : 5}
                   style={{
-                    textAlign:
-                      "center",
-                    color:
-                      "var(--text-3)",
-                    padding:
-                      "32px",
+                    textAlign: "center",
+                    color: "var(--text-3)",
+                    padding: "32px",
                   }}
                 >
                   No tasks yet
@@ -1100,73 +783,35 @@ function ListView({
             )}
 
             {tasks.map((t) => {
-              const overdue =
-                isOverdue(
-                  t.due_date
-                );
-
-              const subtasks =
-                subtasksByParent[
-                  t.id
-                ] || [];
-
-              const isExpanded =
-                expanded.has(
-                  t.id
-                );
-
-              const mainDone =
-                allSubtasksDone(
-                  subtasks
-                );
+              const subtasks = subtasksByParent[t.id] || [];
+              const isExpanded = expanded.has(t.id);
+              const mainDone = allSubtasksDone(subtasks);
+              const overdue = isOverdue(
+                t.due_date,
+                mainDone ? "Done" : undefined,
+              );
 
               return (
-                <Fragment
-                  key={t.id}
-                >
+                <Fragment key={t.id}>
                   {/* MAIN TASK */}
-
-                  <tr
-                    className={
-                      overdue
-                        ? "overdue"
-                        : ""
-                    }
-                  >
+                  <tr className={overdue ? "overdue" : ""}>
                     <td>
-                      {subtasks.length >
-                        0 && (
+                      {subtasks.length > 0 && (
                         <button
-                          onClick={() =>
-                            toggleExpand(
-                              t.id
-                            )
-                          }
+                          onClick={() => toggleExpand(t.id)}
                           style={{
-                            background:
-                              "none",
-                            border:
-                              "none",
-                            cursor:
-                              "pointer",
-                            color:
-                              "var(--text-3)",
-                            fontSize:
-                              "11px",
-                            padding:
-                              "2px 4px",
-                            transform:
-                              isExpanded
-                                ? "rotate(0deg)"
-                                : "rotate(-90deg)",
-                            transition:
-                              "transform 0.15s",
+                            background: "none",
+                            border: "none",
+                            cursor: "pointer",
+                            color: "var(--text-3)",
+                            fontSize: "11px",
+                            padding: "2px 4px",
+                            transform: isExpanded
+                              ? "rotate(0deg)"
+                              : "rotate(-90deg)",
+                            transition: "transform 0.15s",
                           }}
-                          title={
-                            isExpanded
-                              ? "Collapse"
-                              : "Expand"
-                          }
+                          title={isExpanded ? "Collapse" : "Expand"}
                         >
                           ▼
                         </button>
@@ -1176,127 +821,67 @@ function ListView({
                     <td>
                       <Link
                         to={`/projects/${projectId}/tasks/${t.id}`}
-                        style={{
-                          color:
-                            "var(--text)",
-                          textDecoration:
-                            "none",
-                        }}
+                        style={{ color: "var(--text)", textDecoration: "none" }}
                       >
                         {t.title}
                       </Link>
 
-                      {mainDone && (
-                        <span
-                          className="badge badge-done"
-                          style={{
-                            fontSize:
-                              "9px",
-                            marginLeft:
-                              "6px",
-                            verticalAlign:
-                              "middle",
-                          }}
-                        >
-                          ✓ Done
-                        </span>
-                      )}
-
-                      {subtasks.length >
-                        0 && (
+                      {subtasks.length > 0 && (
                         <span
                           style={{
-                            fontSize:
-                              "10px",
-                            color:
-                              "var(--text-3)",
-                            marginLeft:
-                              "6px",
+                            fontSize: "10px",
+                            color: "var(--text-3)",
+                            marginLeft: "6px",
                           }}
                         >
-                          (
-                          {
-                            subtasks.length
-                          }{" "}
-                          sub-task
-                          {subtasks.length !==
-                          1
-                            ? "s"
-                            : ""}
-                          )
+                          ({subtasks.length} sub-task
+                          {subtasks.length !== 1 ? "s" : ""})
                         </span>
                       )}
                     </td>
 
+                    {/* Priority hidden once Done */}
                     <td>
-                      <span
-                        className={`badge badge-${t.priority}`}
-                      >
-                        {t.priority}
-                      </span>
+                      {!mainDone && (
+                        <span className={`badge badge-${t.priority}`}>
+                          {t.priority}
+                        </span>
+                      )}
                     </td>
 
-                    {/* MAIN TASK STAGE REMOVED */}
+                    {/* Derived Done badge (same style as sub tasks) */}
+                    <td>{mainDone && <span className="badge badge-done">Done</span>}</td>
 
                     <td
                       style={{
-                        color:
-                          overdue
-                            ? "var(--danger)"
-                            : "var(--text-2)",
+                        color: overdue ? "var(--danger)" : "var(--text-2)",
                       }}
                     >
-                      {formatDate(
-                        t.due_date
-                      )}
+                      {!mainDone && formatDate(t.due_date)}
                     </td>
 
                     {isManager && (
                       <td>
-                        <div
-                          style={{
-                            display:
-                              "flex",
-                            gap: "4px",
-                          }}
-                        >
+                        <div style={{ display: "flex", gap: "4px" }}>
                           <button
                             className="btn btn-ghost btn-sm"
-                            onClick={() =>
-                              onEdit(
-                                t
-                              )
-                            }
+                            onClick={() => onEdit(t)}
                           >
                             Edit
                           </button>
 
                           <button
                             className="btn btn-ghost btn-sm"
-                            style={{
-                              color:
-                                "var(--accent)",
-                            }}
-                            onClick={() =>
-                              onAddSubTask(
-                                t
-                              )
-                            }
+                            style={{ color: "var(--accent)" }}
+                            onClick={() => onAddSubTask(t)}
                           >
                             Sub Task
                           </button>
 
                           <button
                             className="btn btn-ghost btn-sm"
-                            style={{
-                              color:
-                                "var(--danger)",
-                            }}
-                            onClick={() =>
-                              onDelete(
-                                t.id
-                              )
-                            }
+                            style={{ color: "var(--danger)" }}
+                            onClick={() => onDelete(t.id)}
                           >
                             Del
                           </button>
@@ -1306,137 +891,84 @@ function ListView({
                   </tr>
 
                   {/* SUB TASKS */}
-
                   {isExpanded &&
-                    subtasks.map(
-                      (st) => {
-                        const stOverdue =
-                          isOverdue(
-                            st.due_date,
-                            st.stage
-                          );
+                    subtasks.map((st) => {
+                      const stOverdue = isOverdue(st.due_date, st.stage);
+                      const stDone = st.stage === "Done";
 
-                        return (
-                          <tr
-                            key={
-                              st.id
-                            }
-                            className={
-                              stOverdue
-                                ? "overdue"
-                                : ""
-                            }
+                      return (
+                        <tr
+                          key={st.id}
+                          className={stOverdue ? "overdue" : ""}
+                          style={{ background: "var(--bg-2)" }}
+                        >
+                          <td />
+
+                          <td style={{ paddingLeft: "28px" }}>
+                            <Link
+                              to={`/projects/${projectId}/tasks/${st.id}`}
+                              style={{
+                                color: "var(--text-2)",
+                                textDecoration: "none",
+                                fontSize: "12px",
+                              }}
+                            >
+                              ↳ {st.title}
+                            </Link>
+                          </td>
+
+                          {/* Priority hidden once Done */}
+                          <td>
+                            {!stDone && (
+                              <span className={`badge badge-${st.priority}`}>
+                                {st.priority}
+                              </span>
+                            )}
+                          </td>
+
+                          <td>
+                            <span
+                              className={`badge badge-${st.stage
+                                ?.toLowerCase()
+                                .replace(/\s/g, "")}`}
+                            >
+                              {st.stage}
+                            </span>
+                          </td>
+
+                          <td
                             style={{
-                              background:
-                                "var(--bg-2)",
+                              color: stOverdue
+                                ? "var(--danger)"
+                                : "var(--text-2)",
                             }}
                           >
-                            <td />
+                            {!stDone && formatDate(st.due_date)}
+                          </td>
 
-                            <td
-                              style={{
-                                paddingLeft:
-                                  "28px",
-                              }}
-                            >
-                              <Link
-                                to={`/projects/${projectId}/tasks/${st.id}`}
-                                style={{
-                                  color:
-                                    "var(--text-2)",
-                                  textDecoration:
-                                    "none",
-                                  fontSize:
-                                    "12px",
-                                }}
-                              >
-                                ↳{" "}
-                                {st.title}
-                              </Link>
-                            </td>
-
+                          {isManager && (
                             <td>
-                              <span
-                                className={`badge badge-${st.priority}`}
-                              >
-                                {
-                                  st.priority
-                                }
-                              </span>
-                            </td>
-
-                            {/* SUB TASK STAGE REMAINS */}
-
-                            <td>
-                              <span
-                                className={`badge badge-${st.stage
-                                  ?.toLowerCase()
-                                  .replace(
-                                    /\s/g,
-                                    ""
-                                  )}`}
-                              >
-                                {
-                                  st.stage
-                                }
-                              </span>
-                            </td>
-
-                            <td
-                              style={{
-                                color:
-                                  stOverdue
-                                    ? "var(--danger)"
-                                    : "var(--text-2)",
-                              }}
-                            >
-                              {formatDate(
-                                st.due_date
-                              )}
-                            </td>
-
-                            {isManager && (
-                              <td>
-                                <div
-                                  style={{
-                                    display:
-                                      "flex",
-                                    gap:
-                                      "4px",
-                                  }}
+                              <div style={{ display: "flex", gap: "4px" }}>
+                                <button
+                                  className="btn btn-ghost btn-sm"
+                                  onClick={() => onEdit(st)}
                                 >
-                                  <button
-                                    className="btn btn-ghost btn-sm"
-                                    onClick={() =>
-                                      onEdit(
-                                        st
-                                      )
-                                    }
-                                  >
-                                    Edit
-                                  </button>
+                                  Edit
+                                </button>
 
-                                  <button
-                                    className="btn btn-ghost btn-sm"
-                                    style={{
-                                      color:
-                                        "var(--danger)",
-                                    }}
-                                    onClick={() =>
-                                      onDelete(
-                                        st.id
-                                      )
-                                    }
-                                  >
-                                    Del
-                                  </button>
-                                </div>
-                              </td>
-                            )}
-                          </tr>
-                        );
-                      }
-                    )}
+                                <button
+                                  className="btn btn-ghost btn-sm"
+                                  style={{ color: "var(--danger)" }}
+                                  onClick={() => onDelete(st.id)}
+                                >
+                                  Del
+                                </button>
+                              </div>
+                            </td>
+                          )}
+                        </tr>
+                      );
+                    })}
                 </Fragment>
               );
             })}

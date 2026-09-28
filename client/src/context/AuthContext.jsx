@@ -22,6 +22,70 @@ import {
   setSessionId,
 } from "../api/tokenStore";
 
+async function removeCurrentPushSubscription() {
+  try {
+    if (
+      !("serviceWorker" in navigator) ||
+      !("PushManager" in window)
+    ) {
+      return;
+    }
+
+    const registration =
+      await navigator.serviceWorker.getRegistration("/");
+
+    if (!registration) {
+      return;
+    }
+
+    const subscription =
+      await registration.pushManager.getSubscription();
+
+    if (!subscription) {
+      return;
+    }
+
+    const subJson =
+      typeof subscription.toJSON === "function"
+        ? subscription.toJSON()
+        : subscription;
+
+    if (!subJson?.endpoint) {
+      return;
+    }
+
+    await api.delete(
+      "/notifications/push-subscribe",
+      {
+        data: {
+          endpoint: subJson.endpoint,
+        },
+      },
+    );
+
+    console.log(
+      "[AuthContext] Push subscription removed from server.",
+    );
+
+    /*
+     * Remove the browser subscription too.
+     *
+     * This makes the next logged-in user on the
+     * same browser create a fresh subscription.
+     */
+    await subscription.unsubscribe();
+
+  } catch (error) {
+    /*
+     * Push cleanup must never block logout.
+     */
+    console.warn(
+      "[AuthContext] Push subscription cleanup failed:",
+      error,
+    );
+  }
+}
+
 const AuthContext =
   createContext(null);
 
@@ -383,82 +447,76 @@ export function AuthProvider({
    * Other tabs/users are untouched.
    */
 
-  const logout = async () => {
-    setLogoutInProgress(
-      true,
-    );
+ const logout = async () => {
+  setLogoutInProgress(true);
 
+  try {
+    /*
+     * Wait for any refresh currently
+     * running in this tab.
+     */
     try {
-      /*
-       * Wait for any refresh currently
-       * running in this tab.
-       */
-      try {
-        await waitForRefresh();
-      } catch (_) {
-        // Continue logout.
-      }
+      await waitForRefresh();
+    } catch (_) {
+      // Continue logout.
+    }
 
-      const refreshToken =
-        getStoredRefreshToken();
+    /*
+     * Remove this browser's push subscription
+     * from the current user's account.
+     *
+     * Important:
+     * This happens BEFORE clearing the current user.
+     */
+    await removeCurrentPushSubscription();
 
-      const sessionId =
-        getSessionId();
+    const refreshToken =
+      getStoredRefreshToken();
 
-      /*
-       * Only send logout request when
-       * this tab actually has a session.
-       */
-      if (
-        refreshToken &&
-        sessionId
-      ) {
-        await api.post(
-          "/auth/logout",
-          {
-            refreshToken,
+    const sessionId =
+      getSessionId();
+
+    /*
+     * Only send logout request when
+     * this tab actually has a session.
+     */
+    if (
+      refreshToken &&
+      sessionId
+    ) {
+      await api.post(
+        "/auth/logout",
+        {
+          refreshToken,
+        },
+        {
+          headers: {
+            "X-Orbit-Session-Id":
+              sessionId,
+
+            "X-Orbit-Client":
+              "1",
           },
-          {
-            headers: {
-              "X-Orbit-Session-Id":
-                sessionId,
-
-              "X-Orbit-Client":
-                "1",
-            },
-          },
-        );
-      }
-    } catch (err) {
-      /*
-       * Even if the server request fails,
-       * clear the local session for this tab.
-       */
-      console.error(
-        "Logout request failed:",
-        err.message,
-      );
-    } finally {
-      clearClientSideAuth();
-
-      setLogoutInProgress(
-        false,
-      );
-
-      /*
-       * This event is LOCAL to this
-       * browser tab.
-       *
-       * It does not use localStorage
-       * or BroadcastChannel.
-       */
-      window.dispatchEvent(
-        new Event(
-          "orbit:logout",
-        ),
+        },
       );
     }
-  };
+  } catch (err) {
+    console.error(
+      "Logout request failed:",
+      err.message,
+    );
+  } finally {
+    clearClientSideAuth();
+
+    setLogoutInProgress(false);
+
+    window.dispatchEvent(
+      new Event(
+        "orbit:logout",
+      ),
+    );
+  }
+};
 
   /*
    * ==========================================================

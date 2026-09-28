@@ -429,15 +429,27 @@ const setupPush = useCallback(async () => {
   }, []);
 
   // ── Main effect: load + poll + subscribe (runs when user logs in) ─
- useEffect(() => {
+useEffect(() => {
   if (!user) {
     subscribedRef.current = false;
     setupUserRef.current = null;
+    swRegRef.current = null;
+
     return undefined;
   }
 
+  // Load existing in-app notifications
   loadNotifications();
 
+  // Automatically setup browser push after login
+  setupPush().catch((error) => {
+    console.error(
+      "[NotificationBell] Automatic push setup failed:",
+      error
+    );
+  });
+
+  // Poll in-app notifications
   const interval = setInterval(
     loadNotifications,
     30_000
@@ -446,7 +458,7 @@ const setupPush = useCallback(async () => {
   return () => {
     clearInterval(interval);
   };
-}, [user, loadNotifications]);
+}, [user, loadNotifications, setupPush]);
 
   useEffect(() => {
     const refresh = () => loadNotifications();
