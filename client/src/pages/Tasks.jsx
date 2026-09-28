@@ -49,7 +49,6 @@
 //   const [editing, setEditing] = useState(null);
 //   const [view, setView] = useState("list");
 //   const [members, setMembers] = useState([]);
-//   const [projectMemberIds, setProjectMemberIds] = useState(new Set());
 //   const [clusters, setClusters] = useState([]);
 //   const [showSubTaskModal, setShowSubTaskModal] = useState(false);
 //   const [subTaskParent, setSubTaskParent] = useState(null);
@@ -77,23 +76,15 @@
 //   ];
 
 //   const load = () => {
-//     const projectRequest = propProject
-//       ? Promise.resolve({ data: propProject })
-//       : api.get(`/projects/${projectId}`);
-
 //     Promise.all([
 //       api.get(`/tasks/project/${projectId}`),
 //       api.get("/members"),
 //       api.get(`/clusters/project/${projectId}`),
-//       projectRequest,
 //     ])
-//       .then(([t, m, c, proj]) => {
+//       .then(([t, m, c]) => {
 //         setTasks(t.data);
 //         setMembers(m.data);
 //         setClusters(c.data);
-//         setProjectMemberIds(
-//           new Set((proj.data?.members || []).map((x) => x.id)),
-//         );
 //       })
 //       .finally(() => setLoading(false));
 //   };
@@ -440,14 +431,13 @@
 //         >
 //           <TaskForm
 //             initial={editing}
-//             members={members.filter((m) => projectMemberIds.has(m.id))}
+//             members={members}
 //             allMembers={members}
 //             clusters={clusters}
 //             // Main tasks do NOT use stages.
 //             stages={[]}
 //             onSave={handleSave}
 //             saving={savingTask}
-//             emptyMembersMessage="No members are assigned to this project yet — assign members on the project first."
 //             onCancel={() => {
 //               setShowModal(false);
 //               setEditing(null);
@@ -1042,6 +1032,9 @@ export default function Tasks({ project: propProject }) {
     loading: false,
   });
 
+  // Delete rule: a main task can only be deleted once all its sub tasks are gone.
+  const [deleteBlocked, setDeleteBlocked] = useState(null); // { title, subtaskCount }
+
   const now = new Date();
   const currentMonthKey = `${now.getFullYear()}-${String(
     now.getMonth() + 1,
@@ -1124,7 +1117,19 @@ export default function Tasks({ project: propProject }) {
     }
   };
 
+  // `tasks` holds every task of the project (all months), so this also
+  // catches sub tasks that are hidden by the month filter.
   const handleDelete = (id) => {
+    const subtaskCount = tasks.filter(
+      (t) => String(t.parent_task_id) === String(id),
+    ).length;
+
+    if (subtaskCount > 0) {
+      const task = tasks.find((t) => String(t.id) === String(id));
+      setDeleteBlocked({ title: task?.title || "This task", subtaskCount });
+      return;
+    }
+
     setDeleteConfirm({ show: true, id, loading: false });
   };
 
@@ -1133,6 +1138,12 @@ export default function Tasks({ project: propProject }) {
 
     try {
       await api.delete(`/tasks/${deleteConfirm.id}`);
+      load();
+    } catch (error) {
+      alert(
+        "Failed to delete task: " +
+          (error.response?.data?.error || error.message),
+      );
       load();
     } finally {
       setDeleteConfirm({ show: false, id: null, loading: false });
@@ -1451,6 +1462,29 @@ export default function Tasks({ project: propProject }) {
             hideCluster
             isSubtaskForm
           />
+        </Modal>
+      )}
+
+      {/* CANNOT DELETE — task still has sub tasks */}
+      {deleteBlocked && (
+        <Modal title="Cannot delete task" onClose={() => setDeleteBlocked(null)}>
+          <p className="mb-2 text-[13px] leading-relaxed text-[var(--text-2)]">
+            <strong className="text-[var(--text)]">{deleteBlocked.title}</strong>{" "}
+            still has {deleteBlocked.subtaskCount}{" "}
+            {deleteBlocked.subtaskCount === 1 ? "sub task" : "sub tasks"}.
+          </p>
+          <p className="text-[13px] leading-relaxed text-[var(--text-2)]">
+            Delete all of its sub tasks first. Once none are left, you can
+            delete the task.
+          </p>
+          <div className="modal-actions">
+            <button
+              className="btn btn-primary"
+              onClick={() => setDeleteBlocked(null)}
+            >
+              Got it
+            </button>
+          </div>
         </Modal>
       )}
 

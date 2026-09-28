@@ -22,69 +22,119 @@ self.addEventListener("activate", (event) => {
    ========================================================= */
 
 self.addEventListener("push", (event) => {
-  console.log("[SW] Push event received.");
-
-  let data = {};
-
-  try {
-    if (event.data) {
-      data = event.data.json();
-    }
-  } catch (error) {
-    console.warn("[SW] Failed to parse push payload:", error);
-
-    try {
-      data = {
-        body: event.data?.text() || "",
-      };
-    } catch {
-      data = {};
-    }
-  }
-
-  const title =
-    data.title ||
-    "Orbit";
-
-  const body =
-    data.body ||
-    data.message ||
-    "You have a new notification.";
-
-  const icon =
-    data.icon ||
-    "/icons/icon-192.png";
-
-  const badge =
-    data.badge ||
-    "/icons/icon-192.png";
-
-  const notificationData =
-    data.data ||
-    {};
-
-  const options = {
-    body,
-    icon,
-    badge,
-
-    data: notificationData,
-
-    tag:
-      notificationData?.notificationId
-        ? `orbit-${notificationData.notificationId}`
-        : "orbit-notification",
-
-    renotify: true,
-
-    requireInteraction: false,
-  };
+  console.log("[SW] 🔔 Push event received.");
 
   event.waitUntil(
-    self.registration.showNotification(
-      title,
-      options
-    )
+    (async () => {
+      let data = {};
+
+      try {
+        if (event.data) {
+          data = event.data.json();
+          console.log("[SW] Push payload:", data);
+        }
+      } catch (error) {
+        console.warn(
+          "[SW] Failed to parse push payload:",
+          error
+        );
+
+        try {
+          data = {
+            body: event.data?.text() || "",
+          };
+        } catch {
+          data = {};
+        }
+      }
+
+      const title =
+        data?.title ||
+        "Orbit";
+
+      const body =
+        data?.body ||
+        data?.message ||
+        "You have a new notification.";
+
+      /*
+       * Use the same icon path that the backend sends.
+       */
+      const icon =
+        data?.icon ||
+        "/orbit-icon-192.png";
+
+      const badge =
+        data?.badge ||
+        "/orbit-icon-192.png";
+
+      const notificationData =
+        data?.data &&
+        typeof data.data === "object"
+          ? data.data
+          : {};
+
+      const options = {
+        body,
+        icon,
+        badge,
+
+        data: notificationData,
+
+        /*
+         * Unique notification tag.
+         * If backend provides notificationId,
+         * notifications can be grouped/replaced correctly.
+         */
+        tag:
+          notificationData?.notificationId
+            ? `orbit-${notificationData.notificationId}`
+            : `orbit-${Date.now()}`,
+
+        /*
+         * Show a new notification even if
+         * another Orbit notification already exists.
+         */
+        renotify: true,
+
+        /*
+         * Keep browser notification behavior
+         * normal. Windows/Brave controls display duration.
+         */
+        requireInteraction: false,
+      };
+
+      console.log(
+        "[SW] Showing notification:",
+        {
+          title,
+          body,
+          icon,
+          badge,
+          data: notificationData,
+        }
+      );
+
+      try {
+        await self.registration.showNotification(
+          title,
+          options
+        );
+
+        console.log(
+          "[SW] ✅ Notification displayed successfully."
+        );
+      } catch (error) {
+        console.error(
+          "[SW] ❌ showNotification() failed:",
+          {
+            name: error?.name,
+            message: error?.message,
+          },
+          error
+        );
+      }
+    })()
   );
 });
 

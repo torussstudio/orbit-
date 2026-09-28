@@ -95,6 +95,8 @@ class CalendarService {
       SELECT
         t.id,
         t.project_id,
+        t.parent_task_id,
+        pt.title AS parent_task_title,
         t.title,
         t.description,
         t.due_date,
@@ -108,6 +110,7 @@ class CalendarService {
         COALESCE(assignee_agg.assigned_members, '[]'::jsonb) AS assigned_members
       FROM tasks t
       JOIN projects p ON p.id = t.project_id
+      LEFT JOIN tasks pt ON pt.id = t.parent_task_id
       LEFT JOIN members creator ON creator.id = t.created_by
       LEFT JOIN LATERAL (
         SELECT

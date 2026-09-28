@@ -70,76 +70,189 @@ function normalizeNotification(row) {
 // ============================================================
 
 async function deliverPush(userId, title, body, data = {}) {
+  console.log("[pushNotify] ─────────────────────────────");
+  console.log("[pushNotify] Starting browser push...");
+  console.log("[pushNotify] userId:", userId);
+  console.log("[pushNotify] title:", title);
+  console.log("[pushNotify] body:", body);
+  console.log("[pushNotify] VAPID configured:", vapidConfigured);
+
   if (!vapidConfigured) {
+    console.error(
+      "[pushNotify] ❌ VAPID is NOT configured."
+    );
+
     return;
   }
 
   try {
     const { rows: subscriptions } = await db.query(
       `
-      SELECT id, endpoint, p256dh, auth
-      FROM push_subscriptions
-      WHERE member_id = $1
+        SELECT
+          id,
+          member_id,
+          endpoint,
+          p256dh,
+          auth,
+          created_at
+        FROM push_subscriptions
+        WHERE member_id = $1
       `,
       [userId],
     );
 
+    console.log(
+      "[pushNotify] Push subscriptions found:",
+      subscriptions.length
+    );
+
     if (!subscriptions.length) {
+      console.warn(
+        "[pushNotify] ⚠️ No push subscription found for user:",
+        userId
+      );
+
       return;
     }
 
     const payload = JSON.stringify({
-      title: title || 'Orbit',
-      body: body || '',
-      icon: '/orbit-icon-192.png',
-      badge: '/orbit-icon-192.png',
+      title: title || "Orbit",
+      body: body || "",
+      icon: "/orbit-icon-192.png",
+      badge: "/orbit-icon-192.png",
       data: data || {},
     });
 
+    console.log(
+      "[pushNotify] Payload:",
+      payload
+    );
+
     await Promise.all(
       subscriptions.map(async (subscription) => {
-        try {
-          await webpush.sendNotification(
-            {
-              endpoint: subscription.endpoint,
-              keys: {
-                p256dh: subscription.p256dh,
-                auth: subscription.auth,
-              },
-            },
-            payload,
-          );
-        } catch (err) {
-          const statusCode = err?.statusCode;
+        console.log(
+          "[pushNotify] Sending push to subscription:",
+          subscription.id
+        );
 
-          // Subscription is no longer valid.
+        console.log(
+          "[pushNotify] Endpoint:",
+          subscription.endpoint
+        );
+
+        try {
+          const response =
+            await webpush.sendNotification(
+              {
+                endpoint:
+                  subscription.endpoint,
+
+                keys: {
+                  p256dh:
+                    subscription.p256dh,
+
+                  auth:
+                    subscription.auth,
+                },
+              },
+              payload,
+            );
+
+          console.log(
+            "[pushNotify] ✅ Push sent successfully",
+            {
+              subscriptionId:
+                subscription.id,
+
+              userId:
+                subscription.member_id,
+
+              statusCode:
+                response?.statusCode,
+
+              headers:
+                response?.headers,
+            }
+          );
+
+          return true;
+
+        } catch (err) {
+          const statusCode =
+            err?.statusCode;
+
+          console.error(
+            "[pushNotify] ❌ Push send failed",
+            {
+              subscriptionId:
+                subscription.id,
+
+              userId:
+                subscription.member_id,
+
+              statusCode,
+
+              name:
+                err?.name,
+
+              message:
+                err?.message,
+
+              body:
+                err?.body,
+
+              headers:
+                err?.headers,
+            }
+          );
+
+          /*
+           * Subscription is permanently invalid.
+           */
           if (
-            [400, 401, 403, 404, 410].includes(statusCode)
+            [400, 401, 403, 404, 410].includes(
+              statusCode
+            )
           ) {
+            console.warn(
+              "[pushNotify] 🗑️ Removing invalid push subscription:",
+              subscription.id
+            );
+
             await db
               .query(
                 `
-                DELETE FROM push_subscriptions
-                WHERE id = $1
+                  DELETE FROM push_subscriptions
+                  WHERE id = $1
                 `,
                 [subscription.id],
               )
-              .catch(() => {});
-          } else {
-            console.error(
-              '[pushNotify] sendNotification failed:',
-              statusCode,
-              err?.message,
-            );
+              .catch((deleteError) => {
+                console.error(
+                  "[pushNotify] Failed to delete invalid subscription:",
+                  deleteError?.message
+                );
+              });
           }
+
+          return false;
         }
       }),
     );
+
+    console.log(
+      "[pushNotify] Browser push processing completed."
+    );
+
   } catch (err) {
-    // Push failure must NEVER break in-app notifications.
     console.error(
-      '[pushNotify] deliverPush failed:',
-      err?.message,
+      "[pushNotify] ❌ deliverPush failed:",
+      {
+        name: err?.name,
+        message: err?.message,
+        statusCode: err?.statusCode,
+        body: err?.body,
+      }
     );
   }
 }
