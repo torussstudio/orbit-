@@ -35,6 +35,8 @@ export default function DatePicker({
   placeholder = 'Select date',
   minDate,
   disabled,
+  fromYear = 1900,
+  toYear = new Date().getFullYear() + 10,
 }) {
   const [open, setOpen] = useState(false);
   const selected = toDate(value);
@@ -140,7 +142,11 @@ export default function DatePicker({
   };
 
   const currentYear = viewDate.getFullYear();
-  const years = Array.from({ length: 21 }, (_, i) => currentYear - 10 + i);
+  // Full year range (fromYear → toYear). The year being viewed is always
+  // included so the <select> never goes blank if it falls outside the range.
+  const startYear = Math.min(fromYear, currentYear);
+  const endYear = Math.max(toYear, currentYear);
+  const years = Array.from({ length: endYear - startYear + 1 }, (_, i) => startYear + i);
 
   return (
     <>
