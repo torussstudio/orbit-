@@ -4,6 +4,7 @@ import Modal from "../components/ui/Modal";
 import ConfirmModal from "../components/ui/ConfirmModal";
 import Select from "../components/ui/Select";
 import { Loader } from "../components/ui/Loader";
+import { useAuth } from "../context/AuthContext";
 
 const INITIAL_CLUSTER_FORM = {
   name: "",
@@ -28,7 +29,9 @@ const MAX_ENTRY_LABEL_LENGTH = 100;
 
 const VALID_VISIBILITIES = ["private", "public"];
 
-export default function Credentials({ projectId, user }) {
+export default function Credentials({ project, active = true }) {
+  const projectId = project?.id;
+  const { isManager } = useAuth();
   const [clusters, setClusters] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -50,7 +53,6 @@ export default function Credentials({ projectId, user }) {
     INITIAL_CONFIRM_MODAL
   );
 
-  const isManager = user?.role === "manager";
 
   /* -------------------------------------------------------------------------- */
   /* LOAD CREDENTIALS                                                           */
@@ -58,8 +60,6 @@ export default function Credentials({ projectId, user }) {
 
   const loadCredentials = async () => {
     if (!projectId) return;
-
-    setLoading(true);
 
     try {
       const response = await axios.get(
@@ -82,17 +82,19 @@ export default function Credentials({ projectId, user }) {
     }
   };
 
+   // Fetch on mount and every time this tab becomes active (silent refetch)
   useEffect(() => {
-    loadCredentials();
-  }, [projectId]);
+    if (active) loadCredentials();
+  }, [projectId, active]);
 
   /*
-   * Revealed credentials are intentionally kept only in React memory.
-   * Reset them whenever project changes.
+   * Revealed credentials are kept only in React memory. Hide them again
+   * whenever the tab is left or the project changes, since the tab now
+   * stays mounted in the background.
    */
   useEffect(() => {
-    setRevealed({});
-  }, [projectId]);
+    if (!active) setRevealed({});
+  }, [projectId, active]);
 
   /* -------------------------------------------------------------------------- */
   /* VALIDATION                                                                 */
@@ -670,13 +672,13 @@ export default function Credentials({ projectId, user }) {
       {/* CREATE / EDIT CLUSTER MODAL                                            */}
       {/* ====================================================================== */}
 
+           {clusterModalOpen && (
       <Modal
         title={
           editingCluster
             ? "Edit Credential Cluster"
             : "Create Credential Cluster"
         }
-        open={clusterModalOpen}
         onClose={closeClusterModal}
       >
         <form
@@ -773,18 +775,19 @@ export default function Credentials({ projectId, user }) {
           </div>
         </form>
       </Modal>
+         )}
 
       {/* ====================================================================== */}
       {/* CREATE / EDIT ENTRY MODAL                                              */}
       {/* ====================================================================== */}
 
+            {entryModalOpen && (
       <Modal
         title={
           editingEntry
             ? "Edit Credential"
             : "Add Credential"
         }
-        open={entryModalOpen}
         onClose={closeEntryModal}
       >
         <form
@@ -903,15 +906,18 @@ export default function Credentials({ projectId, user }) {
           </div>
         </form>
       </Modal>
+         )}
 
       {/* ====================================================================== */}
       {/* CONFIRM DELETE                                                         */}
       {/* ====================================================================== */}
 
-      <ConfirmModal
-        open={confirmModal.open}
+            <ConfirmModal
+        isOpen={confirmModal.open}
         title={confirmModal.title}
         message={confirmModal.message}
+        confirmText="Delete"
+        isDangerous
         onConfirm={executeConfirmAction}
         onCancel={closeConfirmModal}
       />

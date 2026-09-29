@@ -10,7 +10,7 @@ import Loader from '../components/ui/Loader';
 
 const STATUS_COLORS = { draft: 'var(--text-3)', in_review: 'var(--accent-2)', approved: 'var(--success)', needs_rework: 'var(--danger)', completed: 'var(--success)' };
 
-export default function Clusters({ project: propProject }) {
+export default function Clusters({ project: propProject, active = true }) {
   const params = useParams();
   const projectId = propProject?.id || params.id;
   const { isManager } = useAuth();
@@ -24,7 +24,7 @@ export default function Clusters({ project: propProject }) {
   const [confirmModal, setConfirmModal] = useState({ show: false, title: '', message: '', action: null, loading: false, isDangerous: false });
 
   const load = () => api.get(`/clusters/project/${projectId}`).then(r => setClusters(r.data)).finally(() => setLoading(false));
-  useEffect(() => { if (projectId) load(); }, [projectId]);
+   useEffect(() => { if (projectId && active) load(); }, [projectId, active]);
 
   const handleSave = async () => {
     setSaving(true);
