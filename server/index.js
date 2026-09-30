@@ -217,6 +217,11 @@ app.use(
   require("./routes/search"),
 );
 
+app.use(
+  '/api/task-requests',
+   require('./routes/taskRequests')
+);
+
 /*
  * Health
  */

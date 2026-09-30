@@ -591,6 +591,24 @@ const initDB = async () => {
     ON cluster_reviews (cluster_id)
   `);
 
+  // Task requests: members ask for a task, managers review them on the
+  // "Requested Tasks" page and delete them once handled.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS task_requests (
+      id ${idDefinition(defaultIdType)},
+      title VARCHAR(500) NOT NULL,
+      project_name VARCHAR(255) NOT NULL,
+      description TEXT NOT NULL DEFAULT '',
+      due_date DATE,
+      requested_by ${refType(memberIdType)} NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS task_requests_created_at_idx
+    ON task_requests (created_at DESC)
+  `);
+
   console.log("Database schema ready");
 };
 

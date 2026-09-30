@@ -21,6 +21,8 @@ const Members = lazy(() => import('./pages/Members'));
 const Calendar = lazy(() => import('./pages/Calendar'));
 const InReview = lazy(() => import('./pages/InReview'));
 const AccountSettings = lazy(() => import('./pages/AccountSettings'));
+const TaskRequest = lazy(() => import('./pages/Taskrequest'));
+const RequestedTasks = lazy(() => import('./pages/Requestedtasks'));
 
 const SuspenseFallback = () => (
   <Loader label="Loading page" size="lg" variant="page" />
@@ -44,9 +46,11 @@ export default function App() {
             <Route path="projects/:id/credentials" element={<RequireManager><Suspense fallback={<SuspenseFallback />}><Credentials /></Suspense></RequireManager>} />
             <Route path="projects/:id/knowledge" element={<RequireManager><Suspense fallback={<SuspenseFallback />}><Knowledge /></Suspense></RequireManager>} />
             <Route path="tasks-view" element={<Suspense fallback={<SuspenseFallback />}><TaskView /></Suspense>} />
+            <Route path="task-request" element={<Suspense fallback={<SuspenseFallback />}><TaskRequest /></Suspense>} />
             <Route path="members" element={<RequireManager><Suspense fallback={<SuspenseFallback />}><Members /></Suspense></RequireManager>} />
             <Route path="calendar" element={<Suspense fallback={<SuspenseFallback />}><Calendar /></Suspense>} />
             <Route path="in-review" element={<RequireManager><Suspense fallback={<SuspenseFallback />}><InReview /></Suspense></RequireManager>} />
+            <Route path="requested-tasks" element={<RequireManager><Suspense fallback={<SuspenseFallback />}><RequestedTasks /></Suspense></RequireManager>} />
             <Route path="account-settings" element={<Suspense fallback={<SuspenseFallback />}><AccountSettings /></Suspense>} />
           </Route>
         </Routes>

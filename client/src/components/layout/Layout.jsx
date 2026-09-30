@@ -29,6 +29,10 @@ const ICONS = {
   members: 'M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75M13 7a4 4 0 11-8 0 4 4 0 018 0z',
   // Eye: In Review used to share the Task View icon.
   review: 'M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8zM15 12a3 3 0 11-6 0 3 3 0 016 0z',
+  // Sheet/grid: Requested Tasks (manager view)
+  sheet: 'M3 3h18v18H3zM3 9h18M3 15h18M9 3v18',
+  // Inbox tray: Task Request
+  inbox: 'M22 12h-6l-2 3h-4l-2-3H2M5.45 5.11L2 12v6a2 2 0 002 2h16a2 2 0 002-2v-6l-3.45-6.89A2 2 0 0016.76 4H7.24a2 2 0 00-1.79 1.11z',
   search: 'M21 21l-4.35-4.35M19 11a8 8 0 11-16 0 8 8 0 0116 0z',
   close: 'M18 6L6 18M6 6l12 12',
   menu: 'M3 12h18M3 6h18M3 18h18',
@@ -414,10 +418,12 @@ export default function Layout() {
   const navItems = [
     { to: '/', end: true, icon: ICONS.home, label: 'Dashboard' },
     ...(!isManager ? [{ to: '/tasks-view', icon: ICONS.tasks, label: 'Task View' }] : []),
+    ...(!isManager ? [{ to: '/task-request', icon: ICONS.inbox, label: 'Task Request' }] : []),
     ...(isManager ? [{ to: '/projects', icon: ICONS.projects, label: 'Projects' }] : []),
     { to: '/calendar', icon: ICONS.calendar, label: 'Calendar' },
     ...(isManager ? [{ to: '/members', icon: ICONS.members, label: 'Members' }] : []),
     ...(isManager ? [{ to: '/in-review', icon: ICONS.review, label: 'In Review' }] : []),
+    ...(isManager ? [{ to: '/requested-tasks', icon: ICONS.sheet, label: 'Requested Tasks' }] : []),
   ];
 
   // Collapse only applies from md up. The mobile drawer always shows full labels.

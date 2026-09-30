@@ -3,7 +3,17 @@ const db = require("../db");
 
 async function getAllMembers() {
   const { rows } = await db.query(
-    "SELECT id,name,email,role,birthday,skills,active,created_at,avatar_url FROM members ORDER BY created_at",
+    `SELECT m.id, m.name, m.email, m.role, m.birthday, m.skills, m.active, m.created_at, m.avatar_url,
+            COALESCE(tc.task_count, 0)::int AS task_count
+     FROM members m
+     LEFT JOIN (
+       SELECT ta.member_id, COUNT(DISTINCT t.id) AS task_count
+       FROM task_assignees ta
+       JOIN tasks t ON t.id = ta.task_id
+       WHERE t.stage != 'Done'
+       GROUP BY ta.member_id
+     ) tc ON tc.member_id = m.id
+     ORDER BY m.created_at`,
   );
   return rows;
 }
