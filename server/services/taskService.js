@@ -292,12 +292,16 @@ async function reorderTasks(stage, orderedIds, user) {
 }
 
 async function getTaskById(taskId) {
-  const { rows } = await db.query(
+   const { rows } = await db.query(
     `SELECT
        t.*,
        assignee_agg.assignee_name,
-       assignee_agg.assignees
+       assignee_agg.assignees,
+       p.name AS project_name,
+       p.custom_stages AS project_stages
      FROM tasks t
+     LEFT JOIN projects p
+       ON p.id = t.project_id
      ${ASSIGNEE_JOIN}
      WHERE t.id = $1`,
     [taskId],

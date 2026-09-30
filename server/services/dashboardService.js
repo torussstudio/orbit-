@@ -102,9 +102,14 @@ async function getTasksList(stage) {
 
 async function getMyTasks(userId) {
   const tasks = await db.query(
-    `SELECT t.*, p.name as project_name,
-      (SELECT title FROM tasks pt WHERE pt.id = t.parent_task_id) as parent_title
-     FROM tasks t JOIN projects p ON t.project_id=p.id
+    `SELECT t.*, p.name AS project_name,
+      pt.title AS parent_title,
+      COALESCE(c.name, pc.name) AS cluster_name
+     FROM tasks t
+     JOIN projects p ON t.project_id = p.id
+     LEFT JOIN tasks pt ON pt.id = t.parent_task_id
+     LEFT JOIN clusters c ON c.id = t.cluster_id
+     LEFT JOIN clusters pc ON pc.id = pt.cluster_id
      WHERE EXISTS (SELECT 1 FROM task_assignees ta WHERE ta.task_id=t.id AND ta.member_id=$1)
      ORDER BY t.due_date NULLS LAST`,
     [userId],
