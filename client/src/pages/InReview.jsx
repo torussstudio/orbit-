@@ -410,6 +410,13 @@ function timeAgo(value) {
 
 const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
+const toISODate = (d = new Date()) => {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+};
+
 /* ------------------------------------------------------------------ */
 /* Row pieces (shared by the table and the mobile cards)               */
 /* ------------------------------------------------------------------ */
@@ -612,7 +619,12 @@ export default function InReview() {
   };
 
   const handleRework = async () => {
-    const { subtask } = reworkModal;
+  const { subtask } = reworkModal;
+  if (reworkDeadline && reworkDeadline < toISODate()) {
+    setNotice('New deadline cannot be in the past.');
+    closeRework();
+    return;
+  }
     setBusy({ id: subtask.id, type: 'rework' });
     setNotice('');
     try {
@@ -806,7 +818,7 @@ export default function InReview() {
               New deadline
               <span className="ml-1 font-normal text-[var(--text-3)]">(optional)</span>
             </div>
-            <DatePicker value={reworkDeadline} onChange={(val) => setReworkDeadline(val)} placeholder="dd-mm-yyyy" />
+           <DatePicker value={reworkDeadline} onChange={(val) => setReworkDeadline(val)} placeholder="dd-mm-yyyy" min={toISODate()} />
             <p className="m-0 mt-1.5 text-xs text-[var(--text-3)]">Set a new due date for this round of rework.</p>
           </div>
 
