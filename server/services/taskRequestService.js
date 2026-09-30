@@ -31,8 +31,7 @@
 
 // Uses the same pg pool as the rest of the server.
 const pool = require('../db');
-// ADJUST if pushNotify.js is not in the same folder as this file.
-const { sendToMany } = require('./pushNotify');
+const { sendToMany } = require('../utils/pushNotify');
 
 async function createRequest({ title, project_name, description, due_date, requested_by }) {
   const { rows } = await pool.query(
