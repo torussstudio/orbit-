@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef, Fragment } from "react";
+import { Fragment, memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { createPortal } from "react-dom";
 import api from "../api/client";
@@ -83,7 +83,7 @@ function SortIcon({ dir }) {
   );
 }
 
-function SortTh({ label, sortKey, sort, onSort }) {
+const SortTh = memo(function SortTh({ label, sortKey, sort, onSort }) {
   const active = sort.key === sortKey;
   const ariaSort = active ? (sort.dir === "asc" ? "ascending" : "descending") : "none";
   return (
@@ -100,9 +100,9 @@ function SortTh({ label, sortKey, sort, onSort }) {
       </button>
     </th>
   );
-}
+});
 
-function Segmented({ label, value, onChange, options }) {
+const Segmented = memo(function Segmented({ label, value, onChange, options }) {
   return (
     <div
       role="group"
@@ -129,7 +129,7 @@ function Segmented({ label, value, onChange, options }) {
       })}
     </div>
   );
-}
+});
 
 function EmptyState({ title, body, action, alert }) {
   return (
@@ -146,12 +146,12 @@ function EmptyState({ title, body, action, alert }) {
 
 /* Row overflow menu — rendered in a portal and positioned with fixed coords so
    the card's overflow never clips it. */
-function RowMenu({ label, items }) {
+const RowMenu = memo(function RowMenu({ label, items }) {
   const [pos, setPos] = useState(null);
   const btnRef = useRef(null);
   const menuRef = useRef(null);
 
-  const close = () => setPos(null);
+  const close = useCallback(() => setPos(null), []);
 
   const toggle = () => {
     if (pos) return close();
@@ -188,7 +188,7 @@ function RowMenu({ label, items }) {
       window.removeEventListener("resize", close);
       window.removeEventListener("scroll", close, true);
     };
-  }, [pos]);
+  }, [pos, close]);
 
   const onMenuKeyDown = (e) => {
     const nodes = Array.from(menuRef.current.querySelectorAll("button"));
@@ -258,7 +258,7 @@ function RowMenu({ label, items }) {
         )}
     </>
   );
-}
+});
 
 /* Right-hand slide-over used for add / edit. */
 function SlideOver({ title, onClose, children }) {
@@ -397,7 +397,7 @@ const STAGE_STYLES = {
 
 // Self-contained on purpose: the shared StageBadge only gets its styles when the
 // Dashboard page has been mounted, so it rendered as plain text here.
-function StagePill({ stage }) {
+const StagePill = memo(function StagePill({ stage }) {
   const s = STAGE_STYLES[stageTone(stage)];
   return (
     <span
@@ -407,26 +407,23 @@ function StagePill({ stage }) {
       {String(stage || "Todo").replace(/[_-]+/g, " ")}
     </span>
   );
-}
+});
 
-function MemberTasksPanel({ id, member, tasks, loading, error, onRetry }) {
-  // Soonest due first; tasks without a due date go last.
-  const sorted = useMemo(() => {
-    if (!tasks) return [];
-    const at = (x) => {
-      const t = x.due_date ? new Date(x.due_date).getTime() : NaN;
+const MemberTasksPanel = memo(function MemberTasksPanel({ id, member, tasks, loading, error, onRetry }) {
+  // Soonest due first (tasks without a due date go last); due info is computed once per task.
+  const { rows, overdueCount } = useMemo(() => {
+    const timeOf = (task) => {
+      const t = task.due_date ? new Date(task.due_date).getTime() : NaN;
       return Number.isNaN(t) ? Infinity : t;
     };
-    return [...tasks].sort((a, b) => {
-      const ta = at(a);
-      const tb = at(b);
-      return ta === tb ? 0 : ta < tb ? -1 : 1;
-    });
+    const list = (tasks || []).map((task) => ({
+      task,
+      due: dueInfo(task.due_date, task.stage),
+      at: timeOf(task),
+    }));
+    list.sort((a, b) => (a.at === b.at ? 0 : a.at < b.at ? -1 : 1));
+    return { rows: list, overdueCount: list.filter((r) => r.due?.tone === "overdue").length };
   }, [tasks]);
-
-  const overdueCount = sorted.filter(
-    (t) => dueInfo(t.due_date, t.stage)?.tone === "overdue",
-  ).length;
 
   return (
     <div
@@ -437,7 +434,7 @@ function MemberTasksPanel({ id, member, tasks, loading, error, onRetry }) {
         <span>
           Active tasks
           {!loading && !error && tasks ? (
-            <span className="tabular-nums"> · {sorted.length}</span>
+            <span className="tabular-nums"> · {rows.length}</span>
           ) : null}
         </span>
         {overdueCount > 0 && (
@@ -462,7 +459,7 @@ function MemberTasksPanel({ id, member, tasks, loading, error, onRetry }) {
             Retry
           </button>
         </div>
-      ) : sorted.length === 0 ? (
+      ) : rows.length === 0 ? (
         <div className="flex flex-col items-center gap-1 px-4 py-7 text-center">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="text-[color:var(--success)]">
             <circle cx="12" cy="12" r="9" />
@@ -475,8 +472,7 @@ function MemberTasksPanel({ id, member, tasks, loading, error, onRetry }) {
         </div>
       ) : (
         <div className="max-h-[320px] divide-y divide-[color:var(--border)] overflow-y-auto [scrollbar-width:thin]">
-          {sorted.map((t, i) => {
-            const due = dueInfo(t.due_date, t.stage);
+          {rows.map(({ task: t, due }, i) => {
             const overdue = due?.tone === "overdue";
             return (
               <Link
@@ -549,145 +545,386 @@ function MemberTasksPanel({ id, member, tasks, loading, error, onRetry }) {
       )}
     </div>
   );
-}
+});
 
 /* -------------------------------------------------------------------------- */
-/* Page                                                                       */
+/* Hooks                                                                      */
 /* -------------------------------------------------------------------------- */
 
-export default function Members() {
-  const auth = useAuth();
-  const { isManager } = auth;
-  const me = auth.user || auth.currentUser || null;
+const isAbort = (e) =>
+  e?.code === "ERR_CANCELED" || e?.name === "CanceledError" || e?.name === "AbortError";
 
+const SKELETON_ROWS = [0, 1, 2, 3, 4];
+const REFRESH_FAILED = "We couldn't refresh the member list. Reload the page to see the latest.";
+
+// What each confirmable action does. Rows only send a kind + id.
+const MEMBER_ACTIONS = {
+  deactivate: {
+    title: "Deactivate member",
+    message: "Deactivate this member? They will no longer be able to log in.",
+    confirmText: "Deactivate",
+    isDangerous: true,
+    done: "Member deactivated",
+    run: (id) => api.patch(`/members/${id}/deactivate`),
+  },
+  activate: {
+    title: "Activate member",
+    message: "Activate this member? They will be able to log in again.",
+    confirmText: "Activate",
+    isDangerous: false,
+    done: "Member activated",
+    run: (id) => api.patch(`/members/${id}/activate`),
+  },
+  delete: {
+    title: "Delete member",
+    message: "Are you sure you want to permanently delete this member? All their data will be removed.",
+    confirmText: "Delete",
+    isDangerous: true,
+    done: "Member deleted",
+    run: (id) => api.delete(`/members/${id}`),
+  },
+};
+
+// Member list. Cancels superseded requests; a failed refresh after a successful
+// first load becomes a notice instead of replacing the table with an error.
+function useMembersData(onNotice) {
   const [members, setMembers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
-  const [notice, setNotice] = useState("");
-  const [toast, setToast] = useState(null);
-  const [showPanel, setShowPanel] = useState(false);
-  const [editing, setEditing] = useState(null);
-  const [form, setForm] = useState(EMPTY_FORM);
-  const [fieldErrors, setFieldErrors] = useState({});
-  const [showPassword, setShowPassword] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState("");
-  const [confirmModal, setConfirmModal] = useState(CLOSED_CONFIRM);
   const hasLoaded = useRef(false);
+  const controller = useRef(null);
 
-  // Toolbar
-  const [query, setQuery] = useState("");
-  const [roleFilter, setRoleFilter] = useState("all");
-  const [statusFilter, setStatusFilter] = useState("all");
-  const [sort, setSort] = useState({ key: null, dir: "asc" });
+  const load = useCallback(() => {
+    controller.current?.abort();
+    const c = new AbortController();
+    controller.current = c;
 
-  // Expandable per-member task list (managers only).
-  const [expandedId, setExpandedId] = useState(null);
-  const [memberTasks, setMemberTasks] = useState({});
-  const [memberErrors, setMemberErrors] = useState({});
-  const [loadingMember, setLoadingMember] = useState(null);
-
-  const isSelf = (m) =>
-    !!me &&
-    ((me.id != null && m.id === me.id) ||
-      (me.email && m.email && m.email.toLowerCase() === String(me.email).toLowerCase()));
-
-  const load = () =>
-    api
-      .get("/members")
+    return api
+      .get("/members", { signal: c.signal })
       .then((r) => {
+        if (c.signal.aborted) return;
         hasLoaded.current = true;
         setLoadError(false);
         setMembers(r.data);
       })
-      .catch(() => {
+      .catch((e) => {
+        if (isAbort(e) || c.signal.aborted) return;
         if (!hasLoaded.current) setLoadError(true);
-        else setNotice("We couldn't refresh the member list. Reload the page to see the latest.");
+        else onNotice(REFRESH_FAILED);
       })
-      .finally(() => setLoading(false));
-
-  // silent = we already have cached tasks to show, so refresh in the background.
-  const loadMemberTasks = async (id, silent = false) => {
-    if (!silent) setLoadingMember(id);
-    setMemberErrors((prev) => ({ ...prev, [id]: false }));
-    try {
-      const r = await api.get(`/dashboard/members/${id}/tasks`);
-      setMemberTasks((prev) => ({ ...prev, [id]: r.data.tasks || [] }));
-    } catch {
-      // Keep whatever is cached on a silent refresh; otherwise show Retry.
-      if (!silent) setMemberErrors((prev) => ({ ...prev, [id]: true }));
-    } finally {
-      if (!silent) setLoadingMember(null);
-    }
-  };
-
-  const toggleMember = (id) => {
-    if (expandedId === id) {
-      setExpandedId(null);
-      return;
-    }
-    setExpandedId(id);
-    // Always refetch so the list never goes stale; show cached tasks meanwhile.
-    loadMemberTasks(id, Boolean(memberTasks[id]));
-  };
-
-  // After any change, drop task caches (counts and assignments may have moved).
-  const afterChange = async (message) => {
-    setExpandedId(null);
-    setMemberTasks({});
-    setMemberErrors({});
-    await load();
-    if (message) setToast({ id: Date.now(), text: message });
-  };
+      .finally(() => {
+        if (controller.current === c) setLoading(false);
+      });
+  }, [onNotice]);
 
   useEffect(() => {
     load();
-  }, []);
+    return () => controller.current?.abort();
+  }, [load]);
 
-  // Auto-dismiss the inline error notice.
-  useEffect(() => {
-    if (!notice) return;
-    const t = setTimeout(() => setNotice(""), 6000);
-    return () => clearTimeout(t);
-  }, [notice]);
-
-  // Auto-dismiss the success toast.
-  useEffect(() => {
-    if (!toast) return;
-    const t = setTimeout(() => setToast(null), 4000);
-    return () => clearTimeout(t);
-  }, [toast]);
-
-  const retry = () => {
+  const retry = useCallback(() => {
     setLoadError(false);
     setLoading(true);
     load();
-  };
+  }, [load]);
 
-  const openCreate = () => {
-    setEditing(null);
-    setForm(EMPTY_FORM);
-    setFieldErrors({});
-    setShowPassword(false);
-    setError("");
-    setShowPanel(true);
-  };
+  return { members, loading, loadError, load, retry };
+}
 
-  const openEdit = (m) => {
-    setEditing(m);
-    setForm({
-      name: m.name,
-      email: m.email,
-      password: "",
-      role: m.role,
-    });
-    setFieldErrors({});
-    setShowPassword(false);
-    setError("");
-    setShowPanel(true);
-  };
+// Expandable per-member task list. Always refetches on open (so it never goes
+// stale) but shows cached tasks meanwhile; the latest request wins.
+function useMemberTasks() {
+  const [expandedId, setExpandedId] = useState(null);
+  const [tasks, setTasks] = useState({});
+  const [errors, setErrors] = useState({});
+  const [loadingId, setLoadingId] = useState(null);
+  const controller = useRef(null);
+  const latest = useRef({ expandedId, tasks });
+  latest.current = { expandedId, tasks };
 
-  const closePanel = () => setShowPanel(false);
+  const fetchTasks = useCallback(async (id, silent = false) => {
+    controller.current?.abort();
+    const c = new AbortController();
+    controller.current = c;
+
+    setLoadingId(silent ? null : id);
+    setErrors((p) => ({ ...p, [id]: false }));
+    try {
+      const r = await api.get(`/dashboard/members/${id}/tasks`, { signal: c.signal });
+      if (!c.signal.aborted) setTasks((p) => ({ ...p, [id]: r.data.tasks || [] }));
+    } catch (e) {
+      if (isAbort(e) || c.signal.aborted) return;
+      // Keep whatever is cached on a silent refresh; otherwise show Retry.
+      if (!silent) setErrors((p) => ({ ...p, [id]: true }));
+    } finally {
+      if (controller.current === c) setLoadingId(null);
+    }
+  }, []);
+
+  const toggle = useCallback(
+    (id) => {
+      if (latest.current.expandedId === id) {
+        setExpandedId(null);
+        return;
+      }
+      setExpandedId(id);
+      fetchTasks(id, Boolean(latest.current.tasks[id]));
+    },
+    [fetchTasks],
+  );
+
+  const retry = useCallback((id) => fetchTasks(id), [fetchTasks]);
+
+  // After any change, drop task caches (counts and assignments may have moved).
+  const reset = useCallback(() => {
+    controller.current?.abort();
+    setExpandedId(null);
+    setTasks({});
+    setErrors({});
+    setLoadingId(null);
+  }, []);
+
+  useEffect(() => () => controller.current?.abort(), []);
+
+  return { expandedId, tasks, errors, loadingId, toggle, retry, reset };
+}
+
+/* -------------------------------------------------------------------------- */
+/* Row                                                                        */
+/* -------------------------------------------------------------------------- */
+
+const MemberMenu = memo(function MemberMenu({ member, onAction }) {
+  const items = useMemo(
+    () => [
+      member.active
+        ? { label: "Deactivate", onSelect: () => onAction("deactivate", member.id) }
+        : { label: "Activate", onSelect: () => onAction("activate", member.id) },
+      {
+        label: "Delete",
+        danger: true,
+        separatorBefore: true,
+        onSelect: () => onAction("delete", member.id),
+      },
+    ],
+    [member.active, member.id, onAction],
+  );
+  return <RowMenu label={`More actions for ${member.name}`} items={items} />;
+});
+
+const MemberRow = memo(function MemberRow({
+  m,
+  self,
+  isManager,
+  colCount,
+  isOpen,
+  tasks,
+  tasksLoading,
+  tasksError,
+  onToggleTasks,
+  onRetryTasks,
+  onEdit,
+  onAction,
+}) {
+  const count = Number(m.task_count) || 0;
+  const countLabel = `${count} task${count !== 1 ? "s" : ""}`;
+  const panelId = `mb-tasks-${m.id}`;
+  const hue = avatarHue(m.email || m.name);
+  const countTone = count === 0 ? "text-[color:var(--text-3)]" : "text-[color:var(--accent)]";
+
+  return (
+    <>
+      <tr className="transition-colors hover:bg-[color:var(--bg-3)] motion-reduce:transition-none max-md:flex max-md:flex-wrap max-md:items-center max-md:gap-x-3 max-md:gap-y-2 max-md:border-b max-md:border-[color:var(--border)] max-md:px-4 max-md:py-3">
+        <td className={`${TD} max-md:w-full`}>
+          <div className="flex items-center gap-2.5 whitespace-nowrap">
+            <div
+              aria-hidden="true"
+              className={`user-avatar shrink-0 overflow-hidden !rounded-[10px] !p-0 font-semibold ${
+                m.active ? "" : "opacity-60 grayscale"
+              }`}
+              style={{
+                color: `hsl(${hue} 50% 40%)`,
+                background: `color-mix(in srgb, hsl(${hue} 60% 50%) 16%, var(--bg-3))`,
+              }}
+            >
+              {m.avatar_url ? (
+                <img
+                  src={m.avatar_url}
+                  alt=""
+                  loading="lazy"
+                  decoding="async"
+                  className="block h-full w-full rounded-[10px] object-cover"
+                />
+              ) : (
+                initial(m.name)
+              )}
+            </div>
+            <span className={m.active ? "font-medium" : "font-normal text-[color:var(--text-2)]"}>
+              {m.name}
+            </span>
+            {self && (
+              <span className="rounded bg-[color:var(--bg-3)] px-1.5 py-px text-[10px] font-semibold text-[color:var(--text-3)]">
+                You
+              </span>
+            )}
+          </div>
+        </td>
+
+        <td
+          className={`${TD} whitespace-nowrap text-[color:var(--text-2)] max-md:w-full max-md:whitespace-normal max-md:break-all`}
+        >
+          {m.email}
+        </td>
+
+        <td className={TD}>
+          <span
+            className={`inline-block rounded-md px-2 py-0.5 text-[11px] font-semibold capitalize ${
+              m.role === "manager"
+                ? "bg-[color:color-mix(in_srgb,var(--accent)_12%,transparent)] text-[color:var(--accent)]"
+                : "bg-[color:var(--bg-3)] text-[color:var(--text-2)]"
+            } ${m.active ? "" : "opacity-75"}`}
+          >
+            {m.role}
+          </span>
+        </td>
+
+        <td className={TD}>
+          {isManager ? (
+            <button
+              type="button"
+              onClick={() => onToggleTasks(m.id)}
+              aria-expanded={isOpen}
+              aria-controls={panelId}
+              aria-label={`${countLabel} for ${m.name}`}
+              className={`${BARE} -mx-2 -my-[3px] inline-flex items-center gap-1.5 whitespace-nowrap rounded-md px-2 py-[3px] font-[family-name:var(--font-mono)] text-[13px] tabular-nums transition hover:bg-[color:color-mix(in_srgb,var(--accent)_10%,transparent)] active:scale-[0.97] motion-reduce:transition-none motion-reduce:active:scale-100 ${FOCUS} ${countTone}`}
+            >
+              {countLabel}
+              <svg
+                width="9"
+                height="9"
+                viewBox="0 0 10 10"
+                aria-hidden="true"
+                className={`text-[color:var(--text-3)] transition-transform motion-reduce:transition-none ${
+                  isOpen ? "rotate-180" : ""
+                }`}
+              >
+                <path d="M1 3l4 4 4-4z" fill="currentColor" />
+              </svg>
+            </button>
+          ) : (
+            <span
+              className={`whitespace-nowrap font-[family-name:var(--font-mono)] text-[13px] tabular-nums ${countTone}`}
+            >
+              {countLabel}
+            </span>
+          )}
+        </td>
+
+        <td className={`${TD} whitespace-nowrap text-xs tabular-nums text-[color:var(--text-3)]`}>
+          {formatDate(m.created_at)}
+        </td>
+
+        <td className={TD}>
+          <span
+            className={`inline-flex items-center gap-1.5 whitespace-nowrap text-xs ${
+              m.active ? "text-[color:var(--success)]" : "text-[color:var(--text-2)]"
+            }`}
+          >
+            <span
+              aria-hidden="true"
+              className={`h-[7px] w-[7px] rounded-full ${
+                m.active ? "bg-[color:var(--success)]" : "bg-[color:var(--text-3)]"
+              }`}
+            />
+            {m.active ? "Active" : "Inactive"}
+          </span>
+        </td>
+
+        {isManager && (
+          <td className={`${TD} text-right max-md:ml-auto`}>
+            <div className="flex flex-wrap justify-end gap-0.5">
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() => onEdit(m)}
+                aria-label={`Edit ${m.name}`}
+              >
+                Edit
+              </button>
+              {!self && <MemberMenu member={m} onAction={onAction} />}
+            </div>
+          </td>
+        )}
+      </tr>
+
+      {isManager && isOpen && (
+        <tr className="bg-[color:var(--bg-2)] hover:bg-[color:var(--bg-2)] max-md:block">
+          <td colSpan={colCount} className="!pb-4 !pt-1.5 max-md:block max-md:!px-4">
+            <MemberTasksPanel
+              id={panelId}
+              member={m}
+              tasks={tasks}
+              loading={tasksLoading || (!tasks && !tasksError)}
+              error={tasksError}
+              onRetry={() => onRetryTasks(m.id)}
+            />
+          </td>
+        </tr>
+      )}
+    </>
+  );
+});
+
+/* -------------------------------------------------------------------------- */
+/* Add / edit form (owns its state, so typing never re-renders the table)     */
+/* -------------------------------------------------------------------------- */
+
+const EYE_PROPS = {
+  width: 16,
+  height: 16,
+  viewBox: "0 0 24 24",
+  fill: "none",
+  stroke: "currentColor",
+  strokeWidth: 2,
+  strokeLinecap: "round",
+  strokeLinejoin: "round",
+  "aria-hidden": "true",
+};
+
+function EyeIcon({ off }) {
+  return off ? (
+    <svg {...EYE_PROPS}>
+      <path d="M17.94 17.94A10.94 10.94 0 0 1 12 20c-7 0-11-8-11-8a18.5 18.5 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" />
+      <line x1="1" y1="1" x2="23" y2="23" />
+    </svg>
+  ) : (
+    <svg {...EYE_PROPS}>
+      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8Z" />
+      <circle cx="12" cy="12" r="3" />
+    </svg>
+  );
+}
+
+function FieldError({ id, children }) {
+  if (!children) return null;
+  return (
+    <div id={id} role="alert" className="mt-1.5 text-xs text-[color:var(--danger)]">
+      {children}
+    </div>
+  );
+}
+
+const EMAIL_RE = /^\S+@\S+\.\S+$/;
+
+function MemberFormPanel({ editing, onClose, onSaved }) {
+  const [form, setForm] = useState(() =>
+    editing
+      ? { name: editing.name, email: editing.email, password: "", role: editing.role }
+      : EMPTY_FORM,
+  );
+  const [fieldErrors, setFieldErrors] = useState({});
+  const [showPassword, setShowPassword] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
 
   const setField = (key) => (e) => {
     const value = e.target.value;
@@ -699,8 +936,7 @@ export default function Members() {
     const errs = {};
     if (!form.name.trim()) errs.name = "Enter a name.";
     if (!form.email.trim()) errs.email = "Enter an email address.";
-    else if (!/^\S+@\S+\.\S+$/.test(form.email.trim()))
-      errs.email = "Enter a valid email address.";
+    else if (!EMAIL_RE.test(form.email.trim())) errs.email = "Enter a valid email address.";
     if (!editing && !form.password) errs.password = "Enter a password.";
     return errs;
   };
@@ -718,115 +954,263 @@ export default function Members() {
     try {
       if (editing) await api.put(`/members/${editing.id}`, payload);
       else await api.post("/members", payload);
-      setShowPanel(false);
-      await afterChange(editing ? "Member updated" : "Member added");
+      await onSaved(editing ? "Member updated" : "Member added");
     } catch (err) {
-      setError(
-        err.response?.data?.error ||
-          "We couldn't save this member. Please try again.",
-      );
-    } finally {
+      setError(err.response?.data?.error || "We couldn't save this member. Please try again.");
       setSaving(false);
     }
   };
 
-  const handleDeactivate = (id) => {
-    setConfirmModal({
-      show: true,
-      title: "Deactivate member",
-      message: "Deactivate this member? They will no longer be able to log in.",
-      confirmText: "Deactivate",
-      isDangerous: true,
-      action: async () => {
-        await api.patch(`/members/${id}/deactivate`);
-        await afterChange("Member deactivated");
-      },
-      loading: false,
-    });
-  };
+  return (
+    <SlideOver title={editing ? "Edit member" : "Add member"} onClose={onClose}>
+      <form onSubmit={handleSave} noValidate className="flex min-h-0 flex-1 flex-col">
+        <div className="flex-1 space-y-5 overflow-y-auto px-6 py-5">
+          <div>
+            <label className="form-label" htmlFor="mb-name">Full name</label>
+            <input
+              id="mb-name"
+              className="form-input w-full"
+              value={form.name}
+              onChange={setField("name")}
+              placeholder="e.g. Anjali Menon"
+              aria-invalid={!!fieldErrors.name}
+              aria-describedby={fieldErrors.name ? "mb-name-error" : undefined}
+              autoFocus
+            />
+            <FieldError id="mb-name-error">{fieldErrors.name}</FieldError>
+          </div>
 
-  const handleActivate = (id) => {
-    setConfirmModal({
-      show: true,
-      title: "Activate member",
-      message: "Activate this member? They will be able to log in again.",
-      confirmText: "Activate",
-      isDangerous: false,
-      action: async () => {
-        await api.patch(`/members/${id}/activate`);
-        await afterChange("Member activated");
-      },
-      loading: false,
-    });
-  };
+          <div>
+            <label className="form-label" htmlFor="mb-email">Email</label>
+            <input
+              id="mb-email"
+              className="form-input w-full"
+              type="email"
+              value={form.email}
+              onChange={setField("email")}
+              placeholder="name@company.com"
+              aria-invalid={!!fieldErrors.email}
+              aria-describedby={fieldErrors.email ? "mb-email-error" : undefined}
+            />
+            <FieldError id="mb-email-error">{fieldErrors.email}</FieldError>
+          </div>
 
-  const handleDelete = (id) => {
-    setConfirmModal({
-      show: true,
-      title: "Delete member",
-      message:
-        "Are you sure you want to permanently delete this member? All their data will be removed.",
-      confirmText: "Delete",
-      isDangerous: true,
-      action: async () => {
-        await api.delete(`/members/${id}`);
-        await afterChange("Member deleted");
-      },
-      loading: false,
-    });
-  };
+          <div>
+            <span className="form-label">Role</span>
+            <Select value={form.role} onChange={(val) => setForm((f) => ({ ...f, role: val }))}>
+              <option value="member">Member</option>
+              <option value="manager">Manager</option>
+            </Select>
+          </div>
 
-  const executeConfirmAction = async () => {
+          <div>
+            <label className="form-label" htmlFor="mb-password">
+              {editing ? "New password (leave blank to keep current)" : "Password"}
+            </label>
+            <div className="relative">
+              <input
+                id="mb-password"
+                className="form-input w-full !pr-10"
+                type={showPassword ? "text" : "password"}
+                value={form.password}
+                onChange={setField("password")}
+                placeholder="••••••••"
+                autoComplete="new-password"
+                aria-invalid={!!fieldErrors.password}
+                aria-describedby={fieldErrors.password ? "mb-password-error" : undefined}
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword((v) => !v)}
+                aria-label={showPassword ? "Hide password" : "Show password"}
+                aria-pressed={showPassword}
+                title={showPassword ? "Hide password" : "Show password"}
+                className={`${BARE} absolute right-2 top-1/2 flex -translate-y-1/2 items-center justify-center rounded-md p-1 text-[color:var(--text-3)] transition hover:text-[color:var(--text)] active:scale-90 motion-reduce:transition-none ${FOCUS}`}
+              >
+                <EyeIcon off={showPassword} />
+              </button>
+            </div>
+            <FieldError id="mb-password-error">{fieldErrors.password}</FieldError>
+          </div>
+
+          {error && (
+            <div
+              role="alert"
+              className="rounded-md bg-[color:color-mix(in_srgb,var(--danger)_10%,transparent)] px-3 py-2 text-[13px] text-[color:var(--danger)]"
+            >
+              {error}
+            </div>
+          )}
+        </div>
+
+        <div className="flex justify-end gap-2 border-t border-[color:var(--border)] px-6 py-4">
+          <button type="button" className="btn btn-ghost" onClick={onClose} disabled={saving}>
+            Cancel
+          </button>
+          <button type="submit" className="btn btn-primary" disabled={saving}>
+            {saving ? "Saving…" : "Save member"}
+          </button>
+        </div>
+      </form>
+    </SlideOver>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* Page                                                                       */
+/* -------------------------------------------------------------------------- */
+
+export default function Members() {
+  const auth = useAuth();
+  const { isManager } = auth;
+  const me = auth.user || auth.currentUser || null;
+
+  const [notice, setNotice] = useState("");
+  const [toast, setToast] = useState(null);
+  const [panel, setPanel] = useState(null); // null | { editing: member | null }
+  const [confirmModal, setConfirmModal] = useState(CLOSED_CONFIRM);
+
+  // Toolbar
+  const [query, setQuery] = useState("");
+  const [roleFilter, setRoleFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [sort, setSort] = useState({ key: null, dir: "asc" });
+  // Typing stays instant; filtering a long list yields to input.
+  const deferredQuery = useDeferredValue(query);
+
+  const { members, loading, loadError, load, retry } = useMembersData(setNotice);
+  const memberTasks = useMemberTasks();
+  const { reset: resetTasks } = memberTasks;
+
+  // Auto-dismiss the inline error notice and the success toast.
+  useEffect(() => {
+    if (!notice) return undefined;
+    const t = setTimeout(() => setNotice(""), 6000);
+    return () => clearTimeout(t);
+  }, [notice]);
+
+  useEffect(() => {
+    if (!toast) return undefined;
+    const t = setTimeout(() => setToast(null), 4000);
+    return () => clearTimeout(t);
+  }, [toast]);
+
+  /* ---------- who am I ---------- */
+
+  const meId = me?.id ?? null;
+  const meEmail = me?.email ? String(me.email).toLowerCase() : "";
+  const isSelf = useCallback(
+    (m) => (meId != null && m.id === meId) || (!!meEmail && !!m.email && m.email.toLowerCase() === meEmail),
+    [meId, meEmail],
+  );
+
+  /* ---------- actions ---------- */
+
+  const afterChange = useCallback(
+    async (message) => {
+      resetTasks();
+      await load();
+      if (message) setToast({ id: Date.now(), text: message });
+    },
+    [resetTasks, load],
+  );
+
+  const openCreate = useCallback(() => setPanel({ editing: null }), []);
+  const openEdit = useCallback((m) => setPanel({ editing: m }), []);
+  const closePanel = useCallback(() => setPanel(null), []);
+  const handleSaved = useCallback(
+    async (message) => {
+      setPanel(null);
+      await afterChange(message);
+    },
+    [afterChange],
+  );
+
+  const handleAction = useCallback(
+    (kind, id) => {
+      const a = MEMBER_ACTIONS[kind];
+      setConfirmModal({
+        show: true,
+        title: a.title,
+        message: a.message,
+        confirmText: a.confirmText,
+        isDangerous: a.isDangerous,
+        loading: false,
+        action: async () => {
+          await a.run(id);
+          await afterChange(a.done);
+        },
+      });
+    },
+    [afterChange],
+  );
+
+  const closeConfirm = useCallback(() => setConfirmModal(CLOSED_CONFIRM), []);
+
+  const executeConfirmAction = useCallback(async () => {
     if (!confirmModal.action) return;
     setConfirmModal((prev) => ({ ...prev, loading: true }));
     try {
       await confirmModal.action();
     } catch (err) {
-      setNotice(
-        err?.response?.data?.error ||
-          "We couldn't complete that action. Please try again.",
-      );
+      setNotice(err?.response?.data?.error || "We couldn't complete that action. Please try again.");
     } finally {
       setConfirmModal(CLOSED_CONFIRM);
     }
-  };
+  }, [confirmModal]);
 
-  const toggleSort = (key) =>
-    setSort((s) => {
-      const first = FIRST_SORT_DIR[key];
-      const second = first === "asc" ? "desc" : "asc";
-      if (s.key !== key) return { key, dir: first };
-      if (s.dir === first) return { key, dir: second };
-      return { key: null, dir: "asc" };
-    });
+  const dismissNotice = useCallback(() => setNotice(""), []);
 
-  const clearFilters = () => {
+  const toggleSort = useCallback(
+    (key) =>
+      setSort((s) => {
+        const first = FIRST_SORT_DIR[key];
+        const second = first === "asc" ? "desc" : "asc";
+        if (s.key !== key) return { key, dir: first };
+        if (s.dir === first) return { key, dir: second };
+        return { key: null, dir: "asc" };
+      }),
+    [],
+  );
+
+  const clearFilters = useCallback(() => {
     setQuery("");
     setRoleFilter("all");
     setStatusFilter("all");
-  };
+  }, []);
+
+  /* ---------- derived ---------- */
+
+  // Lower-cased search text is built once per list, not once per keystroke.
+  const searchable = useMemo(
+    () => members.map((m) => ({ m, text: `${m.name} ${m.email}`.toLowerCase() })),
+    [members],
+  );
 
   const visible = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    const list = members.filter((m) => {
-      if (roleFilter !== "all" && m.role !== roleFilter) return false;
-      if (statusFilter === "active" && !m.active) return false;
-      if (statusFilter === "inactive" && m.active) return false;
-      if (q && !`${m.name} ${m.email}`.toLowerCase().includes(q)) return false;
-      return true;
-    });
+    const q = deferredQuery.trim().toLowerCase();
+    const list = [];
+    for (const { m, text } of searchable) {
+      if (roleFilter !== "all" && m.role !== roleFilter) continue;
+      if (statusFilter === "active" && !m.active) continue;
+      if (statusFilter === "inactive" && m.active) continue;
+      if (q && !text.includes(q)) continue;
+      list.push(m);
+    }
     if (!sort.key) return list;
     const dir = sort.dir === "asc" ? 1 : -1;
-    return [...list].sort((a, b) => {
+    return list.sort((a, b) => {
       if (sort.key === "name") return dir * (a.name || "").localeCompare(b.name || "");
       if (sort.key === "tasks") return dir * ((Number(a.task_count) || 0) - (Number(b.task_count) || 0));
       return dir * (new Date(a.created_at) - new Date(b.created_at));
     });
-  }, [members, query, roleFilter, statusFilter, sort]);
+  }, [searchable, deferredQuery, roleFilter, statusFilter, sort]);
 
   const filtersActive = query.trim() !== "" || roleFilter !== "all" || statusFilter !== "all";
-  const activeCount = members.filter((m) => m.active).length;
+  const activeCount = useMemo(() => members.filter((m) => m.active).length, [members]);
   const colCount = isManager ? 7 : 6;
+
+  const { expandedId, tasks: tasksById, errors: tasksErrors, loadingId } = memberTasks;
 
   return (
     <>
@@ -856,7 +1240,7 @@ export default function Members() {
             <button
               type="button"
               aria-label="Dismiss"
-              onClick={() => setNotice("")}
+              onClick={dismissNotice}
               className={`${BARE} px-0.5 py-0 leading-none text-inherit opacity-70 transition hover:opacity-100 active:scale-90 ${FOCUS}`}
             >
               ✕
@@ -866,7 +1250,7 @@ export default function Members() {
 
         {loading ? (
           <div className="card overflow-hidden !p-0" aria-hidden="true">
-            {[0, 1, 2, 3, 4].map((i) => (
+            {SKELETON_ROWS.map((i) => (
               <div
                 key={i}
                 className="flex items-center gap-3 px-4 py-3.5 motion-safe:animate-pulse [&+&]:border-t [&+&]:border-[color:var(--border)]"
@@ -936,10 +1320,7 @@ export default function Members() {
                 onChange={setRoleFilter}
                 options={ROLE_FILTERS}
               />
-              <div
-                className="text-xs tabular-nums text-[color:var(--text-3)] md:ml-auto"
-                aria-live="polite"
-              >
+              <div className="text-xs tabular-nums text-[color:var(--text-3)] md:ml-auto" aria-live="polite">
                 {filtersActive
                   ? `${visible.length} of ${members.length} members`
                   : `${members.length} member${members.length !== 1 ? "s" : ""}`}
@@ -968,193 +1349,27 @@ export default function Members() {
                         <SortTh label="Tasks" sortKey="tasks" sort={sort} onSort={toggleSort} />
                         <SortTh label="Joined" sortKey="joined" sort={sort} onSort={toggleSort} />
                         <th scope="col" className={TH}>Status</th>
-                        {isManager && (
-                          <th scope="col" className={`${TH} text-right`}>Actions</th>
-                        )}
+                        {isManager && <th scope="col" className={`${TH} text-right`}>Actions</th>}
                       </tr>
                     </thead>
                     <tbody className="max-md:block">
-                      {visible.map((m) => {
-                        const count = Number(m.task_count) || 0;
-                        const countLabel = `${count} task${count !== 1 ? "s" : ""}`;
-                        const isOpen = expandedId === m.id;
-                        const tasks = memberTasks[m.id];
-                        const panelId = `mb-tasks-${m.id}`;
-                        const self = isSelf(m);
-                        const hue = avatarHue(m.email || m.name);
-                        const menuItems = [
-                          m.active
-                            ? { label: "Deactivate", onSelect: () => handleDeactivate(m.id) }
-                            : { label: "Activate", onSelect: () => handleActivate(m.id) },
-                          {
-                            label: "Delete",
-                            danger: true,
-                            separatorBefore: true,
-                            onSelect: () => handleDelete(m.id),
-                          },
-                        ];
-                        return (
-                          <Fragment key={m.id}>
-                            <tr className="transition-colors hover:bg-[color:var(--bg-3)] motion-reduce:transition-none max-md:flex max-md:flex-wrap max-md:items-center max-md:gap-x-3 max-md:gap-y-2 max-md:border-b max-md:border-[color:var(--border)] max-md:px-4 max-md:py-3">
-                              <td className={`${TD} max-md:w-full`}>
-                                <div className="flex items-center gap-2.5 whitespace-nowrap">
-                                  <div
-                                    aria-hidden="true"
-                                    className={`user-avatar shrink-0 overflow-hidden !rounded-[10px] !p-0 font-semibold ${
-                                      m.active ? "" : "opacity-60 grayscale"
-                                    }`}
-                                    style={{
-                                      color: `hsl(${hue} 50% 40%)`,
-                                      background: `color-mix(in srgb, hsl(${hue} 60% 50%) 16%, var(--bg-3))`,
-                                    }}
-                                  >
-                                    {m.avatar_url ? (
-                                      <img
-                                        src={m.avatar_url}
-                                        alt=""
-                                        className="block h-full w-full rounded-[10px] object-cover"
-                                      />
-                                    ) : (
-                                      initial(m.name)
-                                    )}
-                                  </div>
-                                  <span
-                                    className={
-                                      m.active
-                                        ? "font-medium"
-                                        : "font-normal text-[color:var(--text-2)]"
-                                    }
-                                  >
-                                    {m.name}
-                                  </span>
-                                  {self && (
-                                    <span className="rounded bg-[color:var(--bg-3)] px-1.5 py-px text-[10px] font-semibold text-[color:var(--text-3)]">
-                                      You
-                                    </span>
-                                  )}
-                                </div>
-                              </td>
-                              <td
-                                className={`${TD} whitespace-nowrap text-[color:var(--text-2)] max-md:w-full max-md:whitespace-normal max-md:break-all`}
-                              >
-                                {m.email}
-                              </td>
-                              <td className={TD}>
-                                <span
-                                  className={`inline-block rounded-md px-2 py-0.5 text-[11px] font-semibold capitalize ${
-                                    m.role === "manager"
-                                      ? "bg-[color:color-mix(in_srgb,var(--accent)_12%,transparent)] text-[color:var(--accent)]"
-                                      : "bg-[color:var(--bg-3)] text-[color:var(--text-2)]"
-                                  } ${m.active ? "" : "opacity-75"}`}
-                                >
-                                  {m.role}
-                                </span>
-                              </td>
-                              <td className={TD}>
-                                {isManager ? (
-                                  <button
-                                    type="button"
-                                    onClick={() => toggleMember(m.id)}
-                                    aria-expanded={isOpen}
-                                    aria-controls={panelId}
-                                    aria-label={`${countLabel} for ${m.name}`}
-                                    className={`${BARE} -mx-2 -my-[3px] inline-flex items-center gap-1.5 whitespace-nowrap rounded-md px-2 py-[3px] font-[family-name:var(--font-mono)] text-[13px] tabular-nums transition hover:bg-[color:color-mix(in_srgb,var(--accent)_10%,transparent)] active:scale-[0.97] motion-reduce:transition-none motion-reduce:active:scale-100 ${FOCUS} ${
-                                      count === 0
-                                        ? "text-[color:var(--text-3)]"
-                                        : "text-[color:var(--accent)]"
-                                    }`}
-                                  >
-                                    {countLabel}
-                                    <svg
-                                      width="9"
-                                      height="9"
-                                      viewBox="0 0 10 10"
-                                      aria-hidden="true"
-                                      className={`text-[color:var(--text-3)] transition-transform motion-reduce:transition-none ${
-                                        isOpen ? "rotate-180" : ""
-                                      }`}
-                                    >
-                                      <path d="M1 3l4 4 4-4z" fill="currentColor" />
-                                    </svg>
-                                  </button>
-                                ) : (
-                                  <span
-                                    className={`whitespace-nowrap font-[family-name:var(--font-mono)] text-[13px] tabular-nums ${
-                                      count === 0
-                                        ? "text-[color:var(--text-3)]"
-                                        : "text-[color:var(--accent)]"
-                                    }`}
-                                  >
-                                    {countLabel}
-                                  </span>
-                                )}
-                              </td>
-                              <td
-                                className={`${TD} whitespace-nowrap text-xs tabular-nums text-[color:var(--text-3)]`}
-                              >
-                                {formatDate(m.created_at)}
-                              </td>
-                              <td className={TD}>
-                                <span
-                                  className={`inline-flex items-center gap-1.5 whitespace-nowrap text-xs ${
-                                    m.active
-                                      ? "text-[color:var(--success)]"
-                                      : "text-[color:var(--text-2)]"
-                                  }`}
-                                >
-                                  <span
-                                    aria-hidden="true"
-                                    className={`h-[7px] w-[7px] rounded-full ${
-                                      m.active
-                                        ? "bg-[color:var(--success)]"
-                                        : "bg-[color:var(--text-3)]"
-                                    }`}
-                                  />
-                                  {m.active ? "Active" : "Inactive"}
-                                </span>
-                              </td>
-                              {isManager && (
-                                <td className={`${TD} text-right max-md:ml-auto`}>
-                                  <div className="flex flex-wrap justify-end gap-0.5">
-                                    <button
-                                      type="button"
-                                      className="btn btn-ghost btn-sm"
-                                      onClick={() => openEdit(m)}
-                                      aria-label={`Edit ${m.name}`}
-                                    >
-                                      Edit
-                                    </button>
-                                    {!self && (
-                                      <RowMenu
-                                        label={`More actions for ${m.name}`}
-                                        items={menuItems}
-                                      />
-                                    )}
-                                  </div>
-                                </td>
-                              )}
-                            </tr>
-
-                            {isManager && isOpen && (
-                              <tr className="bg-[color:var(--bg-2)] hover:bg-[color:var(--bg-2)] max-md:block">
-                                <td
-                                  colSpan={colCount}
-                                  className="!pb-4 !pt-1.5 max-md:block max-md:!px-4"
-                                >
-                                  <MemberTasksPanel
-                                    id={panelId}
-                                    member={m}
-                                    tasks={tasks}
-                                    loading={loadingMember === m.id || (!tasks && !memberErrors[m.id])}
-                                    error={!!memberErrors[m.id]}
-                                    onRetry={() => loadMemberTasks(m.id)}
-                                  />
-                                </td>
-                              </tr>
-                            )}
-                          </Fragment>
-                        );
-                      })}
+                      {visible.map((m) => (
+                        <MemberRow
+                          key={m.id}
+                          m={m}
+                          self={isSelf(m)}
+                          isManager={isManager}
+                          colCount={colCount}
+                          isOpen={expandedId === m.id}
+                          tasks={tasksById[m.id]}
+                          tasksLoading={loadingId === m.id}
+                          tasksError={!!tasksErrors[m.id]}
+                          onToggleTasks={memberTasks.toggle}
+                          onRetryTasks={memberTasks.retry}
+                          onEdit={openEdit}
+                          onAction={handleAction}
+                        />
+                      ))}
                     </tbody>
                   </table>
                 </div>
@@ -1164,136 +1379,7 @@ export default function Members() {
         )}
       </div>
 
-      {showPanel && (
-        <SlideOver title={editing ? "Edit member" : "Add member"} onClose={closePanel}>
-          <form onSubmit={handleSave} noValidate className="flex min-h-0 flex-1 flex-col">
-            <div className="flex-1 space-y-5 overflow-y-auto px-6 py-5">
-              <div>
-                <label className="form-label" htmlFor="mb-name">Full name</label>
-                <input
-                  id="mb-name"
-                  className="form-input w-full"
-                  value={form.name}
-                  onChange={setField("name")}
-                  placeholder="e.g. Anjali Menon"
-                  aria-invalid={!!fieldErrors.name}
-                  aria-describedby={fieldErrors.name ? "mb-name-error" : undefined}
-                  autoFocus
-                />
-                {fieldErrors.name && (
-                  <div
-                    id="mb-name-error"
-                    role="alert"
-                    className="mt-1.5 text-xs text-[color:var(--danger)]"
-                  >
-                    {fieldErrors.name}
-                  </div>
-                )}
-              </div>
-
-              <div>
-                <label className="form-label" htmlFor="mb-email">Email</label>
-                <input
-                  id="mb-email"
-                  className="form-input w-full"
-                  type="email"
-                  value={form.email}
-                  onChange={setField("email")}
-                  placeholder="name@company.com"
-                  aria-invalid={!!fieldErrors.email}
-                  aria-describedby={fieldErrors.email ? "mb-email-error" : undefined}
-                />
-                {fieldErrors.email && (
-                  <div
-                    id="mb-email-error"
-                    role="alert"
-                    className="mt-1.5 text-xs text-[color:var(--danger)]"
-                  >
-                    {fieldErrors.email}
-                  </div>
-                )}
-              </div>
-
-              <div>
-                <span className="form-label">Role</span>
-                <Select
-                  value={form.role}
-                  onChange={(val) => setForm((f) => ({ ...f, role: val }))}
-                >
-                  <option value="member">Member</option>
-                  <option value="manager">Manager</option>
-                </Select>
-              </div>
-
-              <div>
-                <label className="form-label" htmlFor="mb-password">
-                  {editing ? "New password (leave blank to keep current)" : "Password"}
-                </label>
-                <div className="relative">
-                  <input
-                    id="mb-password"
-                    className="form-input w-full !pr-10"
-                    type={showPassword ? "text" : "password"}
-                    value={form.password}
-                    onChange={setField("password")}
-                    placeholder="••••••••"
-                    autoComplete="new-password"
-                    aria-invalid={!!fieldErrors.password}
-                    aria-describedby={fieldErrors.password ? "mb-password-error" : undefined}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword((v) => !v)}
-                    aria-label={showPassword ? "Hide password" : "Show password"}
-                    aria-pressed={showPassword}
-                    title={showPassword ? "Hide password" : "Show password"}
-                    className={`${BARE} absolute right-2 top-1/2 flex -translate-y-1/2 items-center justify-center rounded-md p-1 text-[color:var(--text-3)] transition hover:text-[color:var(--text)] active:scale-90 motion-reduce:transition-none ${FOCUS}`}
-                  >
-                    {showPassword ? (
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                        <path d="M17.94 17.94A10.94 10.94 0 0 1 12 20c-7 0-11-8-11-8a18.5 18.5 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" />
-                        <line x1="1" y1="1" x2="23" y2="23" />
-                      </svg>
-                    ) : (
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8Z" />
-                        <circle cx="12" cy="12" r="3" />
-                      </svg>
-                    )}
-                  </button>
-                </div>
-                {fieldErrors.password && (
-                  <div
-                    id="mb-password-error"
-                    role="alert"
-                    className="mt-1.5 text-xs text-[color:var(--danger)]"
-                  >
-                    {fieldErrors.password}
-                  </div>
-                )}
-              </div>
-
-              {error && (
-                <div
-                  role="alert"
-                  className="rounded-md bg-[color:color-mix(in_srgb,var(--danger)_10%,transparent)] px-3 py-2 text-[13px] text-[color:var(--danger)]"
-                >
-                  {error}
-                </div>
-              )}
-            </div>
-
-            <div className="flex justify-end gap-2 border-t border-[color:var(--border)] px-6 py-4">
-              <button type="button" className="btn btn-ghost" onClick={closePanel} disabled={saving}>
-                Cancel
-              </button>
-              <button type="submit" className="btn btn-primary" disabled={saving}>
-                {saving ? "Saving…" : "Save member"}
-              </button>
-            </div>
-          </form>
-        </SlideOver>
-      )}
+      {panel && <MemberFormPanel editing={panel.editing} onClose={closePanel} onSaved={handleSaved} />}
 
       <ConfirmModal
         isOpen={confirmModal.show}
@@ -1302,7 +1388,7 @@ export default function Members() {
         confirmText={confirmModal.confirmText}
         isDangerous={confirmModal.isDangerous}
         onConfirm={executeConfirmAction}
-        onCancel={() => setConfirmModal(CLOSED_CONFIRM)}
+        onCancel={closeConfirm}
         loading={confirmModal.loading}
       />
 

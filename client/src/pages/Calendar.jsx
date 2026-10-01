@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { Fragment, memo, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../api/client';
 import { useAuth } from '../context/AuthContext';
@@ -197,7 +197,7 @@ function formatCellLabel(item) {
 
 function formatDayMeta(item) {
   if (item.itemType === 'event') {
-    return item.date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    return TIME_FMT.format(item.date);
   }
   if (item.itemType === 'task' && item.project_name) return item.project_name;
   if (item.itemType === 'deadline' && item.client_name) return item.client_name;
@@ -213,6 +213,116 @@ function sortDayItems(items) {
 }
 
 const stageKey = (stage) => stage?.toLowerCase().replace(/\s/g, '');
+
+/* ------------------------------------------------------------------ */
+/* Shared constants, formatters and hooks                              */
+/* ------------------------------------------------------------------ */
+
+const EMPTY_ITEMS = [];
+const EMPTY_DATA = { events: [], tasks: [], projects: [], birthdays: [] };
+
+// Intl formatters are expensive to build, so they are created once.
+const DAY_LONG_FMT = new Intl.DateTimeFormat('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+const CELL_LABEL_FMT = new Intl.DateTimeFormat('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+const SHORT_FMT = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' });
+const TIME_FMT = new Intl.DateTimeFormat([], { hour: '2-digit', minute: '2-digit' });
+
+const isAbort = (error) =>
+  error?.code === 'ERR_CANCELED' || error?.name === 'CanceledError' || error?.name === 'AbortError';
+
+const dateKey = (date) => `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
+
+const itemKey = (item, index) => `${item.itemType}-${item.id || item.name || index}`;
+
+const pluralItems = (count) => `${count} ${count === 1 ? 'item' : 'items'}`;
+
+// Closes a popup on outside click and on Escape.
+// `close` receives `true` when it was triggered by Escape.
+function useDismiss(open, rootRef, close, { captureEscape = false } = {}) {
+  const closeRef = useRef(close);
+  closeRef.current = close;
+
+  useEffect(() => {
+    if (!open) return undefined;
+
+    const handlePointerDown = (event) => {
+      if (rootRef.current && !rootRef.current.contains(event.target)) closeRef.current();
+    };
+    const handleKeyDown = (event) => {
+      if (event.key !== 'Escape') return;
+      // Captured so Escape closes only the menu, not the modal behind it.
+      if (captureEscape) event.stopPropagation();
+      closeRef.current(true);
+    };
+
+    document.addEventListener('mousedown', handlePointerDown);
+    document.addEventListener('keydown', handleKeyDown, captureEscape);
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown);
+      document.removeEventListener('keydown', handleKeyDown, captureEscape);
+    };
+  }, [open, rootRef, captureEscape]);
+}
+
+// Calendar data + member list. Requests are cancelled when they are superseded
+// and only the very first load shows the page loader; later loads (filter
+// changes, saves) keep the page on screen and just flag `busy`.
+function useCalendarData(isManager, memberParams) {
+  const [data, setData] = useState(EMPTY_DATA);
+  const [members, setMembers] = useState(EMPTY_ITEMS);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const controller = useRef(null);
+
+  const paramsRef = useRef(memberParams);
+  paramsRef.current = memberParams;
+
+  const refresh = useCallback(async () => {
+    controller.current?.abort();
+    const current = new AbortController();
+    controller.current = current;
+    setBusy(true);
+
+    try {
+      const response = await api.get('/calendar', { params: paramsRef.current, signal: current.signal });
+      if (!current.signal.aborted) setData(response.data);
+    } catch (error) {
+      if (!isAbort(error)) console.error('Error loading calendar data:', error);
+    } finally {
+      if (controller.current === current) setBusy(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    let live = true;
+    refresh().finally(() => {
+      if (live) setLoading(false);
+    });
+    return () => {
+      live = false;
+      controller.current?.abort();
+    };
+  }, [refresh, memberParams]);
+
+  // The member list is only needed for the manager's filter bar and the event form.
+  useEffect(() => {
+    if (!isManager) {
+      setMembers(EMPTY_ITEMS);
+      return undefined;
+    }
+    const current = new AbortController();
+    api
+      .get('/members', { signal: current.signal })
+      .then((response) => setMembers(response.data))
+      .catch((error) => {
+        if (!isAbort(error)) console.error('Error loading members:', error);
+      });
+    return () => current.abort();
+  }, [isManager]);
+
+  return { data, setData, members, loading, busy, refresh };
+}
+
 
 /* ------------------------------------------------------------------ */
 /* Small presentational pieces                                         */
@@ -269,28 +379,21 @@ function Notice({ children, onDismiss }) {
 export default function Calendar() {
   const { isManager, user } = useAuth();
   const navigate = useNavigate();
-  const [data, setData] = useState({ events: [], tasks: [], projects: [], birthdays: [] });
-  const [members, setMembers] = useState([]);
-  const [loading, setLoading] = useState(true);
-  // Calendar (month grid) is the default view.
-  const [view, setView] = useState('month');
-  const [current, setCurrent] = useState(new Date());
-  const [showModal, setShowModal] = useState(false);
-  const [editing, setEditing] = useState(null);
-  // Start value (datetime-local format) used when creating an event from a day / time slot.
-  const [prefillStart, setPrefillStart] = useState('');
+
+  const [view, setView] = useState('month'); // month grid is the default
+  const [current, setCurrent] = useState(() => new Date());
   const [selectedDay, setSelectedDay] = useState(null);
   // Manager-only: filter the calendar by member.
   const [selectedFilterMembers, setSelectedFilterMembers] = useState([]);
-  // Filter the calendar by project (members and admins). Empty = all projects.
+  // Members and admins: filter by project. Empty = all projects.
   const [selectedProjectIds, setSelectedProjectIds] = useState([]);
+
+  // Modals: null = closed.
+  const [formModal, setFormModal] = useState(null); // { editing, prefillStart }
+  const [timeTakenTask, setTimeTakenTask] = useState(null);
   const [confirmModal, setConfirmModal] = useState(EMPTY_CONFIRM);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState('');
-  // Member stage change: "In Review" asks for time taken first (same flow as Task View).
-  const [timeTakenModal, setTimeTakenModal] = useState({ show: false, task: null });
-  const [timeTakenInput, setTimeTakenInput] = useState('');
-  const [timeTakenError, setTimeTakenError] = useState('');
   // Inline error message (failed stage change, failed delete).
   const [notice, setNotice] = useState('');
 
@@ -303,46 +406,14 @@ export default function Calendar() {
     return memberEmails.length > 0 ? { members: memberEmails.join(',') } : {};
   }, [isManager, selectedFilterMembers]);
 
-  useEffect(() => {
-    async function load() {
-      setLoading(true);
+  const { data, setData, members, loading, busy, refresh } = useCalendarData(isManager, memberParams);
 
-      try {
-        const [calendarResponse, membersResponse] = await Promise.all([
-          api.get('/calendar', { params: memberParams }),
-          // The member list is only needed for the manager's filter bar and the event form.
-          isManager ? api.get('/members') : Promise.resolve({ data: [] }),
-        ]);
+  /* ---------- derived data ---------- */
 
-        setData(calendarResponse.data);
-        setMembers(membersResponse.data);
-      } catch (error) {
-        console.error('Error loading calendar data:', error);
-      } finally {
-        setLoading(false);
-      }
-    }
-
-    load();
-  }, [memberParams, isManager]);
-
-  // Silent refresh: keeps the page (and any open day modal) on screen instead of flashing the page loader.
-  const refreshCalendar = async () => {
-    try {
-      const response = await api.get('/calendar', { params: memberParams });
-      setData(response.data);
-    } catch (error) {
-      console.error('Error refreshing calendar:', error);
-    }
-  };
-
-  const allItems = useMemo(
-    () => buildCalendarItems(data, current.getFullYear()),
-    [data, current],
-  );
-
-  // Projects available in the project filter (options for both members and admins).
+  const year = current.getFullYear();
+  const allItems = useMemo(() => buildCalendarItems(data, year), [data, year]);
   const projectOptions = useMemo(() => buildProjectOptions(data), [data]);
+  const activeMembers = useMemo(() => members.filter((member) => member.active !== false), [members]);
 
   // If the available projects change (e.g. admin changes the member filter),
   // drop any selected project that is no longer an option so nothing is hidden by a stale filter.
@@ -359,9 +430,7 @@ export default function Calendar() {
   // Events and birthdays are not tied to a project, so they always stay visible.
   const visibleItems = useMemo(() => {
     if (selectedProjectIds.length === 0) return allItems;
-
     const selected = new Set(selectedProjectIds);
-
     return allItems.filter((item) => {
       if (item.itemType === 'task') return selected.has(String(item.project_id));
       if (item.itemType === 'deadline') return selected.has(String(item.id));
@@ -372,7 +441,7 @@ export default function Calendar() {
   const itemsByDate = useMemo(() => {
     const byDate = new Map();
     visibleItems.forEach((item) => {
-      const key = `${item.date.getFullYear()}-${item.date.getMonth()}-${item.date.getDate()}`;
+      const key = dateKey(item.date);
       const items = byDate.get(key);
       if (items) items.push(item);
       else byDate.set(key, [item]);
@@ -380,52 +449,19 @@ export default function Calendar() {
     return byDate;
   }, [visibleItems]);
 
-  const getItemsForDate = (date) => itemsByDate.get(
-    `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`,
-  ) || [];
+  const getItemsForDate = useCallback(
+    (date) => itemsByDate.get(dateKey(date)) || EMPTY_ITEMS,
+    [itemsByDate],
+  );
 
-  const openNewEvent = (date, hour = 9) => {
-    setEditing(null);
-    setFormError('');
-    setPrefillStart(date ? toInputValue(date, hour) : '');
-    setShowModal(true);
-  };
-
-  const openEdit = (item) => {
-    setEditing(item);
-    setFormError('');
-    setPrefillStart('');
-    setShowModal(true);
-  };
-
-  const closeForm = () => {
-    setShowModal(false);
-    setEditing(null);
-    setFormError('');
-    setPrefillStart('');
-  };
-
-  // Same target as clicking a row in Task View: the task's detail page.
-  const openTask = (task) => {
-    navigate(`/projects/${task.project_id}/tasks/${task.id}`);
-  };
-
-  const handleTaskStageChange = async (task, newStage, extra = {}) => {
-    const previousStage = task.stage;
-    const setStage = (stage) => setData((previous) => ({
-      ...previous,
-      tasks: previous.tasks.map((t) => (t.id === task.id ? { ...t, stage } : t)),
-    }));
-
-    setStage(newStage);
-    try {
-      await api.put(`/tasks/${task.id}`, { stage: newStage, ...extra });
-    } catch (error) {
-      console.error('Failed to update stage:', error);
-      setStage(previousStage);
-      setNotice(error.response?.data?.error || "We couldn't update the stage. Please try again.");
-    }
-  };
+  const selectedItems = useMemo(
+    () => (selectedDay ? sortDayItems(getItemsForDate(selectedDay)) : EMPTY_ITEMS),
+    [selectedDay, getItemsForDate],
+  );
+  const dayViewItems = useMemo(
+    () => (view === 'day' ? sortDayItems(getItemsForDate(current)) : EMPTY_ITEMS),
+    [view, current, getItemsForDate],
+  );
 
   // Auto-dismiss the error notice.
   useEffect(() => {
@@ -434,108 +470,175 @@ export default function Calendar() {
     return () => clearTimeout(timer);
   }, [notice]);
 
-  const handleTaskStageSelect = (task, newStage) => {
-    setNotice('');
-    if (newStage === 'In Review') {
-      setTimeTakenInput('');
-      setTimeTakenError('');
-      setTimeTakenModal({ show: true, task });
-      return;
-    }
-    handleTaskStageChange(task, newStage);
-  };
+  /* ---------- event form ---------- */
 
-  const closeTimeTakenModal = () => {
-    setTimeTakenModal({ show: false, task: null });
-    setTimeTakenInput('');
-    setTimeTakenError('');
-  };
-
-  const handleTimeTakenSubmit = async (event) => {
-    event?.preventDefault();
-    const minutes = parseInt(timeTakenInput, 10);
-    if (!minutes || minutes <= 0) {
-      setTimeTakenError('Enter the time taken in minutes.');
-      return;
-    }
-    const { task } = timeTakenModal;
-    closeTimeTakenModal();
-    await handleTaskStageChange(task, 'In Review', { time_taken: minutes });
-  };
-
-  const shiftSelectedDay = (delta) => {
-    setSelectedDay((previous) => {
-      const next = new Date(previous);
-      next.setDate(next.getDate() + delta);
-      return next;
-    });
-  };
-
-  const shiftCurrent = (direction) => {
-    setCurrent((previous) => {
-      const next = new Date(previous);
-      if (view === 'month') {
-        // Pin to the 1st first, otherwise Jan 31 + 1 month lands in March.
-        next.setDate(1);
-        next.setMonth(next.getMonth() + direction);
-      } else if (view === 'week') {
-        next.setDate(next.getDate() + 7 * direction);
-      } else {
-        next.setDate(next.getDate() + direction);
-      }
-      return next;
-    });
-  };
-
-  const handleSave = async (formData) => {
-    setSaving(true);
+  const openNewEvent = useCallback((date, hour = 9) => {
     setFormError('');
-    try {
-      if (editing?.id) {
-        await api.put(`/calendar/${editing.id}`, formData);
-      } else {
-        await api.post('/calendar', formData);
+    setFormModal({ editing: null, prefillStart: date ? toInputValue(date, hour) : '' });
+  }, []);
+
+  const openEdit = useCallback((item) => {
+    setFormError('');
+    setFormModal({ editing: item, prefillStart: '' });
+  }, []);
+
+  const closeForm = useCallback(() => {
+    setFormModal(null);
+    setFormError('');
+  }, []);
+
+  const editingId = formModal?.editing?.id;
+  const handleSave = useCallback(
+    async (formData) => {
+      setSaving(true);
+      setFormError('');
+      try {
+        if (editingId) await api.put(`/calendar/${editingId}`, formData);
+        else await api.post('/calendar', formData);
+
+        closeForm();
+        // selectedDay is intentionally kept, so the day modal reappears with the updated list.
+        await refresh();
+      } catch (error) {
+        // The form stays open so nothing typed is lost.
+        setFormError(error.response?.data?.error || "We couldn't save this event. Please try again.");
+      } finally {
+        setSaving(false);
       }
+    },
+    [editingId, closeForm, refresh],
+  );
 
-      closeForm();
-      // selectedDay is intentionally kept, so the day modal reappears with the updated list.
-      await refreshCalendar();
-    } catch (error) {
-      // The form stays open so nothing typed is lost.
-      setFormError(error.response?.data?.error || "We couldn't save this event. Please try again.");
-    } finally {
-      setSaving(false);
-    }
-  };
+  /* ---------- delete ---------- */
 
-  const handleDelete = (id) => {
-    setConfirmModal({
-      show: true,
-      title: 'Delete event',
-      message: 'Delete this event? This can’t be undone.',
-      isDangerous: true,
-      action: async () => {
-        try {
-          await api.delete(`/calendar/${id}`);
-          await refreshCalendar();
-        } catch (error) {
-          console.error('Error deleting event:', error);
-          setNotice("We couldn't delete that event. Please try again.");
-        }
-      },
-      loading: false,
-    });
-  };
+  const closeConfirm = useCallback(() => setConfirmModal(EMPTY_CONFIRM), []);
 
-  const executeConfirmAction = async () => {
+  const handleDelete = useCallback(
+    (id) =>
+      setConfirmModal({
+        show: true,
+        title: 'Delete event',
+        message: 'Delete this event? This can’t be undone.',
+        isDangerous: true,
+        loading: false,
+        action: async () => {
+          try {
+            await api.delete(`/calendar/${id}`);
+            await refresh();
+          } catch (error) {
+            console.error('Error deleting event:', error);
+            setNotice("We couldn't delete that event. Please try again.");
+          }
+        },
+      }),
+    [refresh],
+  );
+
+  const executeConfirmAction = useCallback(async () => {
     if (!confirmModal.action) return;
-    setConfirmModal((prev) => ({ ...prev, loading: true }));
+    setConfirmModal((previous) => ({ ...previous, loading: true }));
     try {
       await confirmModal.action();
     } finally {
       setConfirmModal(EMPTY_CONFIRM);
     }
-  };
+  }, [confirmModal]);
+
+  /* ---------- tasks ---------- */
+
+  // Same target as clicking a row in Task View: the task's detail page.
+  const openTask = useCallback(
+    (task) => navigate(`/projects/${task.project_id}/tasks/${task.id}`),
+    [navigate],
+  );
+
+  // Optimistic stage change with rollback.
+  const changeTaskStage = useCallback(
+    async (task, newStage, extra = {}) => {
+      const previousStage = task.stage;
+      const setStage = (stage) =>
+        setData((previous) => ({
+          ...previous,
+          tasks: previous.tasks.map((t) => (t.id === task.id ? { ...t, stage } : t)),
+        }));
+
+      setStage(newStage);
+      try {
+        await api.put(`/tasks/${task.id}`, { stage: newStage, ...extra });
+      } catch (error) {
+        console.error('Failed to update stage:', error);
+        setStage(previousStage);
+        setNotice(error.response?.data?.error || "We couldn't update the stage. Please try again.");
+      }
+    },
+    [setData],
+  );
+
+  // Members: "In Review" asks for time taken first (same flow as Task View).
+  const handleTaskStageSelect = useCallback(
+    (task, newStage) => {
+      setNotice('');
+      if (newStage === 'In Review') setTimeTakenTask(task);
+      else changeTaskStage(task, newStage);
+    },
+    [changeTaskStage],
+  );
+
+  const closeTimeTaken = useCallback(() => setTimeTakenTask(null), []);
+
+  const confirmTimeTaken = useCallback(
+    (task, minutes) => {
+      setTimeTakenTask(null);
+      return changeTaskStage(task, 'In Review', { time_taken: minutes });
+    },
+    [changeTaskStage],
+  );
+
+  /* ---------- navigation ---------- */
+
+  const closeDay = useCallback(() => setSelectedDay(null), []);
+  const addOnSelectedDay = useCallback(() => openNewEvent(selectedDay), [openNewEvent, selectedDay]);
+
+  const shiftSelectedDay = useCallback((delta) => {
+    setSelectedDay((previous) => {
+      const next = new Date(previous);
+      next.setDate(next.getDate() + delta);
+      return next;
+    });
+  }, []);
+
+  const shiftCurrent = useCallback(
+    (direction) => {
+      setCurrent((previous) => {
+        const next = new Date(previous);
+        if (view === 'month') {
+          // Pin to the 1st first, otherwise Jan 31 + 1 month lands in March.
+          next.setDate(1);
+          next.setMonth(next.getMonth() + direction);
+        } else if (view === 'week') {
+          next.setDate(next.getDate() + 7 * direction);
+        } else {
+          next.setDate(next.getDate() + direction);
+        }
+        return next;
+      });
+    },
+    [view],
+  );
+
+  const goPrevious = useCallback(() => shiftCurrent(-1), [shiftCurrent]);
+  const goNext = useCallback(() => shiftCurrent(1), [shiftCurrent]);
+  const goToday = useCallback(() => setCurrent(new Date()), []);
+  const dismissNotice = useCallback(() => setNotice(''), []);
+
+  // Managers edit straight away; everyone else gets the read-only day modal.
+  const handleWeekEventClick = useCallback(
+    (item) => (isManager ? openEdit(item) : setSelectedDay(item.date)),
+    [isManager, openEdit],
+  );
+  const handleNewEventClick = useCallback(() => openNewEvent(null), [openNewEvent]);
+
+  /* ---------- render ---------- */
 
   if (loading) {
     return <Loader label="Loading calendar" size="lg" variant="page" />;
@@ -546,27 +649,25 @@ export default function Calendar() {
     rangeLabel = (
       <>
         {MONTHS[current.getMonth()]}{' '}
-        <span className="font-normal text-[color:var(--text-3)]">{current.getFullYear()}</span>
+        <span className="font-normal text-[color:var(--text-3)]">{year}</span>
       </>
     );
   } else if (view === 'week') {
     const start = startOfWeek(current);
     const end = new Date(start);
     end.setDate(start.getDate() + 6);
-    const short = { month: 'short', day: 'numeric' };
     rangeLabel = (
       <>
-        {start.toLocaleDateString('en-US', short)} – {end.toLocaleDateString('en-US', short)}{' '}
+        {SHORT_FMT.format(start)} – {SHORT_FMT.format(end)}{' '}
         <span className="font-normal text-[color:var(--text-3)]">{end.getFullYear()}</span>
       </>
     );
   } else {
-    rangeLabel = current.toLocaleDateString('en-US', {
-      weekday: 'long', month: 'long', day: 'numeric', year: 'numeric',
-    });
+    rangeLabel = DAY_LONG_FMT.format(current);
   }
 
-  const navNoun = view === 'month' ? 'month' : view === 'week' ? 'week' : 'day';
+  const navNoun = view;
+  const onStageSelect = isManager ? undefined : handleTaskStageSelect;
 
   return (
     <>
@@ -596,7 +697,7 @@ export default function Calendar() {
             ))}
           </div>
           {isManager && (
-            <button type="button" className={btnPrimary()} onClick={() => openNewEvent(null)}>
+            <button type="button" className={btnPrimary()} onClick={handleNewEventClick}>
               <PlusIcon />
               New event
             </button>
@@ -605,7 +706,7 @@ export default function Calendar() {
       </div>
 
       <div className="page-body">
-        {notice && !selectedDay && <Notice onDismiss={() => setNotice('')}>{notice}</Notice>}
+        {notice && !selectedDay && <Notice onDismiss={dismissNotice}>{notice}</Notice>}
 
         {/* Admin (manager): search / filter by any member. Hidden for members. */}
         {isManager && (
@@ -636,19 +737,22 @@ export default function Calendar() {
           ))}
         </ul>
 
-        <div className="overflow-hidden rounded-2xl border border-[color:var(--border)] bg-[var(--bg-2)] shadow-sm">
+        <div
+          aria-busy={busy}
+          className={`overflow-hidden rounded-2xl border border-[color:var(--border)] bg-[var(--bg-2)] shadow-sm transition-opacity duration-150 motion-reduce:transition-none ${busy ? 'opacity-60' : ''}`}
+        >
           <div className="flex items-center justify-between gap-3 border-b border-[color:var(--border)] px-4 py-3">
             <h2 className="m-0 text-base font-semibold tracking-[-0.015em] sm:text-lg" aria-live="polite">
               {rangeLabel}
             </h2>
             <div className="flex shrink-0 items-center gap-1.5">
-              <button type="button" className={iconBtn} onClick={() => shiftCurrent(-1)} aria-label={`Previous ${navNoun}`}>
+              <button type="button" className={iconBtn} onClick={goPrevious} aria-label={`Previous ${navNoun}`}>
                 <ChevronLeft />
               </button>
-              <button type="button" className={btnGhost()} onClick={() => setCurrent(new Date())}>
+              <button type="button" className={btnGhost()} onClick={goToday}>
                 Today
               </button>
-              <button type="button" className={iconBtn} onClick={() => shiftCurrent(1)} aria-label={`Next ${navNoun}`}>
+              <button type="button" className={iconBtn} onClick={goNext} aria-label={`Next ${navNoun}`}>
                 <ChevronRight />
               </button>
             </div>
@@ -663,60 +767,50 @@ export default function Calendar() {
               getItemsForDate={getItemsForDate}
               onDayClick={setSelectedDay}
               isManager={isManager}
-              // Managers edit straight away; everyone else gets the read-only day modal.
-              onClickEvent={(item) => (isManager ? openEdit(item) : setSelectedDay(item.date))}
-              onClickTimeSlot={(date, hour) => openNewEvent(date, hour)}
+              onClickEvent={handleWeekEventClick}
+              onClickTimeSlot={openNewEvent}
             />
           )}
           {view === 'day' && (
             <DayView
-              items={sortDayItems(getItemsForDate(current))}
+              items={dayViewItems}
               isManager={isManager}
               onEdit={openEdit}
               onDelete={handleDelete}
               onOpenTask={openTask}
-              onStageSelect={isManager ? undefined : handleTaskStageSelect}
+              onStageSelect={onStageSelect}
             />
           )}
         </div>
       </div>
 
-      {/* Day drill-down. Hidden while the event form is open, and comes back afterwards. */}
-      {selectedDay && !showModal && !timeTakenModal.show && (
+      {/* Day drill-down. Hidden while another modal is open, and comes back afterwards. */}
+      {selectedDay && !formModal && !timeTakenTask && (
         <DayModal
           date={selectedDay}
-          items={sortDayItems(getItemsForDate(selectedDay))}
+          items={selectedItems}
           isManager={isManager}
-          onClose={() => setSelectedDay(null)}
+          onClose={closeDay}
           onShiftDay={shiftSelectedDay}
-          onAdd={() => openNewEvent(selectedDay)}
+          onAdd={addOnSelectedDay}
           onOpenTask={openTask}
-          onStageSelect={isManager ? undefined : handleTaskStageSelect}
+          onStageSelect={onStageSelect}
           notice={notice}
           onEdit={openEdit}
           onDelete={handleDelete}
         />
       )}
 
-      {timeTakenModal.show && (
-        <Modal title="Time taken" onClose={closeTimeTakenModal}>
-          <TimeTakenForm
-            task={timeTakenModal.task}
-            value={timeTakenInput}
-            error={timeTakenError}
-            onChange={(value) => { setTimeTakenInput(value); setTimeTakenError(''); }}
-            onSubmit={handleTimeTakenSubmit}
-            onCancel={closeTimeTakenModal}
-          />
-        </Modal>
+      {timeTakenTask && (
+        <TimeTakenModal task={timeTakenTask} onClose={closeTimeTaken} onConfirm={confirmTimeTaken} />
       )}
 
-      {showModal && (
-        <Modal title={editing?.id ? 'Edit event' : 'New event'} onClose={closeForm}>
+      {formModal && (
+        <Modal title={formModal.editing?.id ? 'Edit event' : 'New event'} onClose={closeForm}>
           <EventForm
-            initial={editing}
-            prefillStart={prefillStart}
-            members={members.filter((member) => member.active !== false)}
+            initial={formModal.editing}
+            prefillStart={formModal.prefillStart}
+            members={activeMembers}
             onSave={handleSave}
             saving={saving}
             error={formError}
@@ -732,12 +826,13 @@ export default function Calendar() {
         confirmText={confirmModal.isDangerous ? 'Delete' : 'Confirm'}
         isDangerous={confirmModal.isDangerous}
         onConfirm={executeConfirmAction}
-        onCancel={() => setConfirmModal(EMPTY_CONFIRM)}
+        onCancel={closeConfirm}
         loading={confirmModal.loading}
       />
     </>
   );
 }
+
 
 /* ------------------------------------------------------------------ */
 /* Project filter                                                      */
@@ -745,47 +840,33 @@ export default function Calendar() {
 
 // Multi-select dropdown for filtering by project (members and admins).
 // Nothing selected = every project. Selected projects also show as removable chips.
-function ProjectFilterBar({ projects, selectedIds, onChange }) {
+const ProjectFilterBar = memo(function ProjectFilterBar({ projects, selectedIds, onChange }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const rootRef = useRef(null);
 
-  // Close on outside click / Escape.
-  useEffect(() => {
-    if (!open) return undefined;
-
-    const handlePointerDown = (event) => {
-      if (rootRef.current && !rootRef.current.contains(event.target)) setOpen(false);
-    };
-    const handleKeyDown = (event) => {
-      if (event.key === 'Escape') setOpen(false);
-    };
-
-    document.addEventListener('mousedown', handlePointerDown);
-    document.addEventListener('keydown', handleKeyDown);
-    return () => {
-      document.removeEventListener('mousedown', handlePointerDown);
-      document.removeEventListener('keydown', handleKeyDown);
-    };
-  }, [open]);
+  const close = useCallback(() => setOpen(false), []);
+  useDismiss(open, rootRef, close);
 
   useEffect(() => {
     if (!open) setQuery('');
   }, [open]);
 
-  const toggle = (id) => {
-    onChange(
-      selectedIds.includes(id)
-        ? selectedIds.filter((selectedId) => selectedId !== id)
-        : [...selectedIds, id],
-    );
-  };
+  const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
 
-  const selectedProjects = projects.filter((project) => selectedIds.includes(project.id));
-  const normalizedQuery = query.trim().toLowerCase();
-  const filteredProjects = normalizedQuery
-    ? projects.filter((project) => project.name.toLowerCase().includes(normalizedQuery))
-    : projects;
+  const toggle = (id) => {
+    onChange(selectedSet.has(id) ? selectedIds.filter((selectedId) => selectedId !== id) : [...selectedIds, id]);
+  };
+  const clear = () => onChange([]);
+
+  const selectedProjects = useMemo(
+    () => projects.filter((project) => selectedSet.has(project.id)),
+    [projects, selectedSet],
+  );
+  const filteredProjects = useMemo(() => {
+    const normalized = query.trim().toLowerCase();
+    return normalized ? projects.filter((project) => project.name.toLowerCase().includes(normalized)) : projects;
+  }, [projects, query]);
 
   return (
     <div ref={rootRef} className="relative mb-4 flex flex-wrap items-center gap-2">
@@ -836,7 +917,7 @@ function ProjectFilterBar({ projects, selectedIds, onChange }) {
       {selectedIds.length > 0 && (
         <button
           type="button"
-          onClick={() => onChange([])}
+          onClick={clear}
           className="text-xs font-semibold text-[var(--text-3)] underline-offset-2 hover:text-[var(--accent)] hover:underline"
         >
           Clear all
@@ -862,7 +943,7 @@ function ProjectFilterBar({ projects, selectedIds, onChange }) {
               <li className="px-3 py-6 text-center text-[13px] text-[var(--text-3)]">No projects found</li>
             ) : (
               filteredProjects.map((project) => {
-                const checked = selectedIds.includes(project.id);
+                const checked = selectedSet.has(project.id);
                 return (
                   <li key={project.id} role="option" aria-selected={checked}>
                     <label className="flex cursor-pointer items-center gap-3 rounded-md px-3 py-2 text-[13px] text-[var(--text)] hover:bg-[var(--bg-3)]">
@@ -883,7 +964,7 @@ function ProjectFilterBar({ projects, selectedIds, onChange }) {
           <div className="flex items-center justify-between border-t border-[var(--border)] px-3 py-2">
             <button
               type="button"
-              onClick={() => onChange([])}
+              onClick={clear}
               disabled={selectedIds.length === 0}
               className="text-xs font-semibold text-[var(--text-2)] hover:text-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:text-[var(--text-2)]"
             >
@@ -891,7 +972,7 @@ function ProjectFilterBar({ projects, selectedIds, onChange }) {
             </button>
             <button
               type="button"
-              onClick={() => setOpen(false)}
+              onClick={close}
               className="rounded-md bg-[var(--accent)] px-3 py-1 text-xs font-semibold text-white hover:opacity-90"
             >
               Done
@@ -901,24 +982,88 @@ function ProjectFilterBar({ projects, selectedIds, onChange }) {
       )}
     </div>
   );
-}
+});
 
 /* ------------------------------------------------------------------ */
 /* Month view                                                          */
 /* ------------------------------------------------------------------ */
 
-function MonthView({ current, getItemsForDate, onDayClick }) {
+// One day in the grid. Memoized: `items` is a stable array from the date map,
+// so only cells whose data actually changed re-render.
+const DayCell = memo(function DayCell({ date, items, isToday, onDayClick }) {
+  const visible = items.slice(0, 3);
+  const dots = items.slice(0, 4);
+
+  return (
+    <button
+      type="button"
+      onClick={() => onDayClick(date)}
+      aria-label={`${CELL_LABEL_FMT.format(date)}, ${pluralItems(items.length)}`}
+      className={[
+        'flex min-h-16 min-w-0 flex-col items-stretch gap-1 bg-[var(--bg-2)] p-1.5 text-left sm:min-h-28 sm:p-2',
+        'transition-colors duration-150 motion-reduce:transition-none hover:bg-[var(--bg-3)]',
+        'focus-visible:relative focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[color:var(--accent)]',
+      ].join(' ')}
+    >
+      <span
+        className={[
+          'grid h-6 w-6 place-items-center rounded-full text-xs tabular-nums',
+          isToday ? 'bg-[var(--accent)] font-semibold text-white' : 'text-[color:var(--text)]',
+        ].join(' ')}
+      >
+        {date.getDate()}
+      </span>
+
+      {/* Full pills on larger screens */}
+      {visible.map((item, index) => (
+        <span
+          key={itemKey(item, index)}
+          title={formatCellLabel(item)}
+          className={`hidden truncate rounded px-1.5 py-0.5 text-[10px] font-semibold sm:block ${TYPES[item.itemType].tint}`}
+        >
+          {formatCellLabel(item)}
+        </span>
+      ))}
+      {items.length > 3 && (
+        <span className="hidden px-1 text-[10px] text-[color:var(--text-3)] sm:block">
+          +{items.length - 3} more
+        </span>
+      )}
+
+      {/* Compact dots on narrow screens */}
+      {items.length > 0 && (
+        <span className="flex flex-wrap items-center gap-1 sm:hidden">
+          {dots.map((item, index) => (
+            <span
+              key={`dot-${itemKey(item, index)}`}
+              className={`h-1.5 w-1.5 rounded-full ${TYPES[item.itemType].dot}`}
+            />
+          ))}
+          {items.length > 4 && (
+            <span className="text-[10px] text-[color:var(--text-3)]">+{items.length - 4}</span>
+          )}
+        </span>
+      )}
+    </button>
+  );
+});
+
+const MonthView = memo(function MonthView({ current, getItemsForDate, onDayClick }) {
   const year = current.getFullYear();
   const month = current.getMonth();
-  const firstDay = new Date(year, month, 1).getDay();
-  const daysInMonth = new Date(year, month + 1, 0).getDate();
-  const today = new Date();
-  const cells = [];
 
-  for (let index = 0; index < firstDay; index += 1) cells.push(null);
-  for (let day = 1; day <= daysInMonth; day += 1) cells.push(new Date(year, month, day));
-  // Fill the last row so the grid always ends on a full week.
-  while (cells.length % 7 !== 0) cells.push(null);
+  const cells = useMemo(() => {
+    const firstDay = new Date(year, month, 1).getDay();
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    const list = [];
+    for (let index = 0; index < firstDay; index += 1) list.push(null);
+    for (let day = 1; day <= daysInMonth; day += 1) list.push(new Date(year, month, day));
+    // Fill the last row so the grid always ends on a full week.
+    while (list.length % 7 !== 0) list.push(null);
+    return list;
+  }, [year, month]);
+
+  const todayKey = dateKey(new Date());
 
   return (
     <div>
@@ -931,101 +1076,73 @@ function MonthView({ current, getItemsForDate, onDayClick }) {
       </div>
 
       <div className="grid grid-cols-7 gap-px bg-[var(--border)]">
-        {cells.map((date, index) => {
-          if (!date) {
-            return <div key={`empty-${index}`} className="min-h-16 bg-[var(--bg-3)] sm:min-h-28" />;
-          }
-
-          const items = getItemsForDate(date);
-          const isToday = date.toDateString() === today.toDateString();
-
-          return (
-            <button
-              key={date.toISOString()}
-              type="button"
-              onClick={() => onDayClick(date)}
-              aria-label={`${date.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}, ${items.length} ${items.length === 1 ? 'item' : 'items'}`}
-              className={[
-                'flex min-h-16 min-w-0 flex-col items-stretch gap-1 bg-[var(--bg-2)] p-1.5 text-left sm:min-h-28 sm:p-2',
-                'transition-colors duration-150 motion-reduce:transition-none hover:bg-[var(--bg-3)]',
-                'focus-visible:relative focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[color:var(--accent)]',
-              ].join(' ')}
-            >
-              <span
-                className={[
-                  'grid h-6 w-6 place-items-center rounded-full text-xs tabular-nums',
-                  isToday
-                    ? 'bg-[var(--accent)] font-semibold text-white'
-                    : 'text-[color:var(--text)]',
-                ].join(' ')}
-              >
-                {date.getDate()}
-              </span>
-
-              {/* Full pills on larger screens */}
-              {items.slice(0, 3).map((item, itemIndex) => (
-                <span
-                  key={`${item.itemType}-${item.id || item.name || itemIndex}`}
-                  title={formatCellLabel(item)}
-                  className={`hidden truncate rounded px-1.5 py-0.5 text-[10px] font-semibold sm:block ${TYPES[item.itemType].tint}`}
-                >
-                  {formatCellLabel(item)}
-                </span>
-              ))}
-              {items.length > 3 && (
-                <span className="hidden px-1 text-[10px] text-[color:var(--text-3)] sm:block">
-                  +{items.length - 3} more
-                </span>
-              )}
-
-              {/* Compact dots on narrow screens */}
-              {items.length > 0 && (
-                <span className="flex flex-wrap items-center gap-1 sm:hidden">
-                  {items.slice(0, 4).map((item, itemIndex) => (
-                    <span
-                      key={`dot-${item.itemType}-${item.id || item.name || itemIndex}`}
-                      className={`h-1.5 w-1.5 rounded-full ${TYPES[item.itemType].dot}`}
-                    />
-                  ))}
-                  {items.length > 4 && (
-                    <span className="text-[10px] text-[color:var(--text-3)]">+{items.length - 4}</span>
-                  )}
-                </span>
-              )}
-            </button>
-          );
-        })}
+        {cells.map((date, index) =>
+          date ? (
+            <DayCell
+              key={date.getTime()}
+              date={date}
+              items={getItemsForDate(date)}
+              isToday={dateKey(date) === todayKey}
+              onDayClick={onDayClick}
+            />
+          ) : (
+            <div key={`empty-${index}`} className="min-h-16 bg-[var(--bg-3)] sm:min-h-28" />
+          ),
+        )}
       </div>
     </div>
   );
-}
+});
 
 /* ------------------------------------------------------------------ */
 /* Week view                                                           */
 /* ------------------------------------------------------------------ */
 
-function WeekView({ current, getItemsForDate, onDayClick, isManager, onClickEvent, onClickTimeSlot }) {
+const WeekView = memo(function WeekView({ current, getItemsForDate, onDayClick, isManager, onClickEvent, onClickTimeSlot }) {
   const scrollRef = useRef(null);
 
-  // Start the scroll at 08:00 instead of midnight.
+  // Start the scroll at 08:00 (rows are h-[52px]) instead of midnight.
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = 8 * 52;
   }, []);
 
-  const today = new Date();
-  const start = startOfWeek(current);
-  const days = Array.from({ length: 7 }, (_, index) => {
-    const date = new Date(start);
-    date.setDate(start.getDate() + index);
-    return date;
-  });
-  const itemsByDay = days.map((date) => getItemsForDate(date));
-  const allDayByDay = itemsByDay.map((list) => list.filter((item) => item.itemType !== 'event'));
-  const hasAllDay = allDayByDay.some((list) => list.length > 0);
+  const weekStart = startOfWeek(current).getTime();
 
-  const eventsAt = (list, hour) =>
-    list.filter((item) => item.itemType === 'event' && item.date.getHours() === hour);
+  // Everything the grid needs, computed once per week / data change.
+  const { days, allDayByDay, eventsBySlot, hasAllDay } = useMemo(() => {
+    const start = new Date(weekStart);
+    const weekDays = Array.from({ length: 7 }, (_, index) => {
+      const date = new Date(start);
+      date.setDate(start.getDate() + index);
+      return date;
+    });
 
+    const allDay = [];
+    const slots = new Map();
+    weekDays.forEach((date, dayIndex) => {
+      const list = [];
+      getItemsForDate(date).forEach((item) => {
+        if (item.itemType !== 'event') {
+          list.push(item);
+          return;
+        }
+        const key = `${dayIndex}-${item.date.getHours()}`;
+        const bucket = slots.get(key);
+        if (bucket) bucket.push(item);
+        else slots.set(key, [item]);
+      });
+      allDay.push(list);
+    });
+
+    return {
+      days: weekDays,
+      allDayByDay: allDay,
+      eventsBySlot: slots,
+      hasAllDay: allDay.some((list) => list.length > 0),
+    };
+  }, [weekStart, getItemsForDate]);
+
+  const todayKey = dateKey(new Date());
   const cellBorder = 'border-b border-r border-[color:var(--border)]';
 
   return (
@@ -1033,10 +1150,10 @@ function WeekView({ current, getItemsForDate, onDayClick, isManager, onClickEven
       <div className="grid min-w-[44rem] grid-cols-[3.5rem_repeat(7,minmax(5.5rem,1fr))]">
         <div className={`sticky left-0 top-0 z-30 bg-[var(--bg-2)] ${cellBorder}`} />
         {days.map((date, dayIndex) => {
-          const isToday = date.toDateString() === today.toDateString();
+          const isToday = dateKey(date) === todayKey;
           return (
             <button
-              key={`header-${date.toISOString()}`}
+              key={`header-${date.getTime()}`}
               type="button"
               onClick={() => onDayClick(date)}
               className={`sticky top-0 z-20 flex flex-col items-center gap-1 bg-[var(--bg-2)] py-2.5 transition-colors duration-150 hover:bg-[var(--bg-3)] motion-reduce:transition-none ${cellBorder} ${focusRing}`}
@@ -1064,14 +1181,14 @@ function WeekView({ current, getItemsForDate, onDayClick, isManager, onClickEven
               const list = allDayByDay[dayIndex];
               return (
                 <button
-                  key={`allday-${date.toISOString()}`}
+                  key={`allday-${date.getTime()}`}
                   type="button"
                   onClick={() => onDayClick(date)}
                   className={`flex min-h-9 min-w-0 flex-col gap-1 bg-[var(--bg-2)] p-1 text-left transition-colors duration-150 hover:bg-[var(--bg-3)] motion-reduce:transition-none ${cellBorder} ${focusRing}`}
                 >
-                  {list.slice(0, 2).map((item, itemIndex) => (
+                  {list.slice(0, 2).map((item, index) => (
                     <span
-                      key={`${item.itemType}-${item.id || item.name || itemIndex}`}
+                      key={itemKey(item, index)}
                       title={formatCellLabel(item)}
                       className={`truncate rounded px-1.5 py-0.5 text-[10px] font-semibold ${TYPES[item.itemType].tint}`}
                     >
@@ -1093,10 +1210,10 @@ function WeekView({ current, getItemsForDate, onDayClick, isManager, onClickEven
               {String(hour).padStart(2, '0')}:00
             </div>
             {days.map((date, dayIndex) => {
-              const slotEvents = eventsAt(itemsByDay[dayIndex], hour);
+              const slotEvents = eventsBySlot.get(`${dayIndex}-${hour}`);
               return (
                 <div
-                  key={`slot-${date.toISOString()}-${hour}`}
+                  key={`slot-${date.getTime()}-${hour}`}
                   onClick={isManager ? () => onClickTimeSlot(date, hour) : undefined}
                   className={[
                     'relative h-[52px] min-w-0 bg-[var(--bg-2)] p-0.5',
@@ -1104,7 +1221,7 @@ function WeekView({ current, getItemsForDate, onDayClick, isManager, onClickEven
                     isManager ? 'cursor-pointer transition-colors duration-150 hover:bg-[var(--bg-3)] motion-reduce:transition-none' : '',
                   ].join(' ')}
                 >
-                  {slotEvents.map((event, index) => (
+                  {slotEvents?.map((event, index) => (
                     <button
                       key={`${event.id}-${index}`}
                       type="button"
@@ -1126,7 +1243,7 @@ function WeekView({ current, getItemsForDate, onDayClick, isManager, onClickEven
       </div>
     </div>
   );
-}
+});
 
 /* ------------------------------------------------------------------ */
 /* Stage dropdown (members)                                            */
@@ -1137,31 +1254,17 @@ function WeekView({ current, getItemsForDate, onDayClick, isManager, onClickEven
 const QUICK_STAGES = ['Todo', 'In Progress', 'In Review'];
 const STAGE_DOT = { todo: 'bg-[#a78bfa]', inprogress: 'bg-[#f59e0b]', inreview: 'bg-[#3b82f6]' };
 
-function StageDropdown({ task, onChange }) {
+const StageDropdown = memo(function StageDropdown({ task, onChange }) {
   const [open, setOpen] = useState(false);
   const [dropUp, setDropUp] = useState(false);
   const ref = useRef(null);
   const buttonRef = useRef(null);
 
-  useEffect(() => {
-    if (!open) return undefined;
-    const handlePointerDown = (event) => {
-      if (ref.current && !ref.current.contains(event.target)) setOpen(false);
-    };
-    // Escape closes just the menu (captured so it doesn't also close the day modal).
-    const handleKeyDown = (event) => {
-      if (event.key !== 'Escape') return;
-      event.stopPropagation();
-      setOpen(false);
-      buttonRef.current?.focus();
-    };
-    document.addEventListener('mousedown', handlePointerDown);
-    document.addEventListener('keydown', handleKeyDown, true);
-    return () => {
-      document.removeEventListener('mousedown', handlePointerDown);
-      document.removeEventListener('keydown', handleKeyDown, true);
-    };
-  }, [open]);
+  const close = useCallback((viaEscape) => {
+    setOpen(false);
+    if (viaEscape === true) buttonRef.current?.focus();
+  }, []);
+  useDismiss(open, ref, close, { captureEscape: true });
 
   const toggle = () => {
     if (!open && buttonRef.current) {
@@ -1212,14 +1315,14 @@ function StageDropdown({ task, onChange }) {
       )}
     </div>
   );
-}
+});
 
 /* ------------------------------------------------------------------ */
 /* Item row, day modal, day view                                       */
 /* ------------------------------------------------------------------ */
 
 // One row in a day's list. Shared by the day modal and the Day tab so both behave the same.
-function ItemRow({ item, isManager, onEdit, onDelete, onOpenTask, onStageSelect, roomy = false }) {
+const ItemRow = memo(function ItemRow({ item, isManager, onEdit, onDelete, onOpenTask, onStageSelect, roomy = false }) {
   const type = TYPES[item.itemType];
   const meta = formatDayMeta(item);
   const isEditable = isManager && item.itemType === 'event';
@@ -1296,18 +1399,11 @@ function ItemRow({ item, isManager, onEdit, onDelete, onOpenTask, onStageSelect,
       </div>
     </div>
   );
-}
+});
 
-function DayModal({ date, items, isManager, onClose, onShiftDay, onAdd, onEdit, onDelete, onOpenTask, onStageSelect, notice }) {
-  const title = date.toLocaleDateString('en-US', {
-    weekday: 'long',
-    month: 'long',
-    day: 'numeric',
-    year: 'numeric',
-  });
-  const summary = items.length === 0
-    ? 'Nothing scheduled'
-    : `${items.length} ${items.length === 1 ? 'item' : 'items'}`;
+const DayModal = memo(function DayModal({ date, items, isManager, onClose, onShiftDay, onAdd, onEdit, onDelete, onOpenTask, onStageSelect, notice }) {
+  const title = DAY_LONG_FMT.format(date);
+  const summary = items.length === 0 ? 'Nothing scheduled' : pluralItems(items.length);
 
   return (
     <Modal title={title} onClose={onClose}>
@@ -1332,7 +1428,7 @@ function DayModal({ date, items, isManager, onClose, onShiftDay, onAdd, onEdit, 
         <div className="flex max-h-[55vh] flex-col gap-2 overflow-y-auto pr-0.5">
           {items.map((item, index) => (
             <ItemRow
-              key={`${item.itemType}-${item.id || item.name || index}`}
+              key={itemKey(item, index)}
               item={item}
               isManager={isManager}
               onEdit={onEdit}
@@ -1357,9 +1453,9 @@ function DayModal({ date, items, isManager, onClose, onShiftDay, onAdd, onEdit, 
       </div>
     </Modal>
   );
-}
+});
 
-function DayView({ items, isManager, onEdit, onDelete, onOpenTask, onStageSelect }) {
+const DayView = memo(function DayView({ items, isManager, onEdit, onDelete, onOpenTask, onStageSelect }) {
   return (
     <div className="min-h-72 p-4 sm:p-6">
       {items.length === 0 ? (
@@ -1371,7 +1467,7 @@ function DayView({ items, isManager, onEdit, onDelete, onOpenTask, onStageSelect
         <div className="flex flex-col gap-2">
           {items.map((item, index) => (
             <ItemRow
-              key={`${item.itemType}-${item.id || item.name || index}`}
+              key={itemKey(item, index)}
               item={item}
               isManager={isManager}
               onEdit={onEdit}
@@ -1385,47 +1481,68 @@ function DayView({ items, isManager, onEdit, onDelete, onOpenTask, onStageSelect
       )}
     </div>
   );
-}
+});
+
 
 /* ------------------------------------------------------------------ */
 /* Forms                                                               */
 /* ------------------------------------------------------------------ */
 
-function TimeTakenForm({ task, value, error, onChange, onSubmit, onCancel }) {
+// Owns its input state, so typing never re-renders the calendar behind it.
+function TimeTakenModal({ task, onClose, onConfirm }) {
   const uid = useId();
+  const [value, setValue] = useState('');
+  const [error, setError] = useState('');
+
+  const handleSubmit = (event) => {
+    event.preventDefault();
+    const minutes = parseInt(value, 10);
+    if (!minutes || minutes <= 0) {
+      setError('Enter the time taken in minutes.');
+      return;
+    }
+    onConfirm(task, minutes);
+  };
+
   return (
-    <form noValidate onSubmit={onSubmit} className="flex flex-col gap-4">
-      <p className="m-0 text-[13px] leading-relaxed text-[color:var(--text-2)]">
-        Moving <strong className="text-[color:var(--text)]">{task?.displayTitle}</strong> to{' '}
-        <strong className="text-[color:var(--text)]">In Review</strong>. How long did this task take?
-      </p>
-      <div>
-        <label htmlFor={`${uid}-minutes`} className={labelCls}>
-          Time taken (minutes)
-          <span className="ml-0.5 text-[color:var(--danger)]" aria-hidden="true">*</span>
-        </label>
-        <input
-          id={`${uid}-minutes`}
-          className={inputCls}
-          type="number"
-          inputMode="numeric"
-          min="1"
-          value={value}
-          onChange={(event) => onChange(event.target.value)}
-          placeholder="e.g. 45"
-          autoFocus
-          aria-invalid={!!error}
-          aria-describedby={error ? `${uid}-error` : undefined}
-        />
-        <FieldError id={`${uid}-error`}>{error}</FieldError>
-      </div>
-      <div className="flex justify-end gap-2">
-        <button type="button" className={btnGhost()} onClick={onCancel}>Cancel</button>
-        <button type="submit" className={btnPrimary()}>Confirm and move</button>
-      </div>
-    </form>
+    <Modal title="Time taken" onClose={onClose}>
+      <form noValidate onSubmit={handleSubmit} className="flex flex-col gap-4">
+        <p className="m-0 text-[13px] leading-relaxed text-[color:var(--text-2)]">
+          Moving <strong className="text-[color:var(--text)]">{task?.displayTitle}</strong> to{' '}
+          <strong className="text-[color:var(--text)]">In Review</strong>. How long did this task take?
+        </p>
+        <div>
+          <label htmlFor={`${uid}-minutes`} className={labelCls}>
+            Time taken (minutes)
+            <span className="ml-0.5 text-[color:var(--danger)]" aria-hidden="true">*</span>
+          </label>
+          <input
+            id={`${uid}-minutes`}
+            className={inputCls}
+            type="number"
+            inputMode="numeric"
+            min="1"
+            value={value}
+            onChange={(event) => {
+              setValue(event.target.value);
+              setError('');
+            }}
+            placeholder="e.g. 45"
+            autoFocus
+            aria-invalid={!!error}
+            aria-describedby={error ? `${uid}-error` : undefined}
+          />
+          <FieldError id={`${uid}-error`}>{error}</FieldError>
+        </div>
+        <div className="flex justify-end gap-2">
+          <button type="button" className={btnGhost()} onClick={onClose}>Cancel</button>
+          <button type="submit" className={btnPrimary()}>Confirm and move</button>
+        </div>
+      </form>
+    </Modal>
   );
 }
+
 
 const pad2 = (n) => String(n).padStart(2, '0');
 
@@ -1475,7 +1592,7 @@ function SectionTitle({ children, hint }) {
 }
 
 // Checkbox-style row used for "All members" and for each member.
-function PersonRow({ checked, indeterminate = false, onChange, inputRef, avatar, tint, children, strong = false }) {
+const PersonRow = memo(function PersonRow({ value, checked, indeterminate = false, onToggle, inputRef, avatar, tint, children, strong = false }) {
   return (
     <label className="relative block cursor-pointer">
       <input
@@ -1483,7 +1600,7 @@ function PersonRow({ checked, indeterminate = false, onChange, inputRef, avatar,
         type="checkbox"
         className="peer sr-only"
         checked={checked}
-        onChange={onChange}
+        onChange={() => onToggle(value)}
       />
       <span
         className={[
@@ -1516,7 +1633,8 @@ function PersonRow({ checked, indeterminate = false, onChange, inputRef, avatar,
       </span>
     </label>
   );
-}
+});
+
 
 function EventForm({ initial, prefillStart = '', members, onSave, onCancel, saving = false, error = '' }) {
   const uid = useId();
@@ -1534,14 +1652,18 @@ function EventForm({ initial, prefillStart = '', members, onSave, onCancel, savi
   const id = (name) => `${uid}-${name}`;
   const isBirthday = form.type === 'birthday';
 
-  const setField = (key, value) => {
+  const setField = useCallback((key, value) => {
     setForm((previous) => ({ ...previous, [key]: value }));
     setErrors((previous) => (previous[key] ? { ...previous, [key]: '' } : previous));
-  };
+  }, []);
 
   /* ---------- members ---------- */
 
-  const selectedCount = members.filter((member) => form.member_ids.includes(member.id)).length;
+  const selectedIds = useMemo(() => new Set(form.member_ids), [form.member_ids]);
+  const selectedCount = useMemo(
+    () => members.reduce((count, member) => count + (selectedIds.has(member.id) ? 1 : 0), 0),
+    [members, selectedIds],
+  );
   const allSelected = members.length > 0 && selectedCount === members.length;
   const someSelected = selectedCount > 0 && !allSelected;
 
@@ -1550,18 +1672,22 @@ function EventForm({ initial, prefillStart = '', members, onSave, onCancel, savi
     if (allRef.current) allRef.current.indeterminate = someSelected;
   }, [someSelected]);
 
-  const toggleAll = () => {
-    setField('member_ids', allSelected ? [] : members.map((member) => member.id));
-  };
+  const toggleAll = useCallback(() => {
+    setForm((previous) => {
+      const chosen = new Set(previous.member_ids);
+      const everyone = members.length > 0 && members.every((member) => chosen.has(member.id));
+      return { ...previous, member_ids: everyone ? [] : members.map((member) => member.id) };
+    });
+  }, [members]);
 
-  const toggleMember = (memberId) => {
-    setField(
-      'member_ids',
-      form.member_ids.includes(memberId)
-        ? form.member_ids.filter((current) => current !== memberId)
-        : [...form.member_ids, memberId],
-    );
-  };
+  const toggleMember = useCallback((memberId) => {
+    setForm((previous) => ({
+      ...previous,
+      member_ids: previous.member_ids.includes(memberId)
+        ? previous.member_ids.filter((current) => current !== memberId)
+        : [...previous.member_ids, memberId],
+    }));
+  }, []);
 
   const showSearch = members.length > 6;
   const filteredMembers = useMemo(() => {
@@ -1811,7 +1937,7 @@ function EventForm({ initial, prefillStart = '', members, onSave, onCancel, savi
                 inputRef={allRef}
                 checked={allSelected}
                 indeterminate={someSelected}
-                onChange={toggleAll}
+                onToggle={toggleAll}
                 avatar="All"
                 tint="bg-[var(--accent)] text-white"
                 strong
@@ -1848,8 +1974,9 @@ function EventForm({ initial, prefillStart = '', members, onSave, onCancel, savi
                 filteredMembers.map((member) => (
                   <PersonRow
                     key={member.id}
-                    checked={form.member_ids.includes(member.id)}
-                    onChange={() => toggleMember(member.id)}
+                    value={member.id}
+                    checked={selectedIds.has(member.id)}
+                    onToggle={toggleMember}
                     avatar={member.name?.charAt(0)}
                     tint={avatarTint(member.name)}
                   >

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import api from "../api/client";
 import { useAuth } from "../context/AuthContext";
@@ -9,12 +9,13 @@ import ConfirmModal from "../components/ui/ConfirmModal";
 import TaskForm from "../components/tasks/TaskForm";
 import Loader from "../components/ui/Loader";
 
-const PRIORITY_COLORS = {
-  low: "var(--accent)",
-  medium: "var(--warning)",
-  high: "var(--danger)",
-  critical: "var(--critical)",
-};
+/* ===========================================================================
+ * Constants & helpers
+ * ========================================================================= */
+
+const DEFAULT_STAGES = ["Todo", "In Progress", "In Review", "Done"];
+const EMPTY = [];
+const REFRESH_FAILED = "We couldn't refresh this task. Reload the page to see the latest.";
 
 const STAGE_DOT_COLORS = {
   Todo: "#a78bfa",
@@ -23,261 +24,150 @@ const STAGE_DOT_COLORS = {
   Done: "#10b981",
 };
 
-const stageColor = (s) => STAGE_DOT_COLORS[s] || "var(--accent)";
-const initials = (name) => (name || "?").trim().charAt(0).toUpperCase();
-
-const CLOSED_CONFIRM = {
-  show: false,
-  title: "",
-  message: "",
-  action: null,
-  loading: false,
-  isDangerous: false,
+// Full class literals so Tailwind's scanner can see them.
+const PRIORITY_RAIL = {
+  low: "before:bg-[color:var(--accent)]",
+  medium: "before:bg-[color:var(--warning)]",
+  high: "before:bg-[color:var(--danger)]",
+  critical: "before:bg-[color:var(--critical)]",
 };
 
-const STYLES = `
-.td-grid { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 20px; align-items: start; }
-.td-col { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
-@media (max-width: 900px) { .td-grid { grid-template-columns: 1fr; } }
-@media (max-width: 640px) {
-  .page-header { padding-left: 16px !important; padding-right: 16px !important; }
-  .page-body { padding-left: 16px !important; padding-right: 16px !important; }
-}
+const cx = (...parts) => parts.filter(Boolean).join(" ");
+const initials = (name) => (name || "?").trim().charAt(0).toUpperCase();
+const stageClass = (stage) => stage?.toLowerCase().replace(/\s/g, "");
 
-.td-head-main { min-width: 0; }
-.td-breadcrumb { flex-wrap: wrap; }
-.td-title { font-size: 20px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.3; overflow-wrap: anywhere; text-wrap: balance; }
-.td-header-badges { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+const isAbort = (e) =>
+  e?.code === "ERR_CANCELED" || e?.name === "CanceledError" || e?.name === "AbortError";
 
-/* inline error banner */
-.td-notice {
-  display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;
-  margin-bottom: 16px; padding: 10px 14px; font-size: 13px; line-height: 1.45; border-radius: 8px;
-  color: var(--danger); background: color-mix(in srgb, var(--danger) 9%, var(--bg-2));
-  animation: td-rise .22s ease-out both;
-}
-.td-notice-close { padding: 0 2px; font: inherit; line-height: 1; color: inherit; background: none; border: 0; cursor: pointer; opacity: .7; transition: opacity .15s ease; }
-.td-notice-close:hover { opacity: 1; }
+// `--c` (stage color) style objects are cached so rows don't allocate new ones.
+const stageVarCache = new Map();
+const stageVars = (stage) => {
+  let v = stageVarCache.get(stage);
+  if (!v) {
+    v = { "--c": STAGE_DOT_COLORS[stage] || "var(--accent)" };
+    stageVarCache.set(stage, v);
+  }
+  return v;
+};
 
-.td-panel { padding: 18px 20px; background: var(--bg-2); border: 1px solid var(--border); border-radius: 14px; animation: td-rise .35s cubic-bezier(.22,1,.36,1) both; animation-delay: calc(var(--n, 0) * 45ms); }
-.td-col > :nth-child(2) { --n: 1; }
-.td-col > :nth-child(3) { --n: 2; }
-.td-col > :nth-child(4) { --n: 3; }
-.td-col > :nth-child(5) { --n: 4; }
-/* keep an open stage menu above the panels below it */
-.td-panel:has(.td-menu) { position: relative; z-index: 5; }
-.td-panel-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
-.td-panel-head + .td-hint { margin-top: -4px; }
-.td-h { margin: 0; display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; color: var(--text); }
-.td-count { padding: 1px 7px; font-size: 11px; font-weight: 600; border-radius: 6px; color: var(--text-3); background: var(--bg-4); font-variant-numeric: tabular-nums; }
-.td-hint { margin: 0 0 16px; font-size: 12px; line-height: 1.5; color: var(--text-3); max-width: 60ch; }
-.td-desc { margin: 0; max-width: 68ch; font-size: 14px; line-height: 1.7; color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere; text-wrap: pretty; }
-.td-muted { color: var(--text-3); }
-.td-note { margin: 0; font-size: 13px; color: var(--text-3); }
-.td-composer + .td-note { margin-top: 12px; }
-.td-danger { color: var(--danger); }
-.btn.is-danger { background: var(--danger); border-color: var(--danger); }
+/* ===========================================================================
+ * Styles (Tailwind literals). Keyframes are the only raw CSS; move them to
+ * tailwind.config.js (theme.extend.keyframes) if you prefer zero <style> tags.
+ * ========================================================================= */
 
-.td-panel button:focus-visible, .td-panel a:focus-visible, .td-menu button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-
-/* status stepper */
-.td-steps { display: flex; margin: 0; padding: 0; list-style: none; }
-.td-step { position: relative; flex: 1; display: flex; flex-direction: column; align-items: flex-start; gap: 8px; font-size: 12px; color: var(--text-3); }
-.td-step::before { content: ''; position: absolute; top: 6px; left: 14px; right: -2px; height: 2px; background: var(--bg-4); }
-.td-step:last-child::before { display: none; }
-.td-step.is-past::before { background: var(--c); }
-.td-step-dot { position: relative; z-index: 1; width: 14px; height: 14px; border-radius: 50%; background: var(--bg-2); border: 2px solid var(--bg-4); }
-.td-step.is-past .td-step-dot, .td-step.is-current .td-step-dot { background: var(--c); border-color: var(--c); }
-.td-step.is-current .td-step-dot { box-shadow: 0 0 0 4px color-mix(in srgb, var(--c) 22%, transparent); }
-.td-step.is-current { color: var(--text); font-weight: 600; }
-
-.td-progress { display: flex; align-items: center; gap: 10px; margin-top: 18px; font-size: 12px; color: var(--text-3); font-variant-numeric: tabular-nums; }
-.td-track { flex: 1; height: 5px; border-radius: 999px; background: var(--bg-4); overflow: hidden; }
-.td-fill { height: 100%; width: 100%; border-radius: 999px; background: var(--accent); transform-origin: left center; transition: transform .5s cubic-bezier(.22,1,.36,1); }
-.td-fill.is-complete { background: var(--success, #10b981); }
-
-/* sub tasks */
-.td-sublist { display: flex; flex-direction: column; gap: 8px; }
-.td-sub {
-  position: relative; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px;
-  padding: 12px 14px 12px 18px; background: var(--bg-3); border-radius: 10px; transition: background-color .15s ease;
-}
-.td-sub::before { content: ''; position: absolute; left: 0; top: 10px; bottom: 10px; width: 3px; border-radius: 3px; background: var(--p); }
-.td-sub:hover { background: color-mix(in srgb, var(--bg-3) 70%, var(--bg-4)); }
-.td-sub-main { flex: 1 1 220px; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
-.td-sub-title { font-size: 13px; font-weight: 600; color: var(--text); text-decoration: none; overflow-wrap: anywhere; }
-.td-sub-title:hover { text-decoration: underline; text-underline-offset: 3px; }
-.td-sub-actions { display: flex; gap: 4px; flex-shrink: 0; }
-.td-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; font-size: 12px; color: var(--text-3); }
-.td-who { display: inline-flex; align-items: center; gap: 6px; }
-.td-avatar {
-  flex-shrink: 0; width: 20px; height: 20px; display: inline-flex; align-items: center; justify-content: center;
-  font-size: 10px; font-weight: 600; border-radius: 6px; color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 14%, transparent);
-}
-.td-avatar.lg { width: 30px; height: 30px; font-size: 12px; border-radius: 9px; }
-.td-chip { padding: 1px 7px; font-size: 11px; font-weight: 500; border-radius: 6px; color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); font-variant-numeric: tabular-nums; }
-.td-chip.is-danger { color: var(--danger); background: color-mix(in srgb, var(--danger) 12%, transparent); }
-
-.td-stage-wrap { position: relative; display: inline-block; }
-.td-stage-btn { font: inherit; border: none; cursor: pointer; transition: opacity .15s ease, transform .12s ease; }
-.td-stage-btn:active:not(:disabled):not(.is-static) { transform: scale(.96); }
-.td-stage-btn:disabled { opacity: .7; }
-.td-stage-btn.is-static { cursor: default; }
-.td-menu {
-  position: absolute; top: calc(100% + 6px); left: 0; z-index: 40; min-width: 160px; padding: 4px;
-  background: var(--bg-2); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 12px 32px -12px rgba(15,23,42,.35);
-  transform-origin: top left; animation: td-pop .16s ease-out both;
-}
-.td-menu button {
-  display: flex; align-items: center; gap: 8px; width: 100%; padding: 7px 10px; border: none; border-radius: 6px;
-  background: transparent; color: var(--text); font-size: 12px; text-align: left; cursor: pointer; transition: background-color .15s ease;
-}
-.td-menu button:hover:not([aria-current="true"]) { background: var(--bg-3); }
-.td-menu button[aria-current="true"] { font-weight: 700; color: var(--accent); background: var(--bg-3); cursor: default; }
-.td-dot { width: 8px; height: 8px; flex-shrink: 0; border-radius: 50%; background: var(--c); }
-
-.td-empty { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 28px 16px; text-align: center; border: 1px dashed var(--border); border-radius: 12px; font-size: 13px; color: var(--text-3); }
-.td-empty strong { font-size: 14px; color: var(--text); font-weight: 600; }
-.td-empty .btn { margin-top: 10px; }
-.td-empty-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin-top: 10px; }
-.td-empty-actions .btn { margin-top: 0; }
-
-/* move stage */
-.td-stagebar { display: flex; flex-wrap: wrap; gap: 8px; }
-.td-stagebar + .td-hint { margin: 10px 0 0; }
-.td-stagebar button {
-  display: inline-flex; align-items: center; gap: 8px; padding: 7px 14px; font-size: 12px; font-weight: 500; cursor: pointer;
-  color: var(--text-2); background: var(--bg-2); border: 1px solid var(--border); border-radius: 9px;
-  transition: background-color .2s ease, border-color .2s ease, transform .1s ease;
-}
-.td-stagebar button:hover:not(:disabled) { background: var(--bg-3); }
-.td-stagebar button:active:not(:disabled) { transform: scale(.97); }
-.td-stagebar button:disabled { opacity: .5; cursor: not-allowed; }
-.td-stagebar button[aria-pressed="true"] { color: var(--text); border-color: var(--c); background: color-mix(in srgb, var(--c) 14%, transparent); }
-
-/* comments */
-.td-composer { margin-bottom: 8px; }
-.td-composer-row { display: flex; justify-content: flex-end; margin-top: 8px; }
-.td-comment { display: flex; gap: 12px; padding: 14px 0; border-top: 1px solid var(--border); }
-.td-comment-body { min-width: 0; flex: 1; }
-.td-comment-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; margin-bottom: 4px; }
-.td-comment-head b { font-size: 13px; font-weight: 600; color: var(--text); }
-.td-comment-head time { font-size: 11px; color: var(--text-3); font-variant-numeric: tabular-nums; }
-.td-comment-text { font-size: 13px; line-height: 1.6; color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere; }
-
-/* sidebar */
-.td-dl { margin: 0; }
-.td-dl > div { display: flex; justify-content: space-between; gap: 12px; padding: 9px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
-.td-dl > div:last-child { border-bottom: none; padding-bottom: 0; }
-.td-dl dt { color: var(--text-3); flex-shrink: 0; }
-.td-dl dd { margin: 0; text-align: right; color: var(--text); overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
-.td-dl dd.is-cap { text-transform: capitalize; }
-.td-dl dd.is-overdue { color: var(--danger); font-weight: 600; }
-.td-tl { margin: 0; padding: 0; list-style: none; }
-.td-tl li { position: relative; padding: 0 0 14px 18px; font-size: 12px; overflow-wrap: anywhere; }
-.td-tl li:last-child { padding-bottom: 0; }
-.td-tl li::before { content: ''; position: absolute; left: 0; top: 5px; width: 7px; height: 7px; border-radius: 50%; background: var(--text-3); }
-.td-tl li::after { content: ''; position: absolute; left: 3px; top: 15px; bottom: -3px; width: 1px; background: var(--border); }
-.td-tl li:last-child::after { display: none; }
-.td-tl .who { color: var(--accent); font-weight: 500; }
-.td-tl .what { color: var(--text-2); }
-.td-tl time { display: block; margin-top: 2px; font-size: 11px; color: var(--text-3); font-variant-numeric: tabular-nums; }
-
-/* modals */
-.td-modal-text { margin: 0 0 16px; font-size: 13px; line-height: 1.55; color: var(--text-2); }
-.td-modal-text strong { color: var(--text); }
-.td-choices { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 20px; }
-@media (max-width: 480px) { .td-choices { grid-template-columns: 1fr; } }
-.td-choice {
-  display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 18px 12px; cursor: pointer;
-  color: var(--text); background: var(--bg-2); border: 1.5px solid var(--border); border-radius: 12px;
-  transition: border-color .2s ease, background-color .2s ease, transform .1s ease;
-}
-.td-choice:hover { border-color: var(--text-3); }
-.td-choice:active { transform: scale(.98); }
-.td-choice:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.td-choice b { margin-top: 6px; font-size: 13px; font-weight: 600; }
-.td-choice span { font-size: 11px; color: var(--text-3); }
-.td-choice.is-done[aria-pressed="true"] { border-color: var(--success, #10b981); background: color-mix(in srgb, var(--success, #10b981) 10%, transparent); color: var(--success, #10b981); }
-.td-choice.is-rework[aria-pressed="true"] { border-color: var(--danger); background: color-mix(in srgb, var(--danger) 10%, transparent); color: var(--danger); }
-.td-rework-box { margin-bottom: 16px; padding: 14px; background: var(--bg-3); border: 1px solid var(--border); border-radius: 10px; }
-.td-rework-box .td-hint { margin: 6px 0 0; }
-.td-field-error { margin-top: 6px; font-size: 12px; color: var(--danger); }
-.td-modal-error { margin: -8px 0 14px; font-size: 12px; color: var(--danger); }
-
-/* loading skeleton */
-.td-skel { animation: td-pulse 1.4s ease-in-out infinite; }
-.td-skel-head { width: min(420px, 80%); }
-.td-skel .bar { border-radius: 6px; background: var(--bg-4); }
-.td-bar-sm { height: 10px; width: 40%; margin-bottom: 12px; }
-.td-bar-lg { height: 20px; width: 100%; }
-.td-skel-p1 { height: 120px; }
-.td-skel-p2 { height: 160px; animation-delay: 90ms; }
-.td-skel-p3 { height: 220px; animation-delay: 180ms; }
-.td-skel-side { height: 220px; }
-
-@keyframes td-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .5; } }
+const KEYFRAMES = `
 @keyframes td-rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@keyframes td-ping { 0% { transform: scale(1); opacity: .45; } 80%, 100% { transform: scale(2.6); opacity: 0; } }
 @keyframes td-pop { from { opacity: 0; transform: scale(.96) translateY(-4px); } to { opacity: 1; transform: none; } }
-@media (prefers-reduced-motion: reduce) {
-  .td-fill, .td-sub, .td-choice, .td-stagebar button, .td-stage-btn { transition: none; }
-  .td-skel, .td-panel, .td-notice, .td-menu { animation: none; }
-}
 `;
 
-export default function TaskDetail() {
-  const { id: projectId, taskId } = useParams();
-  const { user, isManager } = useAuth();
+// Layout
+const GRID = "grid grid-cols-1 min-[901px]:grid-cols-[minmax(0,1fr)_340px] gap-6 items-start w-full max-w-[1180px] mx-auto";
+const COL_BASE = "flex flex-col gap-4 min-w-0";
+const COL = `${COL_BASE} [&>:nth-child(2)]:[animation-delay:45ms] [&>:nth-child(3)]:[animation-delay:90ms] [&>:nth-child(4)]:[animation-delay:135ms] [&>:nth-child(5)]:[animation-delay:180ms]`;
+const PAGE_PAD = "max-[640px]:!px-4"; // mobile gutter, same as the old !important overrides
+
+// Panels
+const PANEL =
+  "px-6 py-5 bg-[color:var(--bg-2)] rounded-2xl ring-1 ring-inset ring-[color:color-mix(in_srgb,var(--border)_75%,transparent)] shadow-[0_14px_32px_-24px_rgba(15,23,42,0.32)]";
+const PANEL_ANIM =
+  "[animation:td-rise_.35s_cubic-bezier(.22,1,.36,1)_both] motion-reduce:[animation:none]";
+const PANEL_FOCUS =
+  "[&_button:focus-visible]:[outline:2px_solid_var(--accent)] [&_button:focus-visible]:[outline-offset:2px] [&_a:focus-visible]:[outline:2px_solid_var(--accent)] [&_a:focus-visible]:[outline-offset:2px]";
+const PANEL_HEAD = "flex items-center justify-between gap-2.5 flex-wrap mb-4";
+const PANEL_H = "m-0 flex items-center gap-2 text-sm font-semibold tracking-[-0.01em] text-[color:var(--text)]";
+const HINT = "m-0 max-w-[60ch] text-xs leading-normal text-[color:var(--text-3)]";
+const NOTE = "m-0 text-[13px] text-[color:var(--text-3)]";
+
+// Skeleton
+const SKEL_BAR = "rounded-md bg-[color:var(--bg-4)]";
+const SKEL_PULSE =
+  "animate-pulse [animation-duration:1.4s] [animation-timing-function:ease-in-out] motion-reduce:animate-none";
+
+// Sub tasks
+const SUB =
+  "relative flex items-center justify-between flex-wrap gap-3 py-3 pr-3.5 pl-[18px] bg-[color:var(--bg-3)] rounded-xl transition-[background-color,box-shadow] duration-200 hover:bg-[color:color-mix(in_srgb,var(--bg-3)_70%,var(--bg-4))] hover:shadow-[0_12px_24px_-18px_rgba(15,23,42,0.45)] motion-reduce:transition-none before:content-[''] before:absolute before:left-0 before:top-2.5 before:bottom-2.5 before:w-[3px] before:rounded-[3px]";
+const META = "flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs text-[color:var(--text-3)]";
+const STAGE_BTN =
+  "![font:inherit] !border-0 !cursor-pointer transition-[opacity,transform] duration-150 disabled:opacity-70 motion-reduce:transition-none";
+const MENU =
+  "absolute top-[calc(100%+6px)] left-0 z-40 min-w-[160px] p-1 bg-[color:var(--bg-2)] border border-[color:var(--border)] rounded-[10px] shadow-[0_12px_32px_-12px_rgba(15,23,42,0.35)] origin-top-left [animation:td-pop_.16s_ease-out_both] motion-reduce:[animation:none]";
+const MENU_ITEM =
+  "flex items-center gap-2 w-full px-2.5 py-[7px] border-0 rounded-md bg-transparent text-[color:var(--text)] text-xs text-left cursor-pointer transition-colors duration-150 motion-reduce:transition-none";
+
+const CHIP =
+  "px-[7px] py-px text-[11px] font-medium rounded-md tabular-nums";
+const CHIP_ACCENT =
+  "text-[color:var(--accent)] bg-[color:color-mix(in_srgb,var(--accent)_12%,transparent)]";
+const CHIP_DANGER =
+  "text-[color:var(--danger)] bg-[color:color-mix(in_srgb,var(--danger)_12%,transparent)]";
+
+// Stage bar / steps
+const STAGEBAR_BTN =
+  "inline-flex items-center gap-2 px-3.5 py-2 text-xs font-medium cursor-pointer border border-transparent rounded-lg transition-[background-color,box-shadow,color,transform] duration-200 enabled:active:scale-[0.97] disabled:opacity-50 disabled:cursor-not-allowed motion-reduce:transition-none";
+
+// Review modal choices
+const CHOICES = [
+  {
+    key: "done",
+    title: "Mark as done",
+    hint: "Sub task is completed",
+    on: "border-[color:var(--success,#10b981)] bg-[color:color-mix(in_srgb,var(--success,#10b981)_10%,transparent)] text-[color:var(--success,#10b981)]",
+    icon: <path d="M5 12.5l4.5 4.5L19 7.5" />,
+  },
+  {
+    key: "rework",
+    title: "Send for rework",
+    hint: "Needs more work",
+    on: "border-[color:var(--danger)] bg-[color:color-mix(in_srgb,var(--danger)_10%,transparent)] text-[color:var(--danger)]",
+    icon: (
+      <>
+        <path d="M4 12a8 8 0 1 1 2.5 5.8" />
+        <path d="M4 19v-5h5" />
+      </>
+    ),
+  },
+];
+
+/* ===========================================================================
+ * Data hook
+ * ========================================================================= */
+
+// The task is the only request that MUST succeed. Project and members are
+// best-effort: a member who was assigned a task but is not on the project gets
+// 403 from /projects/:id, and that must not block the task page.
+// Requests are cancelled on navigation/unmount so a slow response for a previous
+// task can never overwrite the current one.
+function useTaskDetail({ taskId, projectId, isManager, onNotice }) {
   const [task, setTask] = useState(null);
+  const [project, setProject] = useState(null);
+  const [members, setMembers] = useState(EMPTY);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null); // null | "notfound" | "failed"
-  const [notice, setNotice] = useState("");
-  const [comment, setComment] = useState("");
-  const [submitting, setSubmitting] = useState(false);
-  const [changingStage, setChangingStage] = useState(null);
-  const [members, setMembers] = useState([]);
-  const [project, setProject] = useState(null);
   const hasLoaded = useRef(false);
+  const fullCtl = useRef(null);
+  const taskCtl = useRef(null);
 
-  const [showSubTaskModal, setShowSubTaskModal] = useState(false);
-  const [editingSubTask, setEditingSubTask] = useState(null);
-  const [savingSubTask, setSavingSubTask] = useState(false);
-  const [confirmModal, setConfirmModal] = useState(CLOSED_CONFIRM);
+  // Latest values without re-creating `load` (and re-fetching) when they change.
+  const ctx = useRef({ projectId, isManager });
+  ctx.current = { projectId, isManager };
 
-  const [timeTakenModal, setTimeTakenModal] = useState({
-    show: false,
-    subtask: null,
-    nextStage: null,
-  });
-  const [timeTakenInput, setTimeTakenInput] = useState("");
-  const [timeTakenError, setTimeTakenError] = useState("");
-  const [timeTakenSaving, setTimeTakenSaving] = useState(false);
+  const load = useCallback(() => {
+    fullCtl.current?.abort();
+    const c = new AbortController();
+    fullCtl.current = c;
+    const { signal } = c;
+    const { projectId: pid, isManager: manager } = ctx.current;
 
-  const [managerReviewModal, setManagerReviewModal] = useState({
-    show: false,
-    subtask: null,
-  });
-  const [reworkDeadline, setReworkDeadline] = useState("");
-  const [reviewAction, setReviewAction] = useState(null);
-  const [reviewSaving, setReviewSaving] = useState(false);
-  const [reviewError, setReviewError] = useState("");
-
-  const [stageLoading, setStageLoading] = useState(null);
-  const [stageDropdown, setStageDropdown] = useState(null);
-
-  // The task is the only request that MUST succeed. Project and members are
-  // best-effort: a member who was assigned a task but is not on the project
-  // gets 403 from /projects/:id, and that must not block the task page.
-  const load = () =>
-    Promise.all([
-      api.get(`/tasks/${taskId}`),
-           isManager
-        ? api.get(`/projects/${projectId}`).catch(() => ({ data: null }))
+    return Promise.all([
+      api.get(`/tasks/${taskId}`, { signal }),
+      manager
+        ? api.get(`/projects/${pid}`, { signal }).catch(() => ({ data: null }))
         : Promise.resolve({ data: null }),
-      api.get("/members").catch(() => ({ data: [] })),
+      api.get("/members", { signal }).catch(() => ({ data: EMPTY })),
     ])
       .then(([t, p, m]) => {
+        if (signal.aborted) return;
         hasLoaded.current = true;
         setLoadError(null);
         setTask(t.data);
@@ -285,6 +175,7 @@ export default function TaskDetail() {
         setMembers(m.data);
       })
       .catch((err) => {
+        if (isAbort(err) || signal.aborted) return;
         const status = err?.response?.status;
         const missing = status === 404 || status === 403;
         if (!hasLoaded.current || missing) {
@@ -292,28 +183,914 @@ export default function TaskDetail() {
           setLoadError(missing ? "notfound" : "failed");
         } else {
           // A refresh failed after a successful first load — keep the page.
-          setNotice("We couldn't refresh this task. Reload the page to see the latest.");
+          onNotice(REFRESH_FAILED);
         }
       })
-      .finally(() => setLoading(false));
+      .finally(() => {
+        if (fullCtl.current === c) setLoading(false);
+      });
+  }, [taskId, onNotice]);
 
-  const loadTaskOnly = () =>
-    api
-      .get(`/tasks/${taskId}`)
-      .then((r) => setTask(r.data))
-      .catch(() =>
-        setNotice("We couldn't refresh this task. Reload the page to see the latest."),
-      );
+  const loadTaskOnly = useCallback(() => {
+    taskCtl.current?.abort();
+    const c = new AbortController();
+    taskCtl.current = c;
 
-  // After changing a sub task (or the task itself), refresh only what changed.
-  const refreshFor = (subtask) =>
-    String(subtask.id) === String(taskId) ? load() : loadTaskOnly();
+    return api
+      .get(`/tasks/${taskId}`, { signal: c.signal })
+      .then((r) => {
+        if (!c.signal.aborted) setTask(r.data);
+      })
+      .catch((e) => {
+        if (!isAbort(e)) onNotice(REFRESH_FAILED);
+      });
+  }, [taskId, onNotice]);
 
   useEffect(() => {
     hasLoaded.current = false;
     setLoading(true);
     load();
-  }, [taskId]);
+    return () => {
+      fullCtl.current?.abort();
+      taskCtl.current?.abort();
+      fullCtl.current = null;
+      taskCtl.current = null;
+    };
+  }, [load]);
+
+  const retry = useCallback(() => {
+    setLoadError(null);
+    setLoading(true);
+    load();
+  }, [load]);
+
+  return { task, project, members, loading, loadError, load, loadTaskOnly, retry };
+}
+
+/* ===========================================================================
+ * Small shared components
+ * ========================================================================= */
+
+const Avatar = memo(function Avatar({ name, large }) {
+  return (
+    <span
+      className={cx(
+        "shrink-0 inline-flex items-center justify-center font-semibold text-[color:var(--accent)] bg-[color:color-mix(in_srgb,var(--accent)_14%,transparent)]",
+        large ? "size-[30px] text-xs rounded-[9px]" : "size-5 text-[10px] rounded-md",
+      )}
+      aria-hidden="true"
+    >
+      {initials(name)}
+    </span>
+  );
+});
+
+function Chip({ danger, children }) {
+  return <span className={cx(CHIP, danger ? CHIP_DANGER : CHIP_ACCENT)}>{children}</span>;
+}
+
+function Count({ n }) {
+  return (
+    <span className="px-[7px] py-px text-[11px] font-semibold rounded-md text-[color:var(--text-3)] bg-[color:var(--bg-4)] tabular-nums">
+      {n}
+    </span>
+  );
+}
+
+function Panel({ title, raised, children, extraHead, className }) {
+  return (
+    <section
+      className={cx(PANEL, PANEL_ANIM, PANEL_FOCUS, raised && "relative z-[5]", className)}
+    >
+      <div className={PANEL_HEAD}>
+        <h2 className={PANEL_H}>{title}</h2>
+        {extraHead}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function Empty({ title, children, actions, alert }) {
+  return (
+    <div
+      className="flex flex-col items-center gap-1 px-4 py-9 text-center border border-dashed border-[color:var(--border)] rounded-2xl text-[13px] text-[color:var(--text-3)]"
+      role={alert ? "alert" : undefined}
+    >
+      <span className="grid mb-2 size-10 place-items-center rounded-xl bg-[color:var(--bg-3)] text-[color:var(--text-3)]" aria-hidden="true">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+          <path d="M4 7h16M4 12h10M4 17h6" />
+        </svg>
+      </span>
+      <strong className="text-sm font-semibold text-[color:var(--text)]">{title}</strong>
+      <span>{children}</span>
+      {actions && <div className="flex flex-wrap justify-center gap-2 mt-2.5">{actions}</div>}
+    </div>
+  );
+}
+
+function Notice({ message, onClose }) {
+  return (
+    <div
+      className="flex items-start justify-between gap-3 mb-4 px-3.5 py-2.5 text-[13px] leading-[1.45] rounded-lg text-[color:var(--danger)] bg-[color:color-mix(in_srgb,var(--danger)_9%,var(--bg-2))] [animation:td-rise_.22s_ease-out_both] motion-reduce:[animation:none]"
+      role="alert"
+    >
+      <span>{message}</span>
+      <button
+        type="button"
+        className="px-0.5 [font:inherit] leading-none text-inherit bg-transparent border-0 cursor-pointer opacity-70 transition-opacity duration-150 hover:opacity-100 motion-reduce:transition-none"
+        aria-label="Dismiss"
+        onClick={onClose}
+      >
+        ✕
+      </button>
+    </div>
+  );
+}
+
+const DetailSkeleton = memo(function DetailSkeleton() {
+  return (
+    <>
+      <div className={cx("page-header", PAGE_PAD)}>
+        <div className={cx("w-[min(420px,80%)]", SKEL_PULSE)}>
+          <div className={cx(SKEL_BAR, "h-2.5 w-2/5 mb-3")} />
+          <div className={cx(SKEL_BAR, "h-5 w-full")} />
+        </div>
+      </div>
+      <div className={cx("page-body", GRID, PAGE_PAD)} aria-busy="true">
+        <div className={COL_BASE}>
+          <div className={cx(PANEL, SKEL_PULSE, "h-[120px]")} />
+          <div className={cx(PANEL, SKEL_PULSE, "h-[160px] [animation-delay:90ms]")} />
+          <div className={cx(PANEL, SKEL_PULSE, "h-[220px] [animation-delay:180ms]")} />
+        </div>
+        <div className={COL_BASE}>
+          <div className={cx(PANEL, SKEL_PULSE, "h-[220px]")} />
+        </div>
+      </div>
+    </>
+  );
+});
+
+/* ===========================================================================
+ * Header
+ * ========================================================================= */
+
+const TaskHeader = memo(function TaskHeader({ task, project, projectId, isManager }) {
+  const late = task.stage !== "Done" && !!task.due_date && isOverdue(task.due_date);
+  return (
+    <div className={cx("page-header", PAGE_PAD)}>
+      <div className="min-w-0">
+        <nav className="breadcrumb !flex-wrap" aria-label="Breadcrumb">
+          {/* Managers get clickable links to the projects list / project.
+              Members see the same trail as plain text (no navigation). */}
+          {isManager ? (
+            <>
+              <Link to="/projects">Projects</Link>
+              <span className="breadcrumb-sep">/</span>
+              <Link to={`/projects/${projectId}`}>{project?.name || "Project"}</Link>
+            </>
+          ) : (
+            <>
+              <span>Projects</span>
+              {project?.name && (
+                <>
+                  <span className="breadcrumb-sep">/</span>
+                  <span>{project.name}</span>
+                </>
+              )}
+            </>
+          )}
+          <span className="breadcrumb-sep">/</span>
+          {task.parent_task_id ? (
+            isManager ? (
+              <>
+                <Link to={`/projects/${projectId}/tasks/${task.parent_task_id}`}>Task</Link>
+                <span className="breadcrumb-sep">/</span>
+                <span aria-current="page">Sub task</span>
+              </>
+            ) : (
+              <span aria-current="page">Sub task</span>
+            )
+          ) : (
+            <span aria-current="page">Task</span>
+          )}
+        </nav>
+        <h1 className="page-title !text-[26px] !font-semibold !tracking-[-0.03em] !leading-[1.2] max-w-[28ch] [overflow-wrap:anywhere] [text-wrap:balance] max-[640px]:!text-[22px]">
+          {task.title}
+        </h1>
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 mt-3 text-xs text-[color:var(--text-3)]">
+          <span className="inline-flex items-center gap-1.5">
+            <Avatar name={task.assignee_name} />
+            {task.assignee_name || "Unassigned"}
+          </span>
+          {task.due_date && (
+            <span
+              className={cx(
+                "tabular-nums",
+                late && "font-medium text-[color:var(--danger)]",
+              )}
+            >
+              {late ? "Overdue · " : "Due "}
+              {formatDate(task.due_date)}
+            </span>
+          )}
+        </div>
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <span className={`badge badge-${task.priority}`}>{task.priority}</span>
+        <span className={`badge badge-${stageClass(task.stage)}`}>{task.stage}</span>
+      </div>
+    </div>
+  );
+});
+
+/* ===========================================================================
+ * Main column panels
+ * ========================================================================= */
+
+// Read-only, main tasks only: derived automatically from sub task stages.
+const StatusPanel = memo(function StatusPanel({ stages, stageIdx, doneSubs, totalSubs }) {
+  return (
+    <Panel title="Status">
+      <p className={cx(HINT, "-mt-1 mb-4")}>
+        Set automatically from the sub tasks' progress. Change the stage on a sub task below to
+        update this.
+      </p>
+      <ol className="flex m-0 p-0 list-none" aria-label="Task status">
+        {stages.map((s, i) => {
+          const past = i < stageIdx;
+          const current = i === stageIdx;
+          const filled = past || current;
+          return (
+            <li
+              key={s}
+              className={cx(
+                "relative flex-1 flex flex-col items-start gap-2 text-xs",
+                "before:content-[''] before:absolute before:top-[7px] before:left-[18px] before:-right-0.5 before:h-0.5 before:rounded-full last:before:hidden",
+                past ? "before:bg-[color:var(--c)]" : "before:bg-[color:var(--bg-4)]",
+                current
+                  ? "text-[color:var(--text)] font-semibold"
+                  : "text-[color:var(--text-3)]",
+              )}
+              style={stageVars(s)}
+              aria-current={current ? "step" : undefined}
+            >
+              <span
+                className={cx(
+                  "relative z-[1] size-4 rounded-full border-2",
+                  filled
+                    ? "bg-[color:var(--c)] border-[color:var(--c)]"
+                    : "bg-[color:var(--bg-2)] border-[color:var(--bg-4)]",
+                  current && "shadow-[0_0_0_4px_color-mix(in_srgb,var(--c)_22%,transparent)]",
+                )}
+              >
+                {current && (
+                  <span className="absolute -inset-0.5 rounded-full bg-[color:var(--c)] pointer-events-none [animation:td-ping_2s_ease-out_infinite] motion-reduce:[animation:none]" />
+                )}
+              </span>
+              {s}
+            </li>
+          );
+        })}
+      </ol>
+      {totalSubs > 0 && (
+        <div className="flex items-center gap-2.5 mt-[18px] text-xs text-[color:var(--text-3)] tabular-nums">
+          <div
+            className="flex-1 h-1.5 rounded-full bg-[color:var(--bg-4)] overflow-hidden"
+            role="progressbar"
+            aria-valuemin={0}
+            aria-valuemax={totalSubs}
+            aria-valuenow={doneSubs}
+            aria-label="Sub task progress"
+          >
+            <div
+              className={cx(
+                "h-full w-full rounded-full origin-left transition-transform duration-500 ease-[cubic-bezier(.22,1,.36,1)] motion-reduce:transition-none",
+                doneSubs === totalSubs
+                  ? "bg-[color:var(--success,#10b981)]"
+                  : "bg-[color:var(--accent)]",
+              )}
+              style={{ transform: `scaleX(${doneSubs / totalSubs})` }}
+            />
+          </div>
+          <span>
+            {doneSubs} of {totalSubs} sub tasks done
+          </span>
+        </div>
+      )}
+    </Panel>
+  );
+});
+
+const DescriptionPanel = memo(function DescriptionPanel({ text }) {
+  return (
+    <Panel title="Description">
+      <p className="m-0 max-w-[68ch] text-[15px] leading-[1.75] text-[color:var(--text)] whitespace-pre-wrap [overflow-wrap:anywhere] [text-wrap:pretty]">
+        {text || <span className="text-[color:var(--text-3)]">No description provided.</span>}
+      </p>
+    </Panel>
+  );
+});
+
+const SubTaskItem = memo(function SubTaskItem({
+  st,
+  projectId,
+  isManager,
+  menuStages,
+  menuOpen,
+  busy,
+  onToggleMenu,
+  onPickStage,
+  onEdit,
+  onDelete,
+}) {
+  const locked = !isManager && st.stage === "Done";
+
+  return (
+    <div className={cx(SUB, PRIORITY_RAIL[st.priority])}>
+      <div className="flex-[1_1_220px] min-w-0 flex flex-col gap-2">
+        <Link
+          to={`/projects/${projectId}/tasks/${st.id}`}
+          className={cx(
+            "text-sm font-semibold tracking-[-0.005em] no-underline [overflow-wrap:anywhere] underline-offset-[3px] hover:underline",
+            st.stage === "Done" ? "text-[color:var(--text-3)]" : "text-[color:var(--text)]",
+          )}
+        >
+          {st.title}
+        </Link>
+
+        <div className={META}>
+          <span className="relative inline-block" data-stage-wrap>
+            <button
+              type="button"
+              className={cx(
+                `badge badge-${stageClass(st.stage)}`,
+                STAGE_BTN,
+                locked ? "!cursor-default" : "enabled:active:scale-[0.96]",
+              )}
+              aria-haspopup={locked ? undefined : "menu"}
+              aria-expanded={locked ? undefined : menuOpen}
+              disabled={busy}
+              onClick={() => {
+                if (busy || locked) return;
+                onToggleMenu(st.id);
+              }}
+            >
+              {busy ? "Moving…" : locked ? st.stage : `${st.stage} ▾`}
+            </button>
+
+            {menuOpen && (
+              <div className={MENU} role="menu">
+                {menuStages.map((s) => {
+                  const current = s === st.stage;
+                  return (
+                    <button
+                      key={s}
+                      type="button"
+                      role="menuitem"
+                      aria-current={current}
+                      className={cx(
+                        MENU_ITEM,
+                        current
+                          ? "font-bold !text-[color:var(--accent)] bg-[color:var(--bg-3)] !cursor-default"
+                          : "hover:bg-[color:var(--bg-3)]",
+                      )}
+                      style={stageVars(s)}
+                      onClick={() => onPickStage(st, s)}
+                    >
+                      <span className="size-2 shrink-0 rounded-full bg-[color:var(--c)]" />
+                      {s}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </span>
+
+          <span className="inline-flex items-center gap-1.5">
+            <Avatar name={st.assignee_name} />
+            {st.assignee_name || "Unassigned"}
+          </span>
+          {st.due_date && (
+            <span
+              className={cx(
+                "tabular-nums",
+                st.stage !== "Done" && isOverdue(st.due_date) && "font-medium text-[color:var(--danger)]",
+              )}
+            >
+              {formatDate(st.due_date)}
+            </span>
+          )}
+          {st.time_taken > 0 && <Chip>{st.time_taken} min</Chip>}
+          {st.rework_count > 0 && (
+            <Chip danger>
+              {st.rework_count} rework{st.rework_count > 1 ? "s" : ""}
+            </Chip>
+          )}
+        </div>
+      </div>
+
+      <div className="flex gap-1 shrink-0">
+        <button type="button" className="btn btn-ghost btn-sm" onClick={() => onEdit(st)}>
+          Edit
+        </button>
+        {isManager && (
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm text-[color:var(--danger)]"
+            onClick={() => onDelete(st.id)}
+          >
+            Delete
+          </button>
+        )}
+      </div>
+    </div>
+  );
+});
+
+const SubTasksPanel = memo(function SubTasksPanel({
+  subtasks,
+  totalTime,
+  projectId,
+  isManager,
+  menuStages,
+  openMenuId,
+  stageLoading,
+  onAdd,
+  onEdit,
+  onDelete,
+  onToggleMenu,
+  onPickStage,
+}) {
+  return (
+    <Panel
+      // Keeps an open stage menu above the panels below it.
+      raised={openMenuId !== null}
+      title={
+        <>
+          Sub tasks
+          <Count n={subtasks.length} />
+          {totalTime > 0 && <Chip>{totalTime} min total</Chip>}
+        </>
+      }
+      extraHead={
+        isManager && (
+          <button type="button" className="btn btn-ghost btn-sm" onClick={onAdd}>
+            + Add sub task
+          </button>
+        )
+      }
+    >
+      {subtasks.length === 0 ? (
+        <Empty
+          title="No sub tasks yet"
+          actions={
+            isManager && (
+              <button type="button" className="btn btn-primary btn-sm active:scale-[0.97] transition-transform" onClick={onAdd}>
+                Add the first sub task
+              </button>
+            )
+          }
+        >
+          This task counts as done once every sub task is done.
+        </Empty>
+      ) : (
+        <div className="flex flex-col gap-2">
+          {subtasks.map((st) => (
+            <SubTaskItem
+              key={st.id}
+              st={st}
+              projectId={projectId}
+              isManager={isManager}
+              menuStages={menuStages}
+              menuOpen={openMenuId === st.id}
+              busy={stageLoading === st.id}
+              onToggleMenu={onToggleMenu}
+              onPickStage={onPickStage}
+              onEdit={onEdit}
+              onDelete={onDelete}
+            />
+          ))}
+        </div>
+      )}
+    </Panel>
+  );
+});
+
+// The only place a leaf task's stage is edited directly.
+const MoveStagePanel = memo(function MoveStagePanel({
+  allowedStages,
+  currentStage,
+  changingStage,
+  isManager,
+  onChange,
+}) {
+  return (
+    <Panel title="Move stage">
+      <div className="inline-flex flex-wrap max-w-full gap-1 p-1 rounded-xl bg-[color:var(--bg-3)]" role="group" aria-label="Stage">
+        {allowedStages.map((s) => {
+          const pressed = currentStage === s;
+          return (
+            <button
+              key={s}
+              type="button"
+              onClick={() => onChange(s)}
+              disabled={changingStage !== null || (!isManager && currentStage === "Done")}
+              aria-pressed={pressed}
+              className={cx(
+                STAGEBAR_BTN,
+                pressed
+                  ? "text-[color:var(--text)] bg-[color:var(--bg-2)] shadow-[0_1px_2px_rgba(15,23,42,0.12),0_8px_16px_-10px_color-mix(in_srgb,var(--c)_70%,transparent)]"
+                  : "text-[color:var(--text-2)] enabled:hover:bg-[color:color-mix(in_srgb,var(--bg-2)_55%,transparent)] enabled:hover:text-[color:var(--text)]",
+              )}
+              style={stageVars(s)}
+            >
+              <span className="size-2 shrink-0 rounded-full bg-[color:var(--c)]" />
+              {changingStage === s ? "Moving…" : s}
+            </button>
+          );
+        })}
+      </div>
+      {!isManager && (
+        <p className={cx(HINT, "mt-2.5")}>
+          {currentStage === "Done"
+            ? "Approved as Done. Only a manager can move it back."
+            : "A manager has to approve before this can be marked Done."}
+        </p>
+      )}
+    </Panel>
+  );
+});
+
+const CommentItem = memo(function CommentItem({ comment: c }) {
+  return (
+    <article className="flex gap-3 pt-4">
+      <Avatar name={c.author_name} large />
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-baseline gap-2 mb-1">
+          <b className="text-[13px] font-semibold text-[color:var(--text)]">{c.author_name}</b>
+          <time
+            className="text-[11px] text-[color:var(--text-3)] tabular-nums"
+            dateTime={c.created_at}
+          >
+            {new Date(c.created_at).toLocaleString()}
+          </time>
+        </div>
+        <div className="w-fit max-w-full px-3.5 py-2.5 rounded-2xl rounded-tl-md bg-[color:var(--bg-3)] text-[13px] leading-[1.6] text-[color:var(--text)] whitespace-pre-wrap [overflow-wrap:anywhere] [text-wrap:pretty]">
+          {c.content}
+        </div>
+      </div>
+    </article>
+  );
+});
+
+// Owns its draft state so typing never re-renders the rest of the page.
+const CommentsPanel = memo(function CommentsPanel({ taskId, comments, onPosted, onError }) {
+  const [comment, setComment] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    if (!comment.trim() || submitting) return;
+    setSubmitting(true);
+    try {
+      await api.post(`/tasks/${taskId}/comments`, { content: comment });
+      setComment("");
+      await onPosted();
+    } catch {
+      onError("We couldn't post your comment. Please try again.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <Panel title={<>Comments <Count n={comments?.length || 0} /></>}>
+      <form onSubmit={submit} className="mb-2">
+        <textarea
+          className="form-textarea"
+          value={comment}
+          onChange={(e) => setComment(e.target.value)}
+          onKeyDown={(e) => {
+            if ((e.metaKey || e.ctrlKey) && e.key === "Enter") submit(e);
+          }}
+          placeholder="Write a comment… (Ctrl+Enter to post)"
+          aria-label="Write a comment"
+          rows={3}
+        />
+        <div className="flex justify-end mt-2">
+          <button
+            className="btn btn-primary btn-sm"
+            type="submit"
+            disabled={submitting || !comment.trim()}
+          >
+            {submitting ? <Loader label="Posting" size="sm" variant="button" /> : "Post comment"}
+          </button>
+        </div>
+      </form>
+      {comments?.length === 0 && (
+        <p className={cx(NOTE, "mt-3")}>No comments yet. Start the conversation above.</p>
+      )}
+      {comments?.map((c) => (
+        <CommentItem key={c.id} comment={c} />
+      ))}
+    </Panel>
+  );
+});
+
+/* ===========================================================================
+ * Sidebar
+ * ========================================================================= */
+
+const DetailsPanel = memo(function DetailsPanel({ details }) {
+  return (
+    <Panel title="Details">
+      <dl className="m-0">
+        {details.map(({ label, value, className }) => (
+          <div
+            key={label}
+            className="flex justify-between gap-3 py-2.5 border-b border-[color:var(--border)] text-[13px] last:border-b-0 last:pb-0"
+          >
+            <dt className="shrink-0 pt-px text-xs text-[color:var(--text-3)]">{label}</dt>
+            <dd
+              className={cx(
+                "m-0 text-right font-medium text-[color:var(--text)] [overflow-wrap:anywhere] tabular-nums",
+                className,
+              )}
+            >
+              {value}
+            </dd>
+          </div>
+        ))}
+      </dl>
+    </Panel>
+  );
+});
+
+const ActivityItem = memo(function ActivityItem({ activity: a }) {
+  return (
+    <li className="relative pb-3.5 pl-[18px] text-xs [overflow-wrap:anywhere] last:pb-0 before:content-[''] before:absolute before:left-0 before:top-[5px] before:size-[7px] before:rounded-full before:bg-[color:var(--text-3)] first:before:bg-[color:var(--accent)] first:before:shadow-[0_0_0_3px_color-mix(in_srgb,var(--accent)_20%,transparent)] after:content-[''] after:absolute after:left-[3px] after:top-[15px] after:-bottom-[3px] after:w-px after:bg-[color:var(--border)] last:after:hidden">
+      <span className="font-medium text-[color:var(--accent)]">{a.actor_name}</span>
+      <span className="text-[color:var(--text-2)]"> {a.action}</span>
+      {a.meta?.from && (
+        <span className="text-[color:var(--text-3)]">
+          {" "}
+          ({a.meta.from} → {a.meta.to})
+        </span>
+      )}
+      <time
+        className="block mt-0.5 text-[11px] text-[color:var(--text-3)] tabular-nums"
+        dateTime={a.created_at}
+      >
+        {new Date(a.created_at).toLocaleString()}
+      </time>
+    </li>
+  );
+});
+
+const ActivityPanel = memo(function ActivityPanel({ activity }) {
+  return (
+    <Panel title="Activity">
+      {activity?.length === 0 && <p className={NOTE}>No activity yet.</p>}
+      <ol className="m-0 p-0 list-none">
+        {activity?.map((a) => (
+          <ActivityItem key={a.id} activity={a} />
+        ))}
+      </ol>
+    </Panel>
+  );
+});
+
+/* ===========================================================================
+ * Modals (each owns its form state, so typing never re-renders the page)
+ * ========================================================================= */
+
+const MODAL_TEXT = "m-0 mb-4 text-[13px] leading-[1.55] text-[color:var(--text-2)]";
+
+// Members moving a sub task to In Review must say how long it took.
+function TimeTakenModal({ subtask, nextStage, onClose, onSaved }) {
+  const [value, setValue] = useState("");
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const submit = async (e) => {
+    e?.preventDefault();
+    if (saving) return;
+    const minutes = Number(value);
+
+    if (!value || !Number.isInteger(minutes) || minutes <= 0 || minutes > 100000) {
+      setError("Please enter a valid time between 1 and 100,000 minutes.");
+      return;
+    }
+
+    setSaving(true);
+    try {
+      await api.put(`/tasks/${subtask.id}`, { stage: nextStage, time_taken: minutes });
+      onClose();
+      await onSaved(subtask);
+    } catch (err) {
+      console.error("Failed to save time taken:", err);
+      setError(
+        err?.response?.data?.message || "We couldn't save the time taken. Please try again.",
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal title="Time taken" onClose={onClose}>
+      <form onSubmit={submit} noValidate>
+        <p className={MODAL_TEXT}>
+          Moving <strong className="text-[color:var(--text)]">{subtask?.title}</strong> to{" "}
+          <strong className="text-[color:var(--text)]">In Review</strong>. How long did this sub
+          task take?
+        </p>
+        <div className="form-group">
+          <label className="form-label" htmlFor="td-time-taken">
+            Time taken (minutes) *
+          </label>
+          <input
+            id="td-time-taken"
+            className="form-input"
+            type="number"
+            inputMode="numeric"
+            min="1"
+            max="100000"
+            step="1"
+            value={value}
+            onChange={(e) => {
+              setValue(e.target.value);
+              setError("");
+            }}
+            placeholder="e.g. 45"
+            aria-invalid={!!error}
+            aria-describedby={error ? "td-time-taken-error" : undefined}
+            autoFocus
+          />
+          {error && (
+            <div
+              id="td-time-taken-error"
+              className="mt-1.5 text-xs text-[color:var(--danger)]"
+              role="alert"
+            >
+              {error}
+            </div>
+          )}
+        </div>
+        <div className="modal-actions">
+          <button type="button" className="btn btn-ghost" onClick={onClose} disabled={saving}>
+            Cancel
+          </button>
+          <button type="submit" className="btn btn-primary" disabled={saving}>
+            {saving ? "Saving…" : "Confirm and move"}
+          </button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+// Manager decision when a sub task is moved to Done: approve or send for rework.
+function ReviewModal({ subtask, onClose, onSaved }) {
+  const [action, setAction] = useState(null); // "done" | "rework"
+  const [deadline, setDeadline] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  const submit = async () => {
+    if (!action || saving) return;
+    setSaving(true);
+    setError("");
+    try {
+      await api.put(`/tasks/${subtask.id}`, {
+        ...subtask,
+        stage: action === "done" ? "Done" : "Rework",
+        time_taken: null,
+        new_due_date: action === "rework" && deadline ? deadline : null,
+      });
+      onClose();
+      await onSaved(subtask);
+    } catch (err) {
+      setError(
+        err?.response?.data?.message || "We couldn't save this decision. Please try again.",
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const rework = action === "rework";
+
+  return (
+    <Modal title="Review sub task" onClose={onClose}>
+      <p className={MODAL_TEXT}>
+        What would you like to do with{" "}
+        <strong className="text-[color:var(--text)]">"{subtask?.title}"</strong>?
+      </p>
+
+      <div
+        className="grid grid-cols-1 min-[481px]:grid-cols-2 gap-3 mb-5"
+        role="group"
+        aria-label="Review decision"
+      >
+        {CHOICES.map((c) => {
+          const pressed = action === c.key;
+          return (
+            <button
+              key={c.key}
+              type="button"
+              aria-pressed={pressed}
+              onClick={() => setAction(c.key)}
+              className={cx(
+                "flex flex-col items-center gap-1 px-3 py-[18px] cursor-pointer border-[1.5px] rounded-xl transition-[border-color,background-color,transform] duration-200 active:scale-[0.98] motion-reduce:transition-none focus-visible:[outline:2px_solid_var(--accent)] focus-visible:outline-offset-2",
+                pressed
+                  ? c.on
+                  : "text-[color:var(--text)] bg-[color:var(--bg-2)] border-[color:var(--border)] hover:border-[color:var(--text-3)]",
+              )}
+            >
+              <svg
+                width="24"
+                height="24"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                {c.icon}
+              </svg>
+              <b className="mt-1.5 text-[13px] font-semibold">{c.title}</b>
+              <span className="text-[11px] text-[color:var(--text-3)]">{c.hint}</span>
+            </button>
+          );
+        })}
+      </div>
+
+      {rework && (
+        <div className="form-group mb-4 p-3.5 bg-[color:var(--bg-3)] border border-[color:var(--border)] rounded-[10px]">
+          <label className="form-label">New deadline (optional)</label>
+          <DatePicker value={deadline} onChange={setDeadline} placeholder="dd-mm-yyyy" />
+          <div className={cx(HINT, "mt-1.5")}>Set a new due date for the rework cycle.</div>
+        </div>
+      )}
+
+      {error && (
+        <div className="-mt-2 mb-3.5 text-xs text-[color:var(--danger)]" role="alert">
+          {error}
+        </div>
+      )}
+
+      <div className="modal-actions">
+        <button type="button" className="btn btn-ghost" onClick={onClose} disabled={saving}>
+          Cancel
+        </button>
+        <button
+          type="button"
+          className={cx(
+            "btn btn-primary",
+            rework && "!bg-[color:var(--danger)] !border-[color:var(--danger)]",
+          )}
+          onClick={submit}
+          disabled={!action || saving}
+        >
+          {saving
+            ? "Saving…"
+            : action === "done"
+              ? "Mark done"
+              : rework
+                ? "Send for rework"
+                : "Select an action"}
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+/* ===========================================================================
+ * Page
+ * ========================================================================= */
+
+export default function TaskDetail() {
+  const { id: projectId, taskId } = useParams();
+  const { user, isManager } = useAuth();
+
+  const [notice, setNotice] = useState("");
+  const { task, project, members, loading, loadError, load, loadTaskOnly, retry } =
+    useTaskDetail({ taskId, projectId, isManager, onNotice: setNotice });
+
+  const [changingStage, setChangingStage] = useState(null);
+  const [stageLoading, setStageLoading] = useState(null); // sub task id being moved
+  const [stageDropdown, setStageDropdown] = useState(null); // sub task id with open menu
+
+  // Modal state: null = closed.
+  const [subModal, setSubModal] = useState(null); // { task: subtask | null }
+  const [savingSubTask, setSavingSubTask] = useState(false);
+  const [confirm, setConfirm] = useState(null); // { title, message, action, loading, isDangerous }
+  const [timeTaken, setTimeTaken] = useState(null); // { subtask, nextStage }
+  const [review, setReview] = useState(null); // { subtask }
 
   // Auto-dismiss the inline notice.
   useEffect(() => {
@@ -326,7 +1103,7 @@ export default function TaskDetail() {
   useEffect(() => {
     if (stageDropdown === null) return;
     const onDown = (e) => {
-      if (!e.target.closest?.(".td-stage-wrap")) setStageDropdown(null);
+      if (!e.target.closest?.("[data-stage-wrap]")) setStageDropdown(null);
     };
     const onKey = (e) => {
       if (e.key === "Escape") setStageDropdown(null);
@@ -339,832 +1116,350 @@ export default function TaskDetail() {
     };
   }, [stageDropdown]);
 
-  const handleStageChange = async (stage) => {
-    if (stage === task.stage) return;
-    // Members can't move a task out of Done — only a manager can reopen it.
-    if (!isManager && task.stage === "Done") return;
-    // Only ever called for subtasks now — main task stage is read-only
-    // and derived automatically from its subtasks.
-    // For subtasks: members moving from In Progress → In Review must enter time taken
-    if (
-      (task.parent_task_id || !task.subtasks?.length) &&
-      !isManager &&
-      stage === "In Review" &&
-      task.stage !== "In Review"
-    ) {
-      setTimeTakenInput("");
-      setTimeTakenError("");
-      setTimeTakenModal({ show: true, subtask: task, nextStage: stage });
-      return;
-    }
-    // For subtasks: manager moving from In Review → Done triggers review modal
-    if (
-      (task.parent_task_id || !task.subtasks?.length) &&
-      isManager &&
-      stage === "Done" &&
-      task.stage !== "Done"
-    ) {
-      setManagerReviewModal({ show: true, subtask: task });
-      setReviewAction(null);
-      setReworkDeadline("");
-      setReviewError("");
-      return;
-    }
-    setChangingStage(stage);
-    try {
-      await api.put(`/tasks/${taskId}`, { ...task, stage });
-      await load();
-    } catch {
-      setNotice(`We couldn't move this task to ${stage}. Please try again.`);
-    } finally {
-      setChangingStage(null);
-    }
-  };
+  // Everything derived from the task, computed once per task/project change.
+  const view = useMemo(() => {
+    if (!task) return null;
 
-  const handleComment = async (e) => {
-    e.preventDefault();
-    if (!comment.trim() || submitting) return;
-    setSubmitting(true);
-    try {
-      await api.post(`/tasks/${taskId}/comments`, { content: comment });
-      setComment("");
-      await load();
-    } catch {
-      setNotice("We couldn't post your comment. Please try again.");
-    } finally {
-      setSubmitting(false);
+    const stages = project?.custom_stages || task.project_stages || DEFAULT_STAGES;
+    const allowedStages = isManager ? stages : stages.filter((s) => s !== "Done");
+    const subtasks = task.subtasks || EMPTY;
+    let doneSubs = 0;
+    let totalTime = 0;
+    for (const s of subtasks) {
+      if (s.stage === "Done") doneSubs++;
+      totalTime += s.time_taken || 0;
     }
-  };
+    const dueOverdue =
+      task.stage !== "Done" && !!task.due_date && isOverdue(task.due_date);
 
-  const handleSaveSubTask = async (data) => {
-    // If manager is moving from In Review to Done via edit popup, show review modal instead
-    if (
-      isManager &&
-      editingSubTask?.stage === "In Review" &&
-      data.stage === "Done"
-    ) {
-      setShowSubTaskModal(false);
-      setManagerReviewModal({ show: true, subtask: editingSubTask });
-      setReviewAction(null);
-      setReworkDeadline("");
-      setReviewError("");
-      setEditingSubTask(null);
-      return;
-    }
-    setSavingSubTask(true);
-    try {
-      if (editingSubTask) await api.put(`/tasks/${editingSubTask.id}`, data);
-      else
-        await api.post("/tasks", {
-          ...data,
-          project_id: projectId,
-          parent_task_id: taskId,
-          cluster_id: task.cluster_id,
-        });
-      setShowSubTaskModal(false);
-      setEditingSubTask(null);
-      load();
-    } catch {
-      // Modal stays open so nothing typed is lost.
-      setNotice("We couldn't save the sub task. Please try again.");
-    } finally {
-      setSavingSubTask(false);
-    }
-  };
-
-  const handleDeleteSubTask = (id) => {
-    setConfirmModal({
-      show: true,
-      title: "Delete sub task",
-      message: "Are you sure you want to delete this sub task?",
-      isDangerous: true,
-      action: async () => {
-        await api.delete(`/tasks/${id}`);
-        load();
+    const details = [
+      { label: "Assignee", value: task.assignee_name || "—" },
+      { label: "Priority", value: task.priority, className: "capitalize" },
+      {
+        label: "Due date",
+        value: task.due_date
+          ? `${formatDate(task.due_date)}${dueOverdue ? " · Overdue" : ""}`
+          : "—",
+        className: dueOverdue ? "!text-[color:var(--danger)] font-semibold" : "",
       },
-      loading: false,
-    });
-  };
+      { label: "Cluster", value: task.cluster_name || "No cluster" },
+      { label: "Created", value: task.created_at ? formatDate(task.created_at) : "—" },
+      ...(totalTime > 0 ? [{ label: "Total time", value: `${totalTime} min` }] : []),
+    ];
 
-  const handleSubTaskStageSelect = async (st, chosenStage) => {
-    setStageDropdown(null);
-    if (!chosenStage || chosenStage === st.stage) return;
-    // Members can't reopen a Done sub task.
-    if (!isManager && st.stage === "Done") return;
-    if (!isManager) {
-            if (chosenStage === "Done") return;
-      if (chosenStage === "In Review") {
-        setTimeTakenInput("");
-        setTimeTakenError("");
-        setTimeTakenModal({ show: true, subtask: st, nextStage: chosenStage });
-        return;
-      }
+    return {
+      stages,
+      allowedStages,
+      subtasks,
+      isLeaf: !!task.parent_task_id || subtasks.length === 0,
+      doneSubs,
+      totalTime,
+      stageIdx: stages.indexOf(task.stage),
+      details,
+    };
+  }, [task, project, isManager]);
+
+  /* ---------- handlers ---------- */
+
+  const dismissNotice = useCallback(() => setNotice(""), []);
+  const closeSubModal = useCallback(() => setSubModal(null), []);
+  const closeConfirm = useCallback(() => setConfirm(null), []);
+  const closeTimeTaken = useCallback(() => setTimeTaken(null), []);
+  const closeReview = useCallback(() => setReview(null), []);
+  const openTimeTaken = useCallback(
+    (subtask, nextStage) => setTimeTaken({ subtask, nextStage }),
+    [],
+  );
+  const openReview = useCallback((subtask) => setReview({ subtask }), []);
+
+  // After changing a sub task (or the task itself), refresh only what changed.
+  const refreshFor = useCallback(
+    (subtask) => (String(subtask.id) === String(taskId) ? load() : loadTaskOnly()),
+    [taskId, load, loadTaskOnly],
+  );
+
+  // Move a sub task straight to a stage (no modal needed).
+  const moveSubTask = useCallback(
+    async (st, stage, extra, refresh) => {
       setStageLoading(st.id);
       try {
-        await api.put(`/tasks/${st.id}`, {
-          ...st,
-          stage: chosenStage,
-          time_taken: null,
-        });
-        await loadTaskOnly();
+        await api.put(`/tasks/${st.id}`, { ...st, stage, ...extra });
+        await refresh();
       } catch {
-        setNotice(`We couldn't move "${st.title}" to ${chosenStage}. Please try again.`);
+        setNotice(`We couldn't move "${st.title}" to ${stage}. Please try again.`);
       } finally {
         setStageLoading(null);
       }
-      return;
-    }
-    if (chosenStage === "Done") {
-      setManagerReviewModal({ show: true, subtask: st });
-      setReviewAction(null);
-      setReworkDeadline("");
-      setReviewError("");
-      return;
-    }
-    setStageLoading(st.id);
+    },
+    [],
+  );
+
+  const handleSubTaskStageSelect = useCallback(
+    async (st, chosen) => {
+      setStageDropdown(null);
+      if (!chosen || chosen === st.stage) return;
+      // Members can't reopen a Done sub task.
+      if (!isManager && st.stage === "Done") return;
+
+      if (!isManager) {
+        if (chosen === "Done") return;
+        if (chosen === "In Review") return openTimeTaken(st, chosen);
+        return moveSubTask(st, chosen, { time_taken: null }, loadTaskOnly);
+      }
+
+      if (chosen === "Done") return openReview(st);
+      return moveSubTask(st, chosen, null, () => refreshFor(st));
+    },
+    [isManager, openTimeTaken, openReview, moveSubTask, loadTaskOnly, refreshFor],
+  );
+
+  // Stage buttons on a leaf task (main task stage is derived, never edited).
+  const handleStageChange = useCallback(
+    async (stage) => {
+      if (stage === task.stage) return;
+      // Members can't move a task out of Done — only a manager can reopen it.
+      if (!isManager && task.stage === "Done") return;
+
+      if (view.isLeaf) {
+        // Members moving into In Review must enter time taken.
+        if (!isManager && stage === "In Review" && task.stage !== "In Review") {
+          return openTimeTaken(task, stage);
+        }
+        // Managers moving to Done go through the review decision.
+        if (isManager && stage === "Done" && task.stage !== "Done") {
+          return openReview(task);
+        }
+      }
+
+      setChangingStage(stage);
+      try {
+        await api.put(`/tasks/${taskId}`, { ...task, stage });
+        await load();
+      } catch {
+        setNotice(`We couldn't move this task to ${stage}. Please try again.`);
+      } finally {
+        setChangingStage(null);
+      }
+    },
+    [task, view, isManager, taskId, load, openTimeTaken, openReview],
+  );
+
+  const handleSaveSubTask = useCallback(
+    async (data) => {
+      const editing = subModal?.task ?? null;
+
+      // Manager moving In Review → Done via the edit popup gets the review modal instead.
+      if (isManager && editing?.stage === "In Review" && data.stage === "Done") {
+        setSubModal(null);
+        openReview(editing);
+        return;
+      }
+
+      setSavingSubTask(true);
+      try {
+        if (editing) {
+          await api.put(`/tasks/${editing.id}`, data);
+        } else {
+          await api.post("/tasks", {
+            ...data,
+            project_id: projectId,
+            parent_task_id: taskId,
+            cluster_id: task.cluster_id,
+          });
+        }
+        setSubModal(null);
+        load();
+      } catch {
+        // Modal stays open so nothing typed is lost.
+        setNotice("We couldn't save the sub task. Please try again.");
+      } finally {
+        setSavingSubTask(false);
+      }
+    },
+    [subModal, isManager, projectId, taskId, task, load, openReview],
+  );
+
+  const handleDeleteSubTask = useCallback(
+    (id) =>
+      setConfirm({
+        title: "Delete sub task",
+        message: "Are you sure you want to delete this sub task?",
+        isDangerous: true,
+        loading: false,
+        action: async () => {
+          await api.delete(`/tasks/${id}`);
+          load();
+        },
+      }),
+    [load],
+  );
+
+  const executeConfirmAction = useCallback(async () => {
+    if (!confirm?.action) return;
+    setConfirm((prev) => ({ ...prev, loading: true }));
     try {
-      await api.put(`/tasks/${st.id}`, { ...st, stage: chosenStage });
-      await refreshFor(st);
-    } catch {
-      setNotice(`We couldn't move "${st.title}" to ${chosenStage}. Please try again.`);
-    } finally {
-      setStageLoading(null);
-    }
-  };
-
-  const closeReview = () => {
-    setManagerReviewModal({ show: false, subtask: null });
-    setReviewAction(null);
-    setReworkDeadline("");
-    setReviewError("");
-  };
-
-  const closeTimeTaken = () => {
-    setTimeTakenModal({ show: false, subtask: null, nextStage: null });
-    setTimeTakenInput("");
-    setTimeTakenError("");
-  };
-
-  const handleManagerReviewSubmit = async () => {
-    const { subtask } = managerReviewModal;
-    if (!reviewAction || reviewSaving) return;
-    setReviewSaving(true);
-    setReviewError("");
-    try {
-      await api.put(`/tasks/${subtask.id}`, {
-        ...subtask,
-        stage: reviewAction === "done" ? "Done" : "Rework",
-        time_taken: null,
-        new_due_date:
-          reviewAction === "rework" && reworkDeadline ? reworkDeadline : null,
-      });
-      closeReview();
-      await refreshFor(subtask);
-    } catch (error) {
-      setReviewError(
-        error?.response?.data?.message ||
-          "We couldn't save this decision. Please try again.",
-      );
-    } finally {
-      setReviewSaving(false);
-    }
-  };
-
-  const handleTimeTakenSubmit = async (e) => {
-    e?.preventDefault();
-    if (timeTakenSaving) return;
-    const minutes = Number(timeTakenInput);
-
-    if (!timeTakenInput || !Number.isInteger(minutes) || minutes <= 0 || minutes > 100000) {
-      setTimeTakenError(
-        "Please enter a valid time between 1 and 100,000 minutes.",
-      );
-      return;
-    }
-
-    const { subtask, nextStage } = timeTakenModal;
-    setTimeTakenSaving(true);
-
-    try {
-      await api.put(`/tasks/${subtask.id}`, {
-        stage: nextStage,
-        time_taken: minutes,
-      });
-      closeTimeTaken();
-      await refreshFor(subtask);
-    } catch (error) {
-      console.error("Failed to save time taken:", error);
-      setTimeTakenError(
-        error?.response?.data?.message ||
-          "We couldn't save the time taken. Please try again.",
-      );
-    } finally {
-      setTimeTakenSaving(false);
-    }
-  };
-
-  const executeConfirmAction = async () => {
-    if (!confirmModal.action) return;
-    setConfirmModal((prev) => ({ ...prev, loading: true }));
-    try {
-      await confirmModal.action();
+      await confirm.action();
     } catch {
       setNotice("We couldn't complete that action. Please try again.");
     } finally {
-      setConfirmModal(CLOSED_CONFIRM);
+      setConfirm(null);
     }
-  };
+  }, [confirm]);
+
+  const addSubTask = useCallback(() => setSubModal({ task: null }), []);
+  const editSubTask = useCallback((st) => setSubModal({ task: st }), []);
+  const toggleMenu = useCallback(
+    (id) => setStageDropdown((prev) => (prev === id ? null : id)),
+    [],
+  );
+
+  /* ---------- render ---------- */
+
+  let body;
 
   if (loading) {
-    return (
-      <>
-        <style>{STYLES}</style>
-        <div className="page-header">
-          <div className="td-skel td-skel-head">
-            <div className="bar td-bar-sm" />
-            <div className="bar td-bar-lg" />
-          </div>
-        </div>
-        <div className="page-body td-grid" aria-busy="true">
-          <div className="td-col">
-            <div className="td-panel td-skel td-skel-p1" />
-            <div className="td-panel td-skel td-skel-p2" />
-            <div className="td-panel td-skel td-skel-p3" />
-          </div>
-          <div className="td-col">
-            <div className="td-panel td-skel td-skel-side" />
-          </div>
-        </div>
-      </>
-    );
-  }
-
-  if (!task) {
+    body = <DetailSkeleton />;
+  } else if (!task) {
     const failed = loadError === "failed";
-    return (
-      <>
-        <style>{STYLES}</style>
-        <div className="page-body">
-          <div className="td-empty" role="alert">
-            <strong>{failed ? "We couldn't load this task" : "Task not found"}</strong>
-            <span>
-              {failed
-                ? "Check your connection and try again."
-                : "It may have been deleted, or you may not have access to it."}
-            </span>
-            <div className="td-empty-actions">
+    body = (
+      <div className={cx("page-body", PAGE_PAD)}>
+        <Empty
+          alert
+          title={failed ? "We couldn't load this task" : "Task not found"}
+          actions={
+            <>
               {failed && (
-                <button
-                  type="button"
-                  className="btn btn-ghost btn-sm"
-                  onClick={() => {
-                    setLoadError(null);
-                    setLoading(true);
-                    load();
-                  }}
-                >
+                <button type="button" className="btn btn-ghost btn-sm" onClick={retry}>
                   Try again
                 </button>
               )}
               <Link to={`/projects/${projectId}`} className="btn btn-ghost btn-sm">
                 Back to project
               </Link>
+            </>
+          }
+        >
+          {failed
+            ? "Check your connection and try again."
+            : "It may have been deleted, or you may not have access to it."}
+        </Empty>
+      </div>
+    );
+  } else {
+    const { stages, allowedStages, subtasks, isLeaf, doneSubs, totalTime, stageIdx, details } =
+      view;
+    const isMain = !task.parent_task_id;
+
+    body = (
+      <>
+        <TaskHeader task={task} project={project} projectId={projectId} isManager={isManager} />
+
+        <main className={cx("page-body", PAGE_PAD)}>
+          {notice && <Notice message={notice} onClose={dismissNotice} />}
+
+          <div className={GRID}>
+            <div className={COL}>
+              {isMain && (
+                <StatusPanel
+                  stages={stages}
+                  stageIdx={stageIdx}
+                  doneSubs={doneSubs}
+                  totalSubs={subtasks.length}
+                />
+              )}
+
+              <DescriptionPanel text={task.description || task.details || task.desc} />
+
+              {isMain && (
+                <SubTasksPanel
+                  subtasks={subtasks}
+                  totalTime={totalTime}
+                  projectId={projectId}
+                  isManager={isManager}
+                  menuStages={allowedStages}
+                  openMenuId={stageDropdown}
+                  stageLoading={stageLoading}
+                  onAdd={addSubTask}
+                  onEdit={editSubTask}
+                  onDelete={handleDeleteSubTask}
+                  onToggleMenu={toggleMenu}
+                  onPickStage={handleSubTaskStageSelect}
+                />
+              )}
+
+              {isLeaf && (
+                <MoveStagePanel
+                  allowedStages={allowedStages}
+                  currentStage={task.stage}
+                  changingStage={changingStage}
+                  isManager={isManager}
+                  onChange={handleStageChange}
+                />
+              )}
+
+              <CommentsPanel
+                taskId={taskId}
+                comments={task.comments}
+                onPosted={load}
+                onError={setNotice}
+              />
             </div>
+
+            <aside className={COL} aria-label="Task details">
+              <DetailsPanel details={details} />
+              <ActivityPanel activity={task.activity} />
+            </aside>
           </div>
-        </div>
+        </main>
+
+        {subModal && (
+          <Modal
+            title={subModal.task ? "Edit sub task" : "New sub task"}
+            onClose={closeSubModal}
+          >
+            <TaskForm
+              initial={subModal.task}
+              members={members}
+              stages={stages}
+              hideCluster={true}
+              onSave={handleSaveSubTask}
+              onCancel={closeSubModal}
+              saving={savingSubTask}
+              userRole={user?.role}
+              isSubtaskForm
+            />
+          </Modal>
+        )}
+
+        <ConfirmModal
+          isOpen={!!confirm}
+          title={confirm?.title ?? ""}
+          message={confirm?.message ?? ""}
+          confirmText={confirm?.isDangerous ? "Delete" : "Confirm"}
+          isDangerous={!!confirm?.isDangerous}
+          onConfirm={executeConfirmAction}
+          onCancel={closeConfirm}
+          loading={!!confirm?.loading}
+        />
+
+        {timeTaken && (
+          <TimeTakenModal
+            subtask={timeTaken.subtask}
+            nextStage={timeTaken.nextStage}
+            onClose={closeTimeTaken}
+            onSaved={refreshFor}
+          />
+        )}
+
+        {review && <ReviewModal subtask={review.subtask} onClose={closeReview} onSaved={refreshFor} />}
       </>
     );
   }
 
-   const stages = project?.custom_stages || task.project_stages || [
-    "Todo",
-    "In Progress",
-    "In Review",
-    "Done",
-  ];
-  const allowedStages = isManager
-    ? stages
-    : stages.filter((s) => !["Done"].includes(s));
-
-  const subtasks = task.subtasks || [];
-  const isLeaf = !!task.parent_task_id || subtasks.length === 0;
-  const doneSubs = subtasks.filter((s) => s.stage === "Done").length;
-  const totalTime = subtasks.reduce((sum, s) => sum + (s.time_taken || 0), 0);
-  const stageIdx = stages.indexOf(task.stage);
-    const menuStages = allowedStages;
-  const dueOverdue = task.stage !== "Done" && !!task.due_date && isOverdue?.(task.due_date);
-
-  const details = [
-    { l: "Assignee", v: task.assignee_name || "—" },
-    { l: "Priority", v: task.priority, cls: "is-cap" },
-    {
-      l: "Due date",
-      v: task.due_date
-        ? `${formatDate(task.due_date)}${dueOverdue ? " · Overdue" : ""}`
-        : "—",
-      cls: dueOverdue ? "is-overdue" : "",
-    },
-    { l: "Cluster", v: task.cluster_name || "No cluster" },
-    { l: "Created", v: task.created_at ? formatDate(task.created_at) : "—" },
-    ...(totalTime > 0 ? [{ l: "Total time", v: `${totalTime} min` }] : []),
-  ];
-
   return (
     <>
-      <style>{STYLES}</style>
-
-      <div className="page-header">
-        <div className="td-head-main">
-          <nav className="breadcrumb td-breadcrumb" aria-label="Breadcrumb">
-            {/* Managers get clickable links to the projects list / project.
-                Members see the same trail as plain text (no navigation). */}
-            {isManager ? (
-              <>
-                <Link to="/projects">Projects</Link>
-                <span className="breadcrumb-sep">/</span>
-                <Link to={`/projects/${projectId}`}>{project?.name || "Project"}</Link>
-              </>
-            ) : (
-              <>
-                <span>Projects</span>
-                {project?.name && (
-                  <>
-                    <span className="breadcrumb-sep">/</span>
-                    <span>{project.name}</span>
-                  </>
-                )}
-              </>
-            )}
-            <span className="breadcrumb-sep">/</span>
-            {task.parent_task_id ? (
-              isManager ? (
-                <>
-                  <Link to={`/projects/${projectId}/tasks/${task.parent_task_id}`}>
-                    Task
-                  </Link>
-                  <span className="breadcrumb-sep">/</span>
-                  <span aria-current="page">Sub task</span>
-                </>
-              ) : (
-                <span aria-current="page">Sub task</span>
-              )
-            ) : (
-              <span aria-current="page">Task</span>
-            )}
-          </nav>
-          <h1 className="page-title td-title">{task.title}</h1>
-        </div>
-        <div className="td-header-badges">
-          <span className={`badge badge-${task.priority}`}>{task.priority}</span>
-          <span className={`badge badge-${task.stage?.toLowerCase().replace(/\s/g, "")}`}>
-            {task.stage}
-          </span>
-        </div>
-      </div>
-
-      <main className="page-body">
-        {notice && (
-          <div className="td-notice" role="alert">
-            <span>{notice}</span>
-            <button
-              type="button"
-              className="td-notice-close"
-              aria-label="Dismiss"
-              onClick={() => setNotice("")}
-            >
-              ✕
-            </button>
-          </div>
-        )}
-
-        <div className="td-grid">
-          <div className="td-col">
-            {/* Status — read-only, main tasks only. Derived automatically
-                from sub task stages. */}
-            {!task.parent_task_id && (
-              <section className="td-panel">
-                <div className="td-panel-head">
-                  <h2 className="td-h">Status</h2>
-                </div>
-                <p className="td-hint">
-                  Set automatically from the sub tasks' progress. Change the stage on a sub task below to update this.
-                </p>
-                <ol className="td-steps" aria-label="Task status">
-                  {stages.map((s, i) => (
-                    <li
-                      key={s}
-                      className={`td-step${i < stageIdx ? " is-past" : ""}${i === stageIdx ? " is-current" : ""}`}
-                      style={{ "--c": stageColor(s) }}
-                      aria-current={i === stageIdx ? "step" : undefined}
-                    >
-                      <span className="td-step-dot" />
-                      {s}
-                    </li>
-                  ))}
-                </ol>
-                {subtasks.length > 0 && (
-                  <div className="td-progress">
-                    <div
-                      className="td-track"
-                      role="progressbar"
-                      aria-valuemin={0}
-                      aria-valuemax={subtasks.length}
-                      aria-valuenow={doneSubs}
-                      aria-label="Sub task progress"
-                    >
-                      <div
-                        className={`td-fill${doneSubs === subtasks.length ? " is-complete" : ""}`}
-                        style={{ transform: `scaleX(${doneSubs / subtasks.length})` }}
-                      />
-                    </div>
-                    <span>{doneSubs} of {subtasks.length} sub tasks done</span>
-                  </div>
-                )}
-              </section>
-            )}
-
-            {/* Description */}
-            <section className="td-panel">
-              <div className="td-panel-head">
-                <h2 className="td-h">Description</h2>
-              </div>
-              <p className="td-desc">
-                {task.description || task.details || task.desc || (
-                  <span className="td-muted">No description provided.</span>
-                )}
-              </p>
-            </section>
-
-            {/* Sub tasks */}
-            {!task.parent_task_id && (
-              <section className="td-panel">
-                <div className="td-panel-head">
-                  <h2 className="td-h">
-                    Sub tasks
-                    <span className="td-count">{subtasks.length}</span>
-                    {totalTime > 0 && <span className="td-chip">{totalTime} min total</span>}
-                  </h2>
-                  {isManager && (
-                    <button
-                      type="button"
-                      className="btn btn-ghost btn-sm"
-                      onClick={() => {
-                        setEditingSubTask(null);
-                        setShowSubTaskModal(true);
-                      }}
-                    >
-                      + Add sub task
-                    </button>
-                  )}
-                </div>
-
-                {subtasks.length === 0 ? (
-                  <div className="td-empty">
-                    <strong>No sub tasks yet</strong>
-                    <span>This task counts as done once every sub task is done.</span>
-                  </div>
-                ) : (
-                  <div className="td-sublist">
-                    {subtasks.map((st) => {
-                      const locked = !isManager && st.stage === "Done";
-                      const busy = stageLoading === st.id;
-
-                      return (
-                        <div key={st.id} className="td-sub" style={{ "--p": PRIORITY_COLORS[st.priority] }}>
-                          <div className="td-sub-main">
-                            <Link to={`/projects/${projectId}/tasks/${st.id}`} className="td-sub-title">
-                              {st.title}
-                            </Link>
-                            <div className="td-meta">
-                              <span className="td-stage-wrap">
-                                <button
-                                  type="button"
-                                  className={`badge badge-${st.stage?.toLowerCase().replace(/\s/g, "")} td-stage-btn${locked ? " is-static" : ""}`}
-                                  aria-haspopup={locked ? undefined : "menu"}
-                                  aria-expanded={locked ? undefined : stageDropdown === st.id}
-                                  disabled={busy}
-                                  onClick={() => {
-                                    if (busy || locked) return;
-                                    setStageDropdown((prev) => (prev === st.id ? null : st.id));
-                                  }}
-                                >
-                                  {busy ? "Moving…" : locked ? st.stage : `${st.stage} ▾`}
-                                </button>
-                                {stageDropdown === st.id && (
-                                  <div className="td-menu" role="menu">
-                                    {menuStages.map((s) => (
-                                      <button
-                                        key={s}
-                                        type="button"
-                                        role="menuitem"
-                                        aria-current={s === st.stage}
-                                        style={{ "--c": stageColor(s) }}
-                                        onClick={() => handleSubTaskStageSelect(st, s)}
-                                      >
-                                        <span className="td-dot" />
-                                        {s}
-                                      </button>
-                                    ))}
-                                  </div>
-                                )}
-                              </span>
-
-                              <span className="td-who">
-                                <span className="td-avatar" aria-hidden="true">{initials(st.assignee_name)}</span>
-                                {st.assignee_name || "Unassigned"}
-                              </span>
-                              {st.time_taken && <span className="td-chip">{st.time_taken} min</span>}
-                              {st.rework_count > 0 && (
-                                <span className="td-chip is-danger">
-                                  {st.rework_count} rework{st.rework_count > 1 ? "s" : ""}
-                                </span>
-                              )}
-                            </div>
-                          </div>
-
-                          <div className="td-sub-actions">
-                            <button
-                              type="button"
-                              className="btn btn-ghost btn-sm"
-                              onClick={() => {
-                                setEditingSubTask(st);
-                                setShowSubTaskModal(true);
-                              }}
-                            >
-                              Edit
-                            </button>
-                            {isManager && (
-                              <button
-                                type="button"
-                                className="btn btn-ghost btn-sm td-danger"
-                                onClick={() => handleDeleteSubTask(st.id)}
-                              >
-                                Delete
-                              </button>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </section>
-            )}
-
-            {/* Stage changer — only place where a stage is edited directly */}
-            {isLeaf && (
-              <section className="td-panel">
-                <div className="td-panel-head">
-                  <h2 className="td-h">Move stage</h2>
-                </div>
-                <div className="td-stagebar" role="group" aria-label="Stage">
-                  {allowedStages.map((s) => (
-                    <button
-                      key={s}
-                      type="button"
-                      onClick={() => handleStageChange(s)}
-                      disabled={changingStage !== null || (!isManager && task.stage === "Done")}
-                      aria-pressed={task.stage === s}
-                      style={{ "--c": stageColor(s) }}
-                    >
-                      <span className="td-dot" />
-                      {changingStage === s ? "Moving…" : s}
-                    </button>
-                  ))}
-                </div>
-                {!isManager && (
-                  <p className="td-hint">
-                    {task.stage === "Done"
-                      ? "Approved as Done. Only a manager can move it back."
-                      : "A manager has to approve before this can be marked Done."}
-                  </p>
-                )}
-              </section>
-            )}
-
-            {/* Comments */}
-            <section className="td-panel">
-              <div className="td-panel-head">
-                <h2 className="td-h">
-                  Comments <span className="td-count">{task.comments?.length || 0}</span>
-                </h2>
-              </div>
-              <form onSubmit={handleComment} className="td-composer">
-                <textarea
-                  className="form-textarea"
-                  value={comment}
-                  onChange={(e) => setComment(e.target.value)}
-                  onKeyDown={(e) => {
-                    if ((e.metaKey || e.ctrlKey) && e.key === "Enter") handleComment(e);
-                  }}
-                  placeholder="Write a comment… (Ctrl+Enter to post)"
-                  aria-label="Write a comment"
-                  rows={3}
-                />
-                <div className="td-composer-row">
-                  <button className="btn btn-primary btn-sm" type="submit" disabled={submitting || !comment.trim()}>
-                    {submitting ? <Loader label="Posting" size="sm" variant="button" /> : "Post comment"}
-                  </button>
-                </div>
-              </form>
-              {task.comments?.length === 0 && (
-                <p className="td-note">No comments yet. Start the conversation above.</p>
-              )}
-              {task.comments?.map((c) => (
-                <article key={c.id} className="td-comment">
-                  <span className="td-avatar lg" aria-hidden="true">{initials(c.author_name)}</span>
-                  <div className="td-comment-body">
-                    <div className="td-comment-head">
-                      <b>{c.author_name}</b>
-                      <time dateTime={c.created_at}>{new Date(c.created_at).toLocaleString()}</time>
-                    </div>
-                    <div className="td-comment-text">{c.content}</div>
-                  </div>
-                </article>
-              ))}
-            </section>
-          </div>
-
-          {/* Sidebar */}
-          <aside className="td-col" aria-label="Task details">
-            <section className="td-panel">
-              <div className="td-panel-head">
-                <h2 className="td-h">Details</h2>
-              </div>
-              <dl className="td-dl">
-                {details.map(({ l, v, cls }) => (
-                  <div key={l}>
-                    <dt>{l}</dt>
-                    <dd className={cls || undefined}>{v}</dd>
-                  </div>
-                ))}
-              </dl>
-            </section>
-
-            <section className="td-panel">
-              <div className="td-panel-head">
-                <h2 className="td-h">Activity</h2>
-              </div>
-              {task.activity?.length === 0 && <p className="td-note">No activity yet.</p>}
-              <ol className="td-tl">
-                {task.activity?.map((a) => (
-                  <li key={a.id}>
-                    <span className="who">{a.actor_name}</span>
-                    <span className="what"> {a.action}</span>
-                    {a.meta?.from && (
-                      <span className="td-muted"> ({a.meta.from} → {a.meta.to})</span>
-                    )}
-                    <time dateTime={a.created_at}>{new Date(a.created_at).toLocaleString()}</time>
-                  </li>
-                ))}
-              </ol>
-            </section>
-          </aside>
-        </div>
-      </main>
-
-      {showSubTaskModal && (
-        <Modal
-          title={editingSubTask ? "Edit sub task" : "New sub task"}
-          onClose={() => setShowSubTaskModal(false)}
-        >
-          <TaskForm
-            initial={editingSubTask}
-            members={members}
-            stages={stages}
-            hideCluster={true}
-            onSave={handleSaveSubTask}
-            onCancel={() => setShowSubTaskModal(false)}
-            saving={savingSubTask}
-            userRole={user?.role}
-            isSubtaskForm
-          />
-        </Modal>
-      )}
-
-      <ConfirmModal
-        isOpen={confirmModal.show}
-        title={confirmModal.title}
-        message={confirmModal.message}
-        confirmText={confirmModal.isDangerous ? "Delete" : "Confirm"}
-        isDangerous={confirmModal.isDangerous}
-        onConfirm={executeConfirmAction}
-        onCancel={() => setConfirmModal(CLOSED_CONFIRM)}
-        loading={confirmModal.loading}
-      />
-
-      {timeTakenModal.show && (
-        <Modal title="Time taken" onClose={closeTimeTaken}>
-          <form onSubmit={handleTimeTakenSubmit} noValidate>
-            <p className="td-modal-text">
-              Moving <strong>{timeTakenModal.subtask?.title}</strong> to{" "}
-              <strong>In Review</strong>. How long did this sub task take?
-            </p>
-            <div className="form-group">
-              <label className="form-label" htmlFor="td-time-taken">Time taken (minutes) *</label>
-              <input
-                id="td-time-taken"
-                className="form-input"
-                type="number"
-                inputMode="numeric"
-                min="1"
-                max="100000"
-                step="1"
-                value={timeTakenInput}
-                onChange={(e) => {
-                  setTimeTakenInput(e.target.value);
-                  setTimeTakenError("");
-                }}
-                placeholder="e.g. 45"
-                aria-invalid={!!timeTakenError}
-                aria-describedby={timeTakenError ? "td-time-taken-error" : undefined}
-                autoFocus
-              />
-              {timeTakenError && (
-                <div id="td-time-taken-error" className="td-field-error" role="alert">
-                  {timeTakenError}
-                </div>
-              )}
-            </div>
-            <div className="modal-actions">
-              <button type="button" className="btn btn-ghost" onClick={closeTimeTaken} disabled={timeTakenSaving}>
-                Cancel
-              </button>
-              <button type="submit" className="btn btn-primary" disabled={timeTakenSaving}>
-                {timeTakenSaving ? "Saving…" : "Confirm and move"}
-              </button>
-            </div>
-          </form>
-        </Modal>
-      )}
-
-      {managerReviewModal.show && (
-        <Modal title="Review sub task" onClose={closeReview}>
-          <p className="td-modal-text">
-            What would you like to do with{" "}
-            <strong>"{managerReviewModal.subtask?.title}"</strong>?
-          </p>
-          <div className="td-choices" role="group" aria-label="Review decision">
-            <button
-              type="button"
-              className="td-choice is-done"
-              aria-pressed={reviewAction === "done"}
-              onClick={() => setReviewAction("done")}
-            >
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <path d="M5 12.5l4.5 4.5L19 7.5" />
-              </svg>
-              <b>Mark as done</b>
-              <span>Sub task is completed</span>
-            </button>
-            <button
-              type="button"
-              className="td-choice is-rework"
-              aria-pressed={reviewAction === "rework"}
-              onClick={() => setReviewAction("rework")}
-            >
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <path d="M4 12a8 8 0 1 1 2.5 5.8" /><path d="M4 19v-5h5" />
-              </svg>
-              <b>Send for rework</b>
-              <span>Needs more work</span>
-            </button>
-          </div>
-          {reviewAction === "rework" && (
-            <div className="form-group td-rework-box">
-              <label className="form-label">New deadline (optional)</label>
-              <DatePicker
-                value={reworkDeadline}
-                onChange={(val) => setReworkDeadline(val)}
-                placeholder="dd-mm-yyyy"
-              />
-              <div className="td-hint">Set a new due date for the rework cycle.</div>
-            </div>
-          )}
-          {reviewError && (
-            <div className="td-modal-error" role="alert">{reviewError}</div>
-          )}
-          <div className="modal-actions">
-            <button type="button" className="btn btn-ghost" onClick={closeReview} disabled={reviewSaving}>
-              Cancel
-            </button>
-            <button
-              type="button"
-              className={`btn btn-primary${reviewAction === "rework" ? " is-danger" : ""}`}
-              onClick={handleManagerReviewSubmit}
-              disabled={!reviewAction || reviewSaving}
-            >
-              {reviewSaving
-                ? "Saving…"
-                : reviewAction === "done"
-                  ? "Mark done"
-                  : reviewAction === "rework"
-                    ? "Send for rework"
-                    : "Select an action"}
-            </button>
-          </div>
-        </Modal>
-      )}
+      <style>{KEYFRAMES}</style>
+      {body}
     </>
   );
 }
