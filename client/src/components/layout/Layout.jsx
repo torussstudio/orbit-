@@ -78,6 +78,124 @@ function Avatar({ user, size = 'md' }) {
 }
 
 /* ------------------------------------------------------------------ */
+/* New task-request badge (manager only)                               */
+/* ------------------------------------------------------------------ */
+
+const REQUESTS_PATH = '/requested-tasks';
+const REQUESTS_POLL_MS = 60000;
+
+// Per-user "last seen" marker: the newest request timestamp the manager has already looked at.
+const seenKey = (userId) => `orbit_requests_seen_${userId}`;
+
+const readSeen = (userId) => {
+  try {
+    const raw = localStorage.getItem(seenKey(userId));
+    if (raw === null) return null;
+    const n = Number(raw);
+    return Number.isFinite(n) ? n : null;
+  } catch {
+    return null;
+  }
+};
+
+const writeSeen = (userId, ts) => {
+  try { localStorage.setItem(seenKey(userId), String(ts)); } catch { /* storage unavailable */ }
+};
+
+const REVIEW_PATH = '/in-review';
+// NOTE: adjust to the endpoint your In Review page uses. Response can be an array or { tasks: [...] }.
+const REVIEW_ENDPOINT = '/tasks?stage=In%20Review';
+
+// Ids of tasks the manager has already seen in review. Pruned to what is still in review,
+// so a task that goes back to work and returns to review counts as new again.
+const reviewKey = (userId) => `orbit_review_seen_${userId}`;
+
+const readReviewSeen = (userId) => {
+  try {
+    const raw = localStorage.getItem(reviewKey(userId));
+    if (raw === null) return null;
+    const arr = JSON.parse(raw);
+    return Array.isArray(arr) ? arr.map(String) : null;
+  } catch {
+    return null;
+  }
+};
+
+const writeReviewSeen = (userId, ids) => {
+  try { localStorage.setItem(reviewKey(userId), JSON.stringify(ids)); } catch { /* storage unavailable */ }
+};
+
+const TASKS_PATH = '/tasks-view';
+// Same endpoint the Task View page loads (members only). Response: { tasks: [...] }.
+const MY_TASKS_ENDPOINT = '/dashboard/my-tasks';
+
+// Ids of tasks the member has already seen in Task View. Only tasks that need action are kept
+// (not In Review / Done), so a task sent back for rework counts as new again.
+const tasksKey = (userId) => `orbit_tasks_seen_${userId}`;
+
+const readTaskSeen = (userId) => {
+  try {
+    const raw = localStorage.getItem(tasksKey(userId));
+    if (raw === null) return null;
+    const arr = JSON.parse(raw);
+    return Array.isArray(arr) ? arr.map(String) : null;
+  } catch {
+    return null;
+  }
+};
+
+const writeTaskSeen = (userId, ids) => {
+  try { localStorage.setItem(tasksKey(userId), JSON.stringify(ids)); } catch { /* storage unavailable */ }
+};
+
+const BADGE_STYLES = {
+  // Expanded sidebar / mobile drawer: count pill at the right end of the row
+  pill: 'ml-auto h-5 min-w-[20px] shrink-0 px-1.5 text-[11px]',
+  // Collapsed sidebar: small count on the icon corner
+  corner: 'absolute -right-2 -top-2 h-4 min-w-[16px] px-1 text-[10px] ring-2 ring-[var(--bg-2)]',
+  // Mobile hamburger: just a dot, the drawer is closed
+  dot: 'absolute right-0.5 top-0.5 h-2.5 w-2.5 ring-2 ring-[var(--bg-2)]',
+};
+
+const prefersReducedMotion = () =>
+  typeof window !== 'undefined' && !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+
+// Red badge. Pops in when it appears and again whenever the count goes up.
+function NavBadge({ count, variant = 'pill', className = '' }) {
+  const ref = useRef(null);
+  const prev = useRef(0);
+
+  useEffect(() => {
+    if (count > prev.current && ref.current && !prefersReducedMotion()) {
+      ref.current.animate(
+        [
+          { transform: 'scale(0.6)', opacity: 0.4 },
+          { transform: 'scale(1.18)', opacity: 1, offset: 0.6 },
+          { transform: 'scale(1)', opacity: 1 },
+        ],
+        { duration: 280, easing: 'ease-out' },
+      );
+    }
+    prev.current = count;
+  }, [count]);
+
+  return (
+    <span
+      ref={ref}
+      aria-hidden={variant === 'dot' ? 'true' : undefined}
+      className={`inline-flex items-center justify-center rounded-full bg-[var(--danger)] font-semibold leading-none tabular-nums text-white ${BADGE_STYLES[variant]} ${className}`}
+    >
+      {variant !== 'dot' && (
+        <>
+          <span aria-hidden="true">{count > 99 ? '99+' : count}</span>
+          <span className="sr-only">{count} new</span>
+        </>
+      )}
+    </span>
+  );
+}
+
+/* ------------------------------------------------------------------ */
 /* Global search                                                       */
 /* ------------------------------------------------------------------ */
 
@@ -340,7 +458,15 @@ export default function Layout() {
   });
   const [mobileOpen, setMobileOpen] = useState(false);
   const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
+  const [newRequests, setNewRequests] = useState(0);
+  const [newReviews, setNewReviews] = useState(0);
+  const [newAssigned, setNewAssigned] = useState(0);
+  const totalNew = newRequests + newReviews + newAssigned;
   const mainRef = useRef(null);
+
+  const onRequestsPage = location.pathname.startsWith(REQUESTS_PATH);
+  const onReviewPage = location.pathname.startsWith(REVIEW_PATH);
+  const onTaskViewPage = location.pathname.startsWith(TASKS_PATH);
 
   const toggleCollapsed = () => {
     setSidebarCollapsed((prev) => {
@@ -357,6 +483,170 @@ export default function Layout() {
   }, [location.pathname]);
 
   useEffect(() => animateEntrance(mainRef.current), [location.pathname]);
+
+  // New task-request badge (manager only).
+  // Counts requests created after the last time the manager had Requested Tasks open.
+  // While that page is open, the marker follows the newest request, so the badge stays clear.
+  useEffect(() => {
+    const userId = user?.id;
+    if (!isManager || !userId) {
+      setNewRequests(0);
+      return undefined;
+    }
+
+    let cancelled = false;
+
+    const check = async () => {
+      try {
+        const res = await api.get('/task-requests');
+        if (cancelled) return;
+
+        const data = res.data;
+        const list = Array.isArray(data) ? data : data?.requests || data?.task_requests || [];
+        const stamps = list
+          .map((r) => new Date(r.created_at).getTime())
+          .filter(Number.isFinite);
+        const latest = stamps.length ? Math.max(...stamps) : 0;
+
+        // First run on this browser: start from what already exists, so old requests don't all show as new.
+        let seen = readSeen(userId);
+        if (seen === null) {
+          seen = latest;
+          writeSeen(userId, seen);
+        }
+
+        if (onRequestsPage) {
+          if (latest > seen) writeSeen(userId, latest);
+          setNewRequests(0);
+          return;
+        }
+
+        setNewRequests(stamps.filter((t) => t > seen).length);
+      } catch {
+        /* keep the last known count; try again on the next tick */
+      }
+    };
+
+    check();
+    const timer = setInterval(check, REQUESTS_POLL_MS);
+    const onVisible = () => { if (document.visibilityState === 'visible') check(); };
+    window.addEventListener('focus', check);
+    document.addEventListener('visibilitychange', onVisible);
+
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+      window.removeEventListener('focus', check);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [isManager, user?.id, onRequestsPage]);
+
+  // In Review badge (manager only).
+  // Counts tasks now in review that the manager has not seen yet. Opening In Review marks all as seen.
+  useEffect(() => {
+    const userId = user?.id;
+    if (!isManager || !userId) {
+      setNewReviews(0);
+      return undefined;
+    }
+
+    let cancelled = false;
+
+    const check = async () => {
+      try {
+        const res = await api.get(REVIEW_ENDPOINT);
+        if (cancelled) return;
+
+        const data = res.data;
+        const list = Array.isArray(data) ? data : data?.tasks || [];
+        const current = list
+          .filter((t) => t.stage == null || String(t.stage).toLowerCase().replace(/\s/g, '') === 'inreview')
+          .map((t) => String(t.id));
+
+        const seenIds = readReviewSeen(userId);
+
+        // First run on this browser: whatever is already in review counts as seen.
+        if (seenIds === null || onReviewPage) {
+          writeReviewSeen(userId, current);
+          setNewReviews(0);
+          return;
+        }
+
+        const kept = seenIds.filter((id) => current.includes(id));
+        if (kept.length !== seenIds.length) writeReviewSeen(userId, kept);
+        setNewReviews(current.filter((id) => !kept.includes(id)).length);
+      } catch {
+        /* keep the last known count; try again on the next tick */
+      }
+    };
+
+    check();
+    const timer = setInterval(check, REQUESTS_POLL_MS);
+    const onVisible = () => { if (document.visibilityState === 'visible') check(); };
+    window.addEventListener('focus', check);
+    document.addEventListener('visibilitychange', onVisible);
+
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+      window.removeEventListener('focus', check);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [isManager, user?.id, onReviewPage]);
+
+  // Task View badge (member only).
+  // Counts tasks assigned to this member that need action and have not been seen yet.
+  // Opening Task View marks all current tasks as seen.
+  useEffect(() => {
+    const userId = user?.id;
+    if (isManager || !userId) {
+      setNewAssigned(0);
+      return undefined;
+    }
+
+    let cancelled = false;
+
+    const check = async () => {
+      try {
+        const res = await api.get(MY_TASKS_ENDPOINT);
+        if (cancelled) return;
+
+        const data = res.data;
+        const list = Array.isArray(data) ? data : data?.tasks || [];
+        const current = list
+          .filter((t) => !['done', 'inreview'].includes(String(t.stage).toLowerCase().replace(/\s/g, '')))
+          .map((t) => String(t.id));
+
+        const seenIds = readTaskSeen(userId);
+
+        // First run on this browser: whatever is already assigned counts as seen.
+        if (seenIds === null || onTaskViewPage) {
+          writeTaskSeen(userId, current);
+          setNewAssigned(0);
+          return;
+        }
+
+        const kept = seenIds.filter((id) => current.includes(id));
+        if (kept.length !== seenIds.length) writeTaskSeen(userId, kept);
+        setNewAssigned(current.filter((id) => !kept.includes(id)).length);
+      } catch {
+        /* keep the last known count; try again on the next tick */
+      }
+    };
+
+    check();
+    const timer = setInterval(check, REQUESTS_POLL_MS);
+    const onVisible = () => { if (document.visibilityState === 'visible') check(); };
+    window.addEventListener('focus', check);
+    document.addEventListener('visibilitychange', onVisible);
+
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+      window.removeEventListener('focus', check);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [isManager, user?.id, onTaskViewPage]);
 
   // Close drawer on Escape, and lock body scroll while it is open
   useEffect(() => {
@@ -417,13 +707,13 @@ export default function Layout() {
 
   const navItems = [
     { to: '/', end: true, icon: ICONS.home, label: 'Dashboard' },
-    ...(!isManager ? [{ to: '/tasks-view', icon: ICONS.tasks, label: 'Task View' }] : []),
+    ...(!isManager ? [{ to: TASKS_PATH, icon: ICONS.tasks, label: 'Task View', badge: newAssigned }] : []),
     ...(!isManager ? [{ to: '/task-request', icon: ICONS.inbox, label: 'Task Request' }] : []),
     ...(isManager ? [{ to: '/projects', icon: ICONS.projects, label: 'Projects' }] : []),
     { to: '/calendar', icon: ICONS.calendar, label: 'Calendar' },
     ...(isManager ? [{ to: '/members', icon: ICONS.members, label: 'Members' }] : []),
-    ...(isManager ? [{ to: '/in-review', icon: ICONS.review, label: 'In Review' }] : []),
-    ...(isManager ? [{ to: '/requested-tasks', icon: ICONS.sheet, label: 'Requested Tasks' }] : []),
+    ...(isManager ? [{ to: REVIEW_PATH, icon: ICONS.review, label: 'In Review', badge: newReviews }] : []),
+    ...(isManager ? [{ to: REQUESTS_PATH, icon: ICONS.sheet, label: 'Requested Tasks', badge: newRequests }] : []),
   ];
 
   // Collapse only applies from md up. The mobile drawer always shows full labels.
@@ -502,7 +792,7 @@ export default function Layout() {
                   <NavLink
                     to={item.to}
                     end={item.end}
-                    title={item.label}
+                    title={item.badge > 0 ? `${item.label} (${item.badge} new)` : item.label}
                     onClick={() => setMobileOpen(false)}
                     className={({ isActive }) => [
                       'group relative flex items-center gap-2.5 rounded-lg px-3 py-2.5 text-[14px] font-medium no-underline md:py-2 md:text-[13.5px]',
@@ -521,8 +811,16 @@ export default function Layout() {
                           aria-hidden="true"
                           className={`absolute -left-3 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-r-full bg-[var(--accent)] transition-opacity duration-150 motion-reduce:transition-none ${isActive ? 'opacity-100' : 'opacity-0'}`}
                         />
-                        <Icon d={item.icon} />
+                        <span className="relative flex shrink-0">
+                          <Icon d={item.icon} />
+                          {/* Collapsed sidebar: no label, so the count sits on the icon corner */}
+                          {item.badge > 0 && sidebarCollapsed && (
+                            <NavBadge count={item.badge} variant="corner" className="hidden md:inline-flex" />
+                          )}
+                        </span>
                         <span className={`truncate ${labelClass}`}>{item.label}</span>
+                        {/* Expanded sidebar / mobile drawer: red count pill, inline */}
+                        {item.badge > 0 && <NavBadge count={item.badge} className={labelClass} />}
                       </>
                     )}
                   </NavLink>
@@ -540,12 +838,14 @@ export default function Layout() {
           {/* Mobile hamburger */}
           <button
             type="button"
-            className={`flex shrink-0 cursor-pointer items-center justify-center rounded-lg border-none bg-transparent p-1.5 text-[var(--text-2)] hover:bg-[var(--bg-3)] hover:text-[var(--text)] md:hidden ${focusRing}`}
+            className={`relative flex shrink-0 cursor-pointer items-center justify-center rounded-lg border-none bg-transparent p-1.5 text-[var(--text-2)] hover:bg-[var(--bg-3)] hover:text-[var(--text)] md:hidden ${focusRing}`}
             onClick={() => setMobileOpen(true)}
-            aria-label="Open menu"
+            aria-label={totalNew > 0 ? `Open menu, ${totalNew} new` : 'Open menu'}
             aria-expanded={mobileOpen}
           >
             <Icon d={ICONS.menu} className="h-5 w-5" />
+            {/* Mobile: the drawer is closed, so hint that something new is inside */}
+            {totalNew > 0 && <NavBadge count={totalNew} variant="dot" />}
           </button>
 
           {/* Search: inline from md up */}
@@ -631,6 +931,15 @@ export default function Layout() {
             </div>
           )}
         </header>
+
+        {/* Screen readers: announce when new task requests or review items arrive */}
+        <div role="status" aria-live="polite" className="sr-only">
+          {[
+            newRequests > 0 && `${newRequests} new task ${newRequests === 1 ? 'request' : 'requests'}`,
+            newReviews > 0 && `${newReviews} ${newReviews === 1 ? 'task' : 'tasks'} waiting for review`,
+            newAssigned > 0 && `${newAssigned} new ${newAssigned === 1 ? 'task' : 'tasks'} for you`,
+          ].filter(Boolean).join('. ')}
+        </div>
 
         <main
           id="main-content"
