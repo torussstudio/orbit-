@@ -298,7 +298,9 @@ async function getTaskById(taskId) {
        assignee_agg.assignee_name,
        assignee_agg.assignees,
        p.name AS project_name,
-       p.custom_stages AS project_stages
+       p.custom_stages AS project_stages,
+       p.milanote_url AS project_milanote_url,
+       p.docs_url AS project_docs_url
      FROM tasks t
      LEFT JOIN projects p
        ON p.id = t.project_id

@@ -6,6 +6,7 @@ import Modal from '../components/ui/Modal';
 import ConfirmModal from '../components/ui/ConfirmModal';
 import ProjectForm from '../components/projects/ProjectForm';
 import Loader from '../components/ui/Loader';
+   import ProjectLinks from '../components/projects/ProjectLinks';
 
 /* -------------------------------------------------------------------------- */
 /* Task statistics                                                            */
@@ -217,6 +218,10 @@ const ProjectCard = memo(function ProjectCard({
         {p.description || 'No description added.'}
       </p>
 
+      {/* Milanote / Docs / Sheets buttons (only the ones this project has).
+          They sit above the card-wide link, so clicking one opens that link. */}
+      <ProjectLinks project={p} className="mb-4" />
+
       {/* Progress: leaf tasks only (tasks without subtasks + all subtasks) */}
       {stats === undefined && (
         <div className={`mt-auto ${PULSE}`} aria-hidden="true">
@@ -295,6 +300,7 @@ export default function Projects() {
 
   const [modal, setModal] = useState(null); // null | { editing: project | null }
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState('');
   const [editLoadingId, setEditLoadingId] = useState(null);
   const [showArchived, setShowArchived] = useState(false);
   const [confirmModal, setConfirmModal] = useState(CLOSED_CONFIRM);
@@ -323,8 +329,14 @@ export default function Projects() {
 
   /* ---------- modals ---------- */
 
-  const openCreate = useCallback(() => setModal({ editing: null }), []);
-  const closeModal = useCallback(() => setModal(null), []);
+  const openCreate = useCallback(() => {
+    setSaveError('');
+    setModal({ editing: null });
+  }, []);
+  const closeModal = useCallback(() => {
+    setSaveError('');
+    setModal(null);
+  }, []);
   const closeBlocked = useCallback(() => setDeleteBlocked(null), []);
   const closeConfirm = useCallback(() => setConfirmModal(CLOSED_CONFIRM), []);
   const dismissError = useCallback(() => setErrorMsg(''), []);
@@ -354,6 +366,7 @@ export default function Projects() {
     setEditLoadingId(p.id);
     try {
       const { data } = await api.get(`/projects/${p.id}`);
+      setSaveError('');
       setModal({ editing: data });
     } catch {
       setErrorMsg("We couldn't open this project for editing. Please try again.");
@@ -366,11 +379,15 @@ export default function Projects() {
   const handleSave = useCallback(
     async (data) => {
       setSaving(true);
+      setSaveError('');
       try {
         if (editingId) await api.put(`/projects/${editingId}`, data);
         else await api.post('/projects', data);
         setModal(null);
         load();
+      } catch (error) {
+        // Keep the modal open so nothing the user typed is lost.
+        setSaveError(error.response?.data?.error || "We couldn't save the project. Please try again.");
       } finally {
         setSaving(false);
       }
@@ -599,7 +616,13 @@ export default function Projects() {
 
       {modal && (
         <Modal title={modal.editing ? 'Edit project' : 'New project'} onClose={closeModal}>
-          <ProjectForm initial={modal.editing} onSave={handleSave} onCancel={closeModal} saving={saving} />
+          <ProjectForm
+            initial={modal.editing}
+            onSave={handleSave}
+            onCancel={closeModal}
+            saving={saving}
+            error={saveError}
+          />
         </Modal>
       )}
 

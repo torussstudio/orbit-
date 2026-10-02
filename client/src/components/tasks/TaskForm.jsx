@@ -162,10 +162,10 @@ export default function TaskForm({ initial, members, allMembers, clusters, stage
   // only if the task is a sub task, or a main task with NO sub tasks
   // (standalone). A main task that has sub tasks derives both from them,
   // so those fields are hidden and excluded from the payload.
- const showEditFields =
-  !isSubtaskForm &&
-  !!initial &&
-  !!initial.parent_task_id;
+  const showEditFields =
+    !isSubtaskForm &&
+    !!initial &&
+    (!!initial.parent_task_id || !hasExistingSubtasks);
 
   // Which flavour of the assignee + due date block to render, if any.
   const ownerMode = isSubtaskForm

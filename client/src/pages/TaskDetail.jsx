@@ -8,6 +8,7 @@ import Modal from "../components/ui/Modal";
 import ConfirmModal from "../components/ui/ConfirmModal";
 import TaskForm from "../components/tasks/TaskForm";
 import Loader from "../components/ui/Loader";
+import ProjectLinks from "../components/projects/ProjectLinks";
 
 /* ===========================================================================
  * Constants & helpers
@@ -57,21 +58,18 @@ const stageVars = (stage) => {
 
 const KEYFRAMES = `
 @keyframes td-rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
-@keyframes td-ping { 0% { transform: scale(1); opacity: .45; } 80%, 100% { transform: scale(2.6); opacity: 0; } }
 @keyframes td-pop { from { opacity: 0; transform: scale(.96) translateY(-4px); } to { opacity: 1; transform: none; } }
 `;
 
 // Layout
 const GRID = "grid grid-cols-1 min-[901px]:grid-cols-[minmax(0,1fr)_340px] gap-6 items-start w-full max-w-[1180px] mx-auto";
 const COL_BASE = "flex flex-col gap-4 min-w-0";
-const COL = `${COL_BASE} [&>:nth-child(2)]:[animation-delay:45ms] [&>:nth-child(3)]:[animation-delay:90ms] [&>:nth-child(4)]:[animation-delay:135ms] [&>:nth-child(5)]:[animation-delay:180ms]`;
+const COL = COL_BASE;
 const PAGE_PAD = "max-[640px]:!px-4"; // mobile gutter, same as the old !important overrides
 
 // Panels
 const PANEL =
-  "px-6 py-5 bg-[color:var(--bg-2)] rounded-2xl ring-1 ring-inset ring-[color:color-mix(in_srgb,var(--border)_75%,transparent)] shadow-[0_14px_32px_-24px_rgba(15,23,42,0.32)]";
-const PANEL_ANIM =
-  "[animation:td-rise_.35s_cubic-bezier(.22,1,.36,1)_both] motion-reduce:[animation:none]";
+  "px-6 py-5 bg-[color:var(--bg-2)] rounded-xl border border-[color:var(--border)] shadow-[0_1px_2px_rgba(15,23,42,0.05)]";
 const PANEL_FOCUS =
   "[&_button:focus-visible]:[outline:2px_solid_var(--accent)] [&_button:focus-visible]:[outline-offset:2px] [&_a:focus-visible]:[outline:2px_solid_var(--accent)] [&_a:focus-visible]:[outline-offset:2px]";
 const PANEL_HEAD = "flex items-center justify-between gap-2.5 flex-wrap mb-4";
@@ -86,7 +84,7 @@ const SKEL_PULSE =
 
 // Sub tasks
 const SUB =
-  "relative flex items-center justify-between flex-wrap gap-3 py-3 pr-3.5 pl-[18px] bg-[color:var(--bg-3)] rounded-xl transition-[background-color,box-shadow] duration-200 hover:bg-[color:color-mix(in_srgb,var(--bg-3)_70%,var(--bg-4))] hover:shadow-[0_12px_24px_-18px_rgba(15,23,42,0.45)] motion-reduce:transition-none before:content-[''] before:absolute before:left-0 before:top-2.5 before:bottom-2.5 before:w-[3px] before:rounded-[3px]";
+  "relative flex items-center justify-between flex-wrap gap-3 py-3 pr-3.5 pl-[18px] bg-[color:var(--bg-3)] rounded-lg transition-colors duration-150 hover:bg-[color:color-mix(in_srgb,var(--bg-3)_70%,var(--bg-4))] motion-reduce:transition-none before:content-[''] before:absolute before:left-0 before:top-2.5 before:bottom-2.5 before:w-[3px] before:rounded-[3px]";
 const META = "flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs text-[color:var(--text-3)]";
 const STAGE_BTN =
   "![font:inherit] !border-0 !cursor-pointer transition-[opacity,transform] duration-150 disabled:opacity-70 motion-reduce:transition-none";
@@ -158,21 +156,27 @@ function useTaskDetail({ taskId, projectId, isManager, onNotice }) {
     fullCtl.current = c;
     const { signal } = c;
     const { projectId: pid, isManager: manager } = ctx.current;
+    // Project and members rarely change while the page is open, so they are
+    // fetched once. Every later refresh (stage move, comment, ...) only
+    // re-fetches the task: 1 request instead of 3.
+    const first = !hasLoaded.current;
 
     return Promise.all([
       api.get(`/tasks/${taskId}`, { signal }),
-      manager
+      first && manager
         ? api.get(`/projects/${pid}`, { signal }).catch(() => ({ data: null }))
-        : Promise.resolve({ data: null }),
-      api.get("/members", { signal }).catch(() => ({ data: EMPTY })),
+        : null,
+      first ? api.get("/members", { signal }).catch(() => ({ data: EMPTY })) : null,
     ])
       .then(([t, p, m]) => {
         if (signal.aborted) return;
         hasLoaded.current = true;
         setLoadError(null);
         setTask(t.data);
-        setProject(p.data);
-        setMembers(m.data);
+        if (first) {
+          setProject(p ? p.data : null);
+          setMembers(m ? m.data : EMPTY);
+        }
       })
       .catch((err) => {
         if (isAbort(err) || signal.aborted) return;
@@ -260,7 +264,7 @@ function Count({ n }) {
 function Panel({ title, raised, children, extraHead, className }) {
   return (
     <section
-      className={cx(PANEL, PANEL_ANIM, PANEL_FOCUS, raised && "relative z-[5]", className)}
+      className={cx(PANEL, PANEL_FOCUS, raised && "relative z-[5]", className)}
     >
       <div className={PANEL_HEAD}>
         <h2 className={PANEL_H}>{title}</h2>
@@ -274,7 +278,7 @@ function Panel({ title, raised, children, extraHead, className }) {
 function Empty({ title, children, actions, alert }) {
   return (
     <div
-      className="flex flex-col items-center gap-1 px-4 py-9 text-center border border-dashed border-[color:var(--border)] rounded-2xl text-[13px] text-[color:var(--text-3)]"
+      className="flex flex-col items-center gap-1 px-4 py-9 text-center border border-dashed border-[color:var(--border)] rounded-xl text-[13px] text-[color:var(--text-3)]"
       role={alert ? "alert" : undefined}
     >
       <span className="grid mb-2 size-10 place-items-center rounded-xl bg-[color:var(--bg-3)] text-[color:var(--text-3)]" aria-hidden="true">
@@ -335,8 +339,25 @@ const DetailSkeleton = memo(function DetailSkeleton() {
  * Header
  * ========================================================================= */
 
-const TaskHeader = memo(function TaskHeader({ task, project, projectId, isManager }) {
+const TaskHeader = memo(function TaskHeader({ task, project, projectId, isManager, assigneeLabel }) {
   const late = task.stage !== "Done" && !!task.due_date && isOverdue(task.due_date);
+  // Links come from the task payload (project_*_url) so members — who don't
+  // load the full project — see them too. Fall back to `project` for managers.
+  const projectLinks = useMemo(
+    () => ({
+      name: task.project_name || project?.name,
+      milanote_url: task.project_milanote_url ?? project?.milanote_url,
+      docs_url: task.project_docs_url ?? project?.docs_url,
+    }),
+    [
+      task.project_name,
+      task.project_milanote_url,
+      task.project_docs_url,
+      project?.name,
+      project?.milanote_url,
+      project?.docs_url,
+    ],
+  );
   return (
     <div className={cx("page-header", PAGE_PAD)}>
       <div className="min-w-0">
@@ -380,8 +401,8 @@ const TaskHeader = memo(function TaskHeader({ task, project, projectId, isManage
         </h1>
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 mt-3 text-xs text-[color:var(--text-3)]">
           <span className="inline-flex items-center gap-1.5">
-            <Avatar name={task.assignee_name} />
-            {task.assignee_name || "Unassigned"}
+            <Avatar name={assigneeLabel} />
+            {assigneeLabel}
           </span>
           {task.due_date && (
             <span
@@ -395,6 +416,7 @@ const TaskHeader = memo(function TaskHeader({ task, project, projectId, isManage
             </span>
           )}
         </div>
+        <ProjectLinks project={projectLinks} size="md" className="mt-3" />
       </div>
       <div className="flex flex-wrap items-center gap-2">
         <span className={`badge badge-${task.priority}`}>{task.priority}</span>
@@ -444,9 +466,6 @@ const StatusPanel = memo(function StatusPanel({ stages, stageIdx, doneSubs, tota
                   current && "shadow-[0_0_0_4px_color-mix(in_srgb,var(--c)_22%,transparent)]",
                 )}
               >
-                {current && (
-                  <span className="absolute -inset-0.5 rounded-full bg-[color:var(--c)] pointer-events-none [animation:td-ping_2s_ease-out_infinite] motion-reduce:[animation:none]" />
-                )}
               </span>
               {s}
             </li>
@@ -1125,15 +1144,29 @@ export default function TaskDetail() {
     const subtasks = task.subtasks || EMPTY;
     let doneSubs = 0;
     let totalTime = 0;
+    // Main tasks that use sub tasks aren't assigned directly: the people on the
+    // task are the assignees of its sub tasks.
+    const subAssignees = new Set();
     for (const s of subtasks) {
       if (s.stage === "Done") doneSubs++;
       totalTime += s.time_taken || 0;
+      if (Array.isArray(s.assignees) && s.assignees.length) {
+        for (const a of s.assignees) if (a?.name) subAssignees.add(a.name);
+      } else if (s.assignee_name) {
+        for (const n of s.assignee_name.split(", ")) if (n) subAssignees.add(n);
+      }
     }
+    const assigneeLabel =
+      !task.parent_task_id && subtasks.length > 0
+        ? subAssignees.size > 0
+          ? [...subAssignees].join(", ")
+          : "Unassigned"
+        : task.assignee_name || "Unassigned";
     const dueOverdue =
       task.stage !== "Done" && !!task.due_date && isOverdue(task.due_date);
 
     const details = [
-      { label: "Assignee", value: task.assignee_name || "—" },
+      { label: "Assignee", value: assigneeLabel === "Unassigned" ? "—" : assigneeLabel },
       { label: "Priority", value: task.priority, className: "capitalize" },
       {
         label: "Due date",
@@ -1156,6 +1189,7 @@ export default function TaskDetail() {
       totalTime,
       stageIdx: stages.indexOf(task.stage),
       details,
+      assigneeLabel,
     };
   }, [task, project, isManager]);
 
@@ -1346,13 +1380,19 @@ export default function TaskDetail() {
       </div>
     );
   } else {
-    const { stages, allowedStages, subtasks, isLeaf, doneSubs, totalTime, stageIdx, details } =
+    const { stages, allowedStages, subtasks, isLeaf, doneSubs, totalTime, stageIdx, details, assigneeLabel } =
       view;
     const isMain = !task.parent_task_id;
 
     body = (
       <>
-        <TaskHeader task={task} project={project} projectId={projectId} isManager={isManager} />
+        <TaskHeader
+          task={task}
+          project={project}
+          projectId={projectId}
+          isManager={isManager}
+          assigneeLabel={assigneeLabel}
+        />
 
         <main className={cx("page-body", PAGE_PAD)}>
           {notice && <Notice message={notice} onClose={dismissNotice} />}

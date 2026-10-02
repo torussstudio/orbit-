@@ -1,5 +1,6 @@
 import { useId, useState } from 'react';
 import Loader from '../ui/Loader';
+import { normalizeUrl, PROJECT_LINKS } from './ProjectLinks';
 
 const DEFAULT_STAGES = ["Todo", "In Progress", "In Review", "Done"];
 
@@ -8,6 +9,11 @@ const STATUSES = [
   { value: 'on_hold', label: 'On hold', dot: 'bg-[#f59e0b]' },
   { value: 'completed', label: 'Completed', dot: 'bg-[#3b82f6]' },
 ];
+
+const LINK_PLACEHOLDERS = {
+  milanote_url: 'https://app.milanote.com/…',
+  docs_url: 'https://docs.google.com/document/…',
+};
 
 /* ------------------------------------------------------------------ */
 /* Shared class strings (Tailwind only, driven by your CSS variables). */
@@ -90,7 +96,7 @@ function Field({ label, htmlFor, optional = false, required = false, children })
 
 /* ------------------------------------------------------------------ */
 
-export default function ProjectForm({ initial, onSave, onCancel, saving = false }) {
+export default function ProjectForm({ initial, onSave, onCancel, saving = false, error = '' }) {
   const uid = useId();
   const ids = {
     name: `${uid}-name`,
@@ -102,6 +108,8 @@ export default function ProjectForm({ initial, onSave, onCancel, saving = false 
     newStage: `${uid}-new-stage`,
     stageError: `${uid}-stage-error`,
     stageHint: `${uid}-stage-hint`,
+    linksLabel: `${uid}-links-label`,
+    linksHint: `${uid}-links-hint`,
   };
 
   const [form, setForm] = useState({
@@ -113,10 +121,13 @@ export default function ProjectForm({ initial, onSave, onCancel, saving = false 
     // An empty array is truthy, so check the length: a project saved with
     // no stages should fall back to the defaults, not render an empty board.
     custom_stages: initial?.custom_stages?.length ? initial.custom_stages : [...DEFAULT_STAGES],
+    milanote_url: initial?.milanote_url || '',
+    docs_url: initial?.docs_url || '',
   });
   const [newStage, setNewStage] = useState('');
   const [nameError, setNameError] = useState('');
   const [stageError, setStageError] = useState('');
+  const [linkErrors, setLinkErrors] = useState({});
 
   const addStage = () => {
     const value = newStage.trim();
@@ -134,13 +145,39 @@ export default function ProjectForm({ initial, onSave, onCancel, saving = false 
   const removeStage = (s) =>
     setForm(f => ({ ...f, custom_stages: f.custom_stages.filter(x => x !== s) }));
 
+  const setLink = (key, value) => {
+    setForm(f => ({ ...f, [key]: value }));
+    setLinkErrors(errs => (errs[key] ? { ...errs, [key]: '' } : errs));
+  };
+
+  // On blur, tidy the value (adds https:// if it was left out) or show the error.
+  const blurLink = (key) => {
+    const { url, error: err } = normalizeUrl(form[key]);
+    if (err) setLinkErrors(errs => ({ ...errs, [key]: err }));
+    else if (url !== form[key]) setForm(f => ({ ...f, [key]: url }));
+  };
+
   const handleSave = () => {
     if (!form.name.trim()) {
       setNameError('Enter a project name.');
       return;
     }
+
+    const links = {};
+    const errs = {};
+    for (const { key } of PROJECT_LINKS) {
+      const { url, error: err } = normalizeUrl(form[key]);
+      if (err) errs[key] = err;
+      else links[key] = url; // '' clears the link on the server
+    }
+    if (Object.keys(errs).length) {
+      setLinkErrors(errs);
+      return;
+    }
+
     onSave({
       ...form,
+      ...links,
       name: form.name.trim(),
       client_name: form.client_name?.trim() || '',
     });
@@ -221,6 +258,50 @@ export default function ProjectForm({ initial, onSave, onCancel, saving = false 
             </label>
           ))}
         </div>
+      </div>
+
+      {/* Project links */}
+      <div
+        role="group"
+        aria-labelledby={ids.linksLabel}
+        className="flex flex-col gap-3 rounded-lg border border-[color:var(--border)] bg-[var(--bg-3)] p-4"
+      >
+        <div>
+          <h3 id={ids.linksLabel} className="m-0 text-[13px] font-medium tracking-[-0.005em]">
+            Project links
+          </h3>
+          <p id={ids.linksHint} className="mt-0.5 text-[11px] text-[color:var(--text-3)]">
+            Shown as buttons on the project card and details page. Leave empty to hide a button.
+          </p>
+        </div>
+
+        {PROJECT_LINKS.map(({ key, label }) => {
+          const inputId = `${uid}-${key}`;
+          const errId = `${inputId}-error`;
+          return (
+            <div key={key}>
+              <label htmlFor={inputId} className={labelCls}>
+                {label}
+                <span className="ml-1 font-normal text-[color:var(--text-3)]">(optional)</span>
+              </label>
+              <input
+                id={inputId}
+                type="url"
+                inputMode="url"
+                autoComplete="off"
+                spellCheck={false}
+                className={`${inputCls} bg-[var(--bg-2)]`}
+                value={form[key]}
+                onChange={e => setLink(key, e.target.value)}
+                onBlur={() => blurLink(key)}
+                placeholder={LINK_PLACEHOLDERS[key]}
+                aria-invalid={!!linkErrors[key]}
+                aria-describedby={linkErrors[key] ? errId : ids.linksHint}
+              />
+              <FieldError id={errId}>{linkErrors[key]}</FieldError>
+            </div>
+          );
+        })}
       </div>
 
       {/* Task stages */}
@@ -318,6 +399,16 @@ export default function ProjectForm({ initial, onSave, onCancel, saving = false 
           <FieldError id={ids.stageError}>{stageError}</FieldError>
         </div>
       </div>
+
+      {error && (
+        <p
+          role="alert"
+          className="m-0 flex items-center gap-1.5 rounded-lg border border-[color:color-mix(in_srgb,var(--danger)_28%,transparent)] bg-[color:color-mix(in_srgb,var(--danger)_10%,transparent)] px-3 py-2 text-[13px] text-[color:var(--danger)]"
+        >
+          <AlertIcon />
+          {error}
+        </p>
+      )}
 
       <div className="flex items-center justify-end gap-2 pt-1">
         <button

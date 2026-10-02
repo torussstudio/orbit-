@@ -34,6 +34,24 @@ const selectCls = [
   focusRing,
 ].join(' ');
 
+// Replaces the global .page-header / .page-title / .page-subtitle / .page-body
+const pageHeaderCls = [
+  'flex flex-wrap items-center justify-between gap-3 px-8 pt-7',
+  'max-md:items-start max-md:px-4 max-md:pt-5',
+  'max-sm:gap-4',
+  'max-[480px]:px-3',
+  '[&>*]:min-w-0',
+].join(' ');
+const pageTitleCls =
+  'text-[22px] font-bold tracking-[-0.4px] text-[var(--text)] max-md:text-xl';
+const pageSubtitleCls = 'mt-0.5 text-[13px] text-[var(--text-2)]';
+const pageBodyCls = [
+  'flex-1 px-8 pb-10 pt-6',
+  'max-md:px-4 max-md:pb-8 max-md:pt-[18px]',
+  'max-[480px]:px-3',
+  '[&>*]:min-w-0',
+].join(' ');
+
 const Icon = ({ d, className = 'h-3.5 w-3.5 shrink-0' }) => (
   <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
     <path d={d} />
@@ -285,12 +303,12 @@ export default function InReview() {
   };
 
   const handleRework = async () => {
-  const { subtask } = reworkModal;
-  if (reworkDeadline && reworkDeadline < toISODate()) {
-    setNotice('New deadline cannot be in the past.');
-    closeRework();
-    return;
-  }
+    const { subtask } = reworkModal;
+    if (reworkDeadline && reworkDeadline < toISODate()) {
+      setNotice('New deadline cannot be in the past.');
+      closeRework();
+      return;
+    }
     setBusy({ id: subtask.id, type: 'rework' });
     setNotice('');
     try {
@@ -336,14 +354,14 @@ export default function InReview() {
 
   return (
     <>
-      <div className="page-header">
+      <div className={pageHeaderCls}>
         <div>
-          <div className="page-title">In review</div>
-          <div className="page-subtitle">{loading ? 'Loading the review queue' : subtitle}</div>
+          <div className={pageTitleCls}>In review</div>
+          <div className={pageSubtitleCls}>{loading ? 'Loading the review queue' : subtitle}</div>
         </div>
       </div>
 
-      <div className="page-body">
+      <div className={pageBodyCls}>
         {notice && (
           <div
             role="alert"
@@ -484,7 +502,12 @@ export default function InReview() {
               New deadline
               <span className="ml-1 font-normal text-[var(--text-3)]">(optional)</span>
             </div>
-          <DatePicker value={reworkDeadline} onChange={(val) => setReworkDeadline(val)} placeholder="dd-mm-yyyy" minDate={toISODate()} />
+            <DatePicker
+              value={reworkDeadline}
+              onChange={(val) => setReworkDeadline(val)}
+              placeholder="dd-mm-yyyy"
+              minDate={toISODate()}
+            />
             <p className="m-0 mt-1.5 text-xs text-[var(--text-3)]">Set a new due date for this round of rework.</p>
           </div>
 

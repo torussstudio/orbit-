@@ -244,6 +244,12 @@ const initDB = async () => {
     `);
   });
 
+  // Optional external links shown as buttons on the project card/details page.
+  // Nullable and idempotent (ADD COLUMN IF NOT EXISTS), so safe on every boot
+  // and on fresh databases.
+  await ensureColumn("projects", "milanote_url TEXT");
+  await ensureColumn("projects", "docs_url TEXT");
+
   await pool.query(`
     CREATE TABLE IF NOT EXISTS clusters (
       id ${idDefinition(clusterIdType)},

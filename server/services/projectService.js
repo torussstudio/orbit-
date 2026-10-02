@@ -1,6 +1,46 @@
 const db = require("../db");
 const { assertProjectAccess } = require("./accessControl");
 
+/* -------------------------------------------------------------------------- */
+/* Project links (Milanote / Docs)                                            */
+/* -------------------------------------------------------------------------- */
+
+const LINK_LABELS = {
+  milanote_url: "Milanote",
+  docs_url: "Docs",
+};
+
+// Returns:
+//   undefined -> field not sent (keep what's stored)
+//   ""        -> clear the link
+//   "https://…" -> validated, http(s) only (blocks javascript:, data:, etc.)
+const parseLink = (value, label) => {
+  if (value === undefined) return undefined;
+  if (value === null) return "";
+  const raw = String(value).trim();
+  if (!raw) return "";
+  if (raw.length > 2000) throw new Error(`${label} link is too long.`);
+
+  const withScheme = /^[a-z][a-z0-9+.-]*:/i.test(raw) ? raw : `https://${raw}`;
+  let url;
+  try {
+    url = new URL(withScheme);
+  } catch {
+    throw new Error(`${label} link is not a valid URL.`);
+  }
+  if (!["http:", "https:"].includes(url.protocol) || !url.hostname.includes(".")) {
+    throw new Error(`${label} link must be a valid http(s) URL.`);
+  }
+  return url.href;
+};
+
+const parseAllLinks = (data) => ({
+  milanote_url: parseLink(data.milanote_url, LINK_LABELS.milanote_url),
+  docs_url: parseLink(data.docs_url, LINK_LABELS.docs_url),
+});
+
+/* -------------------------------------------------------------------------- */
+
 const getAllProjects = async (user) => {
   let q, params;
   if (user.role === "manager") {
@@ -69,12 +109,16 @@ const createProject = async (user, data) => {
     member_ids,
     custom_stages,
   } = data;
+
+  // Validate before opening a transaction.
+  const links = parseAllLinks(data);
+
   const client = await db.connect();
   try {
     await client.query("BEGIN");
     const { rows } = await client.query(
-      `INSERT INTO projects(name,client_name,description,status,start_date,end_date,custom_stages,created_by,sort_order)
-       VALUES($1,$2,$3,$4,$5,$6,$7,$8,(SELECT COALESCE(MIN(sort_order), 0) - 1 FROM projects)) RETURNING *`,
+      `INSERT INTO projects(name,client_name,description,status,start_date,end_date,custom_stages,created_by,sort_order,milanote_url,docs_url)
+       VALUES($1,$2,$3,$4,$5,$6,$7,$8,(SELECT COALESCE(MIN(sort_order), 0) - 1 FROM projects),$9,$10) RETURNING *`,
       [
         name,
         client_name,
@@ -91,6 +135,8 @@ const createProject = async (user, data) => {
           ]
         ),
         user.id,
+        links.milanote_url || null,
+        links.docs_url || null,
       ]
     );
     const proj = rows[0];
@@ -135,6 +181,12 @@ const updateProject = async (projectId, data) => {
     custom_stages,
     member_ids,
   } = data;
+
+  // Validate before opening a transaction.
+  // undefined -> NULL param -> keep the stored value; "" -> clear; url -> set.
+  const links = parseAllLinks(data);
+  const keepIfUndefined = (v) => (v === undefined ? null : v);
+
   const client = await db.connect();
   try {
     await client.query("BEGIN");
@@ -142,7 +194,9 @@ const updateProject = async (projectId, data) => {
       ? await client.query("SELECT member_id FROM project_members WHERE project_id=$1", [projectId])
       : { rows: [] };
     const { rows } = await client.query(
-      `UPDATE projects SET name=$1,client_name=$2,description=$3,status=$4,start_date=$5,end_date=$6,custom_stages=$7
+      `UPDATE projects SET name=$1,client_name=$2,description=$3,status=$4,start_date=$5,end_date=$6,custom_stages=$7,
+         milanote_url = CASE WHEN $9::text IS NULL THEN milanote_url WHEN $9::text = '' THEN NULL ELSE $9::text END,
+         docs_url     = CASE WHEN $10::text IS NULL THEN docs_url     WHEN $10::text = '' THEN NULL ELSE $10::text END
        WHERE id=$8 RETURNING *`,
       [
         name,
@@ -153,6 +207,8 @@ const updateProject = async (projectId, data) => {
         end_date || null,
         JSON.stringify(custom_stages),
         projectId,
+        keepIfUndefined(links.milanote_url),
+        keepIfUndefined(links.docs_url),
       ]
     );
     if (member_ids) {

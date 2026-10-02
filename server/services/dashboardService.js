@@ -103,6 +103,8 @@ async function getTasksList(stage) {
 async function getMyTasks(userId) {
   const tasks = await db.query(
     `SELECT t.*, p.name AS project_name,
+      p.milanote_url AS project_milanote_url,
+      p.docs_url AS project_docs_url,
       pt.title AS parent_title,
       COALESCE(c.name, pc.name) AS cluster_name
      FROM tasks t

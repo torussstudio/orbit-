@@ -5,6 +5,7 @@ import Tasks from "./Tasks";
 import Clusters from "./Clusters";
 import Credentials from "./Credentials";
 import Knowledge from "./Knowledge";
+   import ProjectLinks from "../components/projects/ProjectLinks";
 
 /* -------------------------------------------------------------------------- */
 /* Tabs                                                                       */
@@ -172,7 +173,7 @@ function ErrorState({ kind, onRetry }) {
   );
 }
 
-// Logo tile, breadcrumb, name, client and description. `project` is null while loading.
+// Logo tile, breadcrumb, name, client, description and links. `project` is null while loading.
 const ProjectSummary = memo(function ProjectSummary({ project }) {
   const loading = !project;
   const initial = (project?.name?.trim()?.[0] || "").toUpperCase();
@@ -236,6 +237,7 @@ const ProjectSummary = memo(function ProjectSummary({ project }) {
                 {project.description}
               </p>
             )}
+            <ProjectLinks project={project} size="md" className="mt-3" />
           </>
         )}
       </div>
