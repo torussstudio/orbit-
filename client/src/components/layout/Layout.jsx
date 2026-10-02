@@ -103,8 +103,8 @@ const writeSeen = (userId, ts) => {
 };
 
 const REVIEW_PATH = '/in-review';
-// NOTE: adjust to the endpoint your In Review page uses. Response can be an array or { tasks: [...] }.
-const REVIEW_ENDPOINT = '/tasks?stage=In%20Review';
+// Same endpoint the In Review page loads. Response can be an array or { tasks: [...] }.
+const REVIEW_ENDPOINT = '/tasks/in-review/all';
 
 // Ids of tasks the manager has already seen in review. Pruned to what is still in review,
 // so a task that goes back to work and returns to review counts as new again.
