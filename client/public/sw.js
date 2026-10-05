@@ -147,9 +147,21 @@ self.addEventListener(
   (event) => {
     event.notification.close();
 
-    const url =
-      event.notification?.data?.url ||
-      "/";
+    // Only ever open pages of this app.
+    let url = "/";
+
+    try {
+      const target = new URL(
+        event.notification?.data?.url || "/",
+        self.location.origin,
+      );
+
+      if (target.origin === self.location.origin) {
+        url = target.href;
+      }
+    } catch {
+      url = "/";
+    }
 
     event.waitUntil(
       (async () => {

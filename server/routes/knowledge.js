@@ -14,6 +14,22 @@ const crypto = require("crypto");
  * ============================================================
  */
 
+/*
+ * Allowed MIME type -> extension used for the stored file.
+ *
+ * The stored extension comes from this map, never from the
+ * uploaded filename, so a file sent as "text/plain" can't be
+ * saved as ".html" and served as a web page by the file host.
+ */
+const ALLOWED_TYPES = {
+  "application/pdf": ".pdf",
+  "image/jpeg": ".jpg",
+  "image/png": ".png",
+  "text/plain": ".txt",
+  "text/markdown": ".md",
+  "application/zip": ".zip",
+};
+
 const upload = multer({
   storage: multer.memoryStorage(),
 
@@ -22,16 +38,7 @@ const upload = multer({
   },
 
   fileFilter: (req, file, callback) => {
-    const allowed = new Set([
-      "application/pdf",
-      "image/jpeg",
-      "image/png",
-      "text/plain",
-      "text/markdown",
-      "application/zip",
-    ]);
-
-    if (!allowed.has(file.mimetype)) {
+    if (!Object.prototype.hasOwnProperty.call(ALLOWED_TYPES, file.mimetype)) {
       return callback(
         new Error("Unsupported file type"),
       );
@@ -40,6 +47,45 @@ const upload = multer({
     callback(null, true);
   },
 });
+
+/*
+ * Runs multer and turns its errors into the 400 responses the
+ * upload handler intended (they used to bypass its catch block
+ * and surface as a generic 500).
+ */
+function uploadSingle(fieldName) {
+  const handler = upload.single(fieldName);
+
+  return (req, res, next) => {
+    handler(req, res, (err) => {
+      if (!err) return next();
+
+      if (
+        err instanceof multer.MulterError &&
+        err.code === "LIMIT_FILE_SIZE"
+      ) {
+        return res.status(400).json({
+          error: "File size must not exceed 20 MB",
+        });
+      }
+
+      if (
+        err instanceof multer.MulterError ||
+        err.message === "Unsupported file type"
+      ) {
+        return res.status(400).json({
+          error: err.message,
+        });
+      }
+
+      return next(err);
+    });
+  };
+}
+
+// project ids end up in the FTP path, so only allow integer or UUID ids.
+const PROJECT_ID_PATTERN =
+  /^(\d{1,18}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
 
 /*
  * ============================================================
@@ -114,7 +160,8 @@ router.get(
     try {
       const { projectId } = req.params;
 
-      const folders = await db.query(
+      const [folders, files, notes] = await Promise.all([
+        db.query(
         `
           SELECT *
           FROM knowledge_folders
@@ -122,9 +169,9 @@ router.get(
           ORDER BY created_at
         `,
         [projectId],
-      );
+      ),
 
-      const files = await db.query(
+        db.query(
         `
           SELECT
             kf.*,
@@ -136,9 +183,9 @@ router.get(
           ORDER BY kf.created_at
         `,
         [projectId],
-      );
+      ),
 
-      const notes = await db.query(
+        db.query(
         `
           SELECT
             kn.*,
@@ -150,7 +197,8 @@ router.get(
           ORDER BY kn.created_at
         `,
         [projectId],
-      );
+      ),
+      ]);
 
       res.json({
         folders: folders.rows,
@@ -287,7 +335,7 @@ router.delete(
 router.post(
   "/files/upload",
   auth,
-  upload.single("file"),
+  uploadSingle("file"),
   requireProjectAccess("project_id"),
   async (req, res, next) => {
     try {
@@ -298,7 +346,10 @@ router.post(
 
       const file = req.file;
 
-      if (!isValidId(project_id)) {
+      if (
+        !isValidId(project_id) ||
+        !PROJECT_ID_PATTERN.test(project_id)
+      ) {
         return res.status(400).json({
           error: "project_id is required",
         });
@@ -342,9 +393,7 @@ router.post(
        * Never use the original filename as the stored filename.
        * UUID prevents filename collisions and path manipulation.
        */
-      const ext = path
-        .extname(file.originalname)
-        .toLowerCase();
+      const ext = ALLOWED_TYPES[file.mimetype];
 
       const filename =
         `${crypto.randomUUID()}${ext}`;

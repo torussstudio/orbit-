@@ -5,6 +5,7 @@ import Layout from './components/layout/Layout';
 import { lazy, Suspense } from 'react';
 import { ToastProvider } from './context/ToastContext';
 import Loader from './components/ui/Loader';
+import ErrorBoundary from './components/ui/ErrorBoundary';
 
 const Login = lazy(() => import('./pages/Login'));
 const Dashboard = lazy(() => import('./pages/Dashboard'));
@@ -30,6 +31,7 @@ const SuspenseFallback = () => (
 
 export default function App() {
   return (
+    <ErrorBoundary>
     <AuthProvider>
       <ToastProvider>
       <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
@@ -57,5 +59,6 @@ export default function App() {
       </BrowserRouter>
       </ToastProvider>
     </AuthProvider>
+    </ErrorBoundary>
   );
 }

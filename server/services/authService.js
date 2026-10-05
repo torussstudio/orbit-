@@ -20,6 +20,18 @@ const {
   findRefreshTokenByJti,
 } = require("../models/refreshTokens");
 
+const {
+  normalizeEmail,
+  assertPasswordLength,
+  assertEmailAvailable,
+  isEmailUniqueViolation,
+  emailTakenError,
+  isLastActiveManager,
+  deleteMemberRecord,
+} = require("../utils/accountRules");
+
+const liveEvents = require("./liveEvents");
+
 function publicUser(row) {
   return {
     id: row.id,
@@ -47,6 +59,42 @@ function authError(
   return err;
 }
 
+/*
+ * Compared against when the email doesn't exist, so a failed login
+ * takes the same time whether or not the account is real (no user
+ * enumeration by timing). Same cost factor as real hashes.
+ */
+const DUMMY_PASSWORD_HASH =
+  bcrypt.hashSync(crypto.randomBytes(16).toString("hex"), 12);
+
+/*
+ * Avatars are stored inline as data URLs and rendered as <img src>
+ * for every user. Only accept base64 image data URLs (what the
+ * browser's FileReader produces) — no remote URLs, no SVG.
+ *
+ * The client shrinks a chosen photo to about 256 px before upload
+ * (AccountSettings.jsx), which gives a data URL of roughly 10-40 KB.
+ * Anything longer than AVATAR_MAX_LENGTH is refused: these photos are
+ * sent inside list responses (members, dashboard), so a large one
+ * slows those pages down for everyone.
+ */
+const AVATAR_DATA_URL_PATTERN =
+  /^data:image\/(?!svg)[a-z0-9.+-]+;base64,[A-Za-z0-9+/]+=*$/i;
+
+// Length of the whole data URL in characters (about 110 KB of image).
+const AVATAR_MAX_LENGTH = 150 * 1024;
+
+function isValidAvatarDataUrl(value) {
+  return (
+    typeof value === "string" &&
+    AVATAR_DATA_URL_PATTERN.test(value)
+  );
+}
+
+function isAvatarTooLarge(value) {
+  return value.length > AVATAR_MAX_LENGTH;
+}
+
 /**
  * LOGIN
  *
@@ -59,31 +107,32 @@ async function loginWithPassword({
   userAgent,
   ipAddress,
 }) {
+  /*
+   * Case-insensitive, so members whose stored email has capital
+   * letters can still log in (the controller lowercases the input).
+   */
   const { rows } = await db.query(
     `
       SELECT *
       FROM members
-      WHERE email = $1
+      WHERE LOWER(email) = $1
         AND active = true
+      ORDER BY id
       LIMIT 1
     `,
-    [email],
+    [normalizeEmail(email)],
   );
 
   const member = rows[0];
 
-  if (!member) {
-    throw authError(
-      "Invalid credentials",
-    );
-  }
-
+  // Always run bcrypt, even for unknown emails, so response time
+  // doesn't reveal which emails have accounts.
   const valid = await bcrypt.compare(
-    password,
-    member.password_hash,
+    String(password),
+    member?.password_hash || DUMMY_PASSWORD_HASH,
   );
 
-  if (!valid) {
+  if (!member || !valid) {
     throw authError(
       "Invalid credentials",
     );
@@ -465,6 +514,15 @@ async function logoutAllSessions(
     memberId,
     "logout_all",
   );
+
+  /*
+   * Sessions are revoked: end the
+   * member's live streams too.
+   */
+  liveEvents.accessChanged(
+    memberId,
+    "logged out everywhere",
+  );
 }
 
 async function getProfile(
@@ -505,6 +563,7 @@ async function updateProfile(
     bio,
     birthday,
     password,
+    current_password,
     avatar_base64,
   } = body;
 
@@ -527,6 +586,59 @@ async function updateProfile(
     );
   }
 
+  const newEmail =
+    normalizeEmail(email);
+
+  /*
+   * The client always sends the email,
+   * so compare it (ignoring case) to see
+   * whether it really changed.
+   */
+  const emailChanged =
+    newEmail !== undefined &&
+    newEmail !==
+      normalizeEmail(current[0].email);
+
+  if (password) {
+    assertPasswordLength(password);
+  }
+
+  /*
+   * Changing the password or the email
+   * needs the current password.
+   *
+   * 400, not 401: the client treats 401
+   * as an expired session.
+   */
+  if (password || emailChanged) {
+    if (!current_password) {
+      throw authError(
+        "Please enter your current password.",
+        400,
+      );
+    }
+
+    const currentPasswordValid =
+      await bcrypt.compare(
+        String(current_password),
+        current[0].password_hash,
+      );
+
+    if (!currentPasswordValid) {
+      throw authError(
+        "Current password is incorrect",
+        400,
+      );
+    }
+  }
+
+  if (emailChanged) {
+    await assertEmailAvailable(
+      newEmail,
+      memberId,
+    );
+  }
+
   const updates = [];
   const values = [];
 
@@ -545,11 +657,7 @@ async function updateProfile(
       `email = $${idx++}`,
     );
 
-    values.push(
-      String(email)
-        .trim()
-        .toLowerCase(),
-    );
+    values.push(newEmail);
   }
 
   if (phone !== undefined) {
@@ -593,6 +701,20 @@ async function updateProfile(
   }
 
   if (avatar_base64) {
+    if (!isValidAvatarDataUrl(avatar_base64)) {
+      throw authError(
+        "Profile photo must be an image file.",
+        400,
+      );
+    }
+
+    if (isAvatarTooLarge(avatar_base64)) {
+      throw authError(
+        "Profile photo is too large. Please choose a smaller photo.",
+        400,
+      );
+    }
+
     updates.push(
       `avatar_url = $${idx++}`,
     );
@@ -628,26 +750,36 @@ async function updateProfile(
 
   values.push(memberId);
 
-  const { rows } =
-    await db.query(
-      `
-        UPDATE members
-        SET ${updates.join(", ")}
-        WHERE id = $${idx}
-        RETURNING
-          id,
-          name,
-          email,
-          role,
-          phone,
-          location,
-          bio,
-          avatar_url,
-          skills,
-          birthday
-      `,
-      values,
-    );
+  let rows;
+
+  try {
+    ({ rows } =
+      await db.query(
+        `
+          UPDATE members
+          SET ${updates.join(", ")}
+          WHERE id = $${idx}
+          RETURNING
+            id,
+            name,
+            email,
+            role,
+            phone,
+            location,
+            bio,
+            avatar_url,
+            skills,
+            birthday
+        `,
+        values,
+      ));
+  } catch (err) {
+    if (isEmailUniqueViolation(err)) {
+      throw emailTakenError();
+    }
+
+    throw err;
+  }
 
   /*
    * Password change intentionally logs
@@ -660,6 +792,15 @@ async function updateProfile(
       memberId,
       "password_changed",
     );
+
+    /*
+     * Sessions are revoked: end the
+     * member's live streams too.
+     */
+    liveEvents.accessChanged(
+      memberId,
+      "password changed",
+    );
   }
 
   return publicUser(
@@ -667,17 +808,47 @@ async function updateProfile(
   );
 }
 
+const LAST_MANAGER_MESSAGE =
+  "You are the only active manager. Make another member a manager before deleting this account.";
+
+const ACCOUNT_LINKED_MESSAGE =
+  "This account is still linked to projects, tasks or comments and cannot be deleted. Ask another manager to deactivate it.";
+
+/*
+ * DELETE OWN ACCOUNT
+ *
+ * One transaction (see deleteMemberRecord):
+ * last-active-manager block, the user's own
+ * notifications, then the member. If the
+ * delete fails, nothing changes and the user
+ * keeps their sessions.
+ *
+ * `pool` is the db pool by default
+ * (a stub can be passed in tests).
+ */
 async function deleteAccount(
   memberId,
+  pool = db,
 ) {
+  await deleteMemberRecord(
+    memberId,
+    {
+      lastManagerMessage:
+        LAST_MANAGER_MESSAGE,
+      linkedMessage:
+        ACCOUNT_LINKED_MESSAGE,
+    },
+    pool,
+  );
+
+  /*
+   * Refresh tokens are removed with the
+   * member (ON DELETE CASCADE); this is
+   * only a safety net.
+   */
   await revokeAllRefreshTokensForMember(
     memberId,
     "account_deleted",
-  );
-
-  await db.query(
-    "DELETE FROM members WHERE id = $1",
-    [memberId],
   );
 }
 
@@ -689,4 +860,5 @@ module.exports = {
   getProfile,
   updateProfile,
   deleteAccount,
+  isLastActiveManager,
 };

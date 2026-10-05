@@ -3,7 +3,9 @@ import { Link } from "react-router-dom";
 import api from "../api/client";
 import { useAuth } from "../context/AuthContext";
 import { formatDate } from "../utils/helpers";
+import { useCountUp } from "../utils/motion";
 import Modal from "../components/ui/Modal";
+import { useLiveRefetch, TASK_AND_PROJECT_EVENTS } from "../hooks/useLiveEvents";
 
 /* ===========================================================================
  * Constants & helpers
@@ -153,7 +155,9 @@ function useDashboardData() {
     load();
   }, [load]);
 
-  return { data, loading, error, retry };
+  // `load` never shows the skeleton again after the first load, so it is
+  // also the silent refresh used by live updates.
+  return { data, loading, error, retry, refresh: load };
 }
 
 // "Total tasks" / "Completed tasks" modal. Latest request wins.
@@ -335,6 +339,7 @@ function CardHead({ title, danger, children }) {
 }
 
 const Stat = memo(function Stat({ value, label, tone, kind, onSelect }) {
+  const valueRef = useCountUp(value);
   const clickable = typeof onSelect === "function";
   const interactive = clickable
     ? {
@@ -361,7 +366,7 @@ const Stat = memo(function Stat({ value, label, tone, kind, onSelect }) {
           STAT_TONE[tone],
         )}
       >
-        {value}
+        <span ref={valueRef}>{value}</span>
       </div>
       <div className="stat-label mt-2.5 flex items-center gap-1.5">
         {label}
@@ -447,7 +452,11 @@ const DashSkeleton = memo(function DashSkeleton() {
 
 export default function Dashboard() {
   const { user, isManager } = useAuth();
-  const { data, loading, error, retry } = useDashboardData();
+  const { data, loading, error, retry, refresh } = useDashboardData();
+
+  // Live updates: a task or project changed (for example a member moved a
+  // task to In Review). Numbers and lists update in place.
+  useLiveRefetch(TASK_AND_PROJECT_EVENTS, refresh);
   const firstName = user?.name?.split(" ")[0];
 
   return (

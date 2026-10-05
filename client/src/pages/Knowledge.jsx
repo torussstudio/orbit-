@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useParams } from "react-router-dom";
 import api from "../api/client";
+import { takePrefetched } from "../api/prefetch";
 import { useAuth } from "../context/AuthContext";
 import { formatDate } from "../utils/helpers";
 import Modal from "../components/ui/Modal";
@@ -134,11 +135,14 @@ export default function Knowledge({ project: propProject, active = true }) {
   // when the cursor crosses child elements.
   const dragDepth = useRef(0);
 
-  const load = () =>
-    api
-      .get(`/knowledge/project/${projectId}`)
+  // The first load picks up the request Project Detail already started from
+  // the URL id (api/prefetch.js); every later load sends its own.
+  const load = () => {
+    const url = `/knowledge/project/${projectId}`;
+    return (takePrefetched(url) || api.get(url))
       .then((r) => setData(r.data))
       .finally(() => setLoading(false));
+  };
 
   // Fetch on mount and every time this tab becomes active (silent refetch)
   useEffect(() => {

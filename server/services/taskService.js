@@ -1,11 +1,28 @@
 const db = require("../db");
 const { assertProjectAccess } = require("./accessControl");
 const { createNotification } = require("../utils/pushNotify");
+const liveEvents = require("./liveEvents");
+const {
+  LIST_SAFETY_LIMIT,
+  TOTAL_COLUMN,
+  splitTotal,
+} = require("../utils/listLimit");
 
 // Stages a member can never set.
 // "Done" needs manager approval, and
 // "Rework" is the manager's review decision.
 const MANAGER_STAGES = ["Done", "Rework"];
+
+// Calendar day (YYYY-MM-DD) of a due date, or null. pg reads
+// `timestamp without time zone` as the Node process's local time, so the
+// local date parts are the stored date (whatever TZ the server runs in).
+function dueDay(value) {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
 
 const ASSIGNEE_JOIN = `
   LEFT JOIN LATERAL (
@@ -128,13 +145,16 @@ async function recomputeParentStage(queryable, parentId, actorId = null) {
   }
 }
 
+// Returns { rows, total }: rows are capped at LIST_SAFETY_LIMIT, total is
+// the real number of tasks in the project.
 async function getTasksByProject(projectId) {
   const { rows } = await db.query(
     `SELECT
        t.*,
        assignee_agg.assignee_name,
        assignee_agg.assignees,
-       c.name AS cluster_name
+       c.name AS cluster_name,
+       COUNT(*) OVER() AS ${TOTAL_COLUMN}
      FROM tasks t
      LEFT JOIN clusters c
        ON t.cluster_id = c.id
@@ -142,11 +162,12 @@ async function getTasksByProject(projectId) {
      WHERE t.project_id = $1
      ORDER BY
        t.sort_order ASC NULLS LAST,
-       t.created_at DESC`,
-    [projectId],
+       t.created_at DESC
+     LIMIT $2`,
+    [projectId, LIST_SAFETY_LIMIT],
   );
 
-  return rows;
+  return splitTotal(rows);
 }
 
 async function reorderTasks(stage, orderedIds, user) {
@@ -176,6 +197,9 @@ async function reorderTasks(stage, orderedIds, user) {
   }
 
   await assertProjectAccess(user, taskProjects[0].project_id);
+
+  // Tasks whose stage changed, for the live event sent after the commit.
+  const movedTasks = [];
 
   const client = await db.connect();
 
@@ -211,6 +235,12 @@ async function reorderTasks(stage, orderedIds, user) {
       );
 
       if (prevStage && prevStage !== stage) {
+        movedTasks.push({
+          id: taskId,
+          project_id: projectId,
+          parent_task_id: parentTaskId,
+        });
+
         await client.query(
           `INSERT INTO task_activity(
              task_id,
@@ -275,6 +305,18 @@ async function reorderTasks(stage, orderedIds, user) {
 
     await client.query("COMMIT");
 
+    // Live update, after the commit. Order-only changes send one event for
+    // the project.
+    if (movedTasks.length > 0) {
+      movedTasks.forEach((moved) => liveEvents.taskChanged("task.updated", moved));
+    } else {
+      liveEvents.taskChanged("task.updated", {
+        id: orderedIds[0],
+        project_id: taskProjects[0].project_id,
+        parent_task_id: null,
+      });
+    }
+
     return {
       success: true,
     };
@@ -292,7 +334,10 @@ async function reorderTasks(stage, orderedIds, user) {
 }
 
 async function getTaskById(taskId) {
-   const { rows } = await db.query(
+  // The four reads are independent, so run them together instead of
+  // one after another.
+  const [taskResult, comments, activity, subtasks] = await Promise.all([
+    db.query(
     `SELECT
        t.*,
        assignee_agg.assignee_name,
@@ -307,15 +352,9 @@ async function getTaskById(taskId) {
      ${ASSIGNEE_JOIN}
      WHERE t.id = $1`,
     [taskId],
-  );
+  ),
 
-  if (!rows[0]) {
-    const err = new Error("Not found");
-    err.status = 404;
-    throw err;
-  }
-
-  const comments = await db.query(
+  db.query(
     `SELECT
        tc.*,
        m.name AS author_name
@@ -325,9 +364,9 @@ async function getTaskById(taskId) {
      WHERE tc.task_id = $1
      ORDER BY tc.created_at`,
     [taskId],
-  );
+  ),
 
-  const activity = await db.query(
+  db.query(
     `SELECT
        ta.*,
        m.name AS actor_name,
@@ -355,9 +394,9 @@ async function getTaskById(taskId) {
      ORDER BY created_at DESC
      LIMIT 30`,
     [taskId],
-  );
+  ),
 
-  const subtasks = await db.query(
+  db.query(
     `SELECT
        t.*,
        assignee_agg.assignee_name,
@@ -367,10 +406,19 @@ async function getTaskById(taskId) {
      WHERE t.parent_task_id = $1
      ORDER BY t.created_at`,
     [taskId],
-  );
+  ),
+  ]);
+
+  const task = taskResult.rows[0];
+
+  if (!task) {
+    const err = new Error("Not found");
+    err.status = 404;
+    throw err;
+  }
 
   return {
-    ...rows[0],
+    ...task,
     comments: comments.rows,
     activity: activity.rows,
     subtasks: subtasks.rows,
@@ -481,6 +529,9 @@ async function createTask(data, user) {
       ).catch(() => {});
     });
 
+    // Live update, after the commit.
+    liveEvents.taskChanged("task.created", task);
+
     return task;
   } catch (e) {
     await client.query("ROLLBACK");
@@ -573,21 +624,21 @@ async function updateTask(taskId, data, user) {
     const movedToInReview =
       existing.stage !== "In Review" && actualStage === "In Review";
 
+    // Members can't change due dates: data.new_due_date is ignored here
+    // (only the manager review flow sets a new deadline).
     const { rows } = await db.query(
       `UPDATE tasks
        SET
          stage=$1,
          updated_at=NOW(),
          time_taken=$2,
-         rework_count=rework_count+$3,
-         due_date=COALESCE($4,due_date)
-       WHERE id=$5
+         rework_count=rework_count+$3
+       WHERE id=$4
        RETURNING *`,
       [
         actualStage,
         time_taken,
         isRework ? 1 : 0,
-        data.new_due_date || null,
         taskId,
       ],
     );
@@ -644,6 +695,9 @@ async function updateTask(taskId, data, user) {
         });
       });
     }
+
+    // Live update, after every write above has been saved.
+    liveEvents.taskChanged("task.updated", rows[0]);
 
     return rows[0];
   }
@@ -711,11 +765,9 @@ async function updateTask(taskId, data, user) {
         : existing.due_date;
 
   /*
-   * Capture old due date before UPDATE.
+   * Capture old due date (calendar day) before UPDATE.
    */
-  const previousDueDate = existing.due_date
-    ? new Date(existing.due_date).getTime()
-    : null;
+  const previousDueDate = dueDay(existing.due_date);
 
   const client = await db.connect();
 
@@ -862,9 +914,9 @@ async function updateTask(taskId, data, user) {
      * MANAGER -> DUE DATE UPDATED
      * ==========================================
      */
-    const newDueDate = rows[0].due_date
-      ? new Date(rows[0].due_date).getTime()
-      : null;
+    // Only a different calendar day counts as a change (not a different time
+    // of day on the same date).
+    const newDueDate = dueDay(rows[0].due_date);
 
     const dueDateChanged = previousDueDate !== newDueDate;
 
@@ -933,6 +985,10 @@ async function updateTask(taskId, data, user) {
       });
     }
 
+    // Live update, after the commit. Previous assignees are included so a
+    // member who was just removed sees the task leave their list.
+    liveEvents.taskChanged("task.updated", rows[0], [...previousAssigneeIds]);
+
     return rows[0];
   } catch (e) {
     await client.query("ROLLBACK");
@@ -979,12 +1035,40 @@ async function deleteTask(taskId, user) {
 
   const parentId = taskRows[0].parent_task_id || null;
 
-  await db.query("DELETE FROM tasks WHERE id=$1", [taskId]);
+  // Who is on the task right now. Read before the delete, because the
+  // assignee rows are removed together with the task.
+  const liveAudience = await liveEvents.taskAudience(taskId);
+
+  // Notifications point at the task by id (related_entity_type /
+  // related_entity_id, a text column), so remove them with the task —
+  // otherwise the bell keeps links to a task that no longer exists. Sub
+  // tasks are already gone (checked above) and each one cleaned up its own
+  // notifications when it was deleted.
+  const client = await db.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(
+      `DELETE FROM notifications
+       WHERE related_entity_type = 'task'
+         AND related_entity_id = $1`,
+      [String(taskId)],
+    );
+    await client.query("DELETE FROM tasks WHERE id=$1", [taskId]);
+    await client.query("COMMIT");
+  } catch (e) {
+    await client.query("ROLLBACK");
+    throw e;
+  } finally {
+    client.release();
+  }
 
   if (parentId) {
     await recomputeParentStage(db, parentId, user.id);
     await recomputeParentDueDate(db, parentId);
   }
+
+  // Live update, after the delete is committed.
+  liveEvents.taskChanged("task.deleted", taskRows[0], liveAudience);
 
   return {
     success: true,
@@ -1007,6 +1091,9 @@ async function createComment(taskId, userId, content) {
        ) AS author_name`,
     [taskId, userId, content],
   );
+
+  // Live update, after the comment is saved.
+  liveEvents.taskChanged("comment.created", { id: taskId });
 
   return rows[0];
 }

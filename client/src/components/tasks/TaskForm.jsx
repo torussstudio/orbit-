@@ -130,6 +130,7 @@ export default function TaskForm({ initial, members, allMembers, clusters, stage
     titleError: `${uid}-title-error`,
     description: `${uid}-description`,
     assigneeError: `${uid}-assignee-error`,
+     dueDateError: `${uid}-due-date-error`,
     timeTaken: `${uid}-time-taken`,
     timeTakenError: `${uid}-time-taken-error`,
   };
@@ -152,6 +153,7 @@ export default function TaskForm({ initial, members, allMembers, clusters, stage
   const [titleError, setTitleError] = useState('');
   const [timeTakenError, setTimeTakenError] = useState('');
   const [assigneeError, setAssigneeError] = useState('');
+  const [dueDateError, setDueDateError] = useState(''); 
   // Toggle only shown for a brand-new main task (not subtasks, not
   // editing an existing task). On = normal flow (subtasks handle their
   // own assignee/due date). Off = this task is standalone, so it needs
@@ -193,6 +195,7 @@ export default function TaskForm({ initial, members, allMembers, clusters, stage
     setHasSubtasks(v => !v);
     setForm(f => ({ ...f, assignee_ids: [], due_date: '' }));
     setAssigneeError('');
+    setDueDateError('');
   };
 
   const isMovingToReview = form.stage === 'In Review' && initial?.stage === 'In Progress';
@@ -225,6 +228,11 @@ export default function TaskForm({ initial, members, allMembers, clusters, stage
       setTimeTakenError('Enter the time taken before moving to In Review.');
       return;
     }
+
+    if (ownerMode && !form.due_date) {
+  setDueDateError('Select a due date.');
+  return;
+}
 
     // assignee_ids and due_date are only "owned" by this form for:
     // sub tasks, simple main tasks (subtasks disabled), and existing
@@ -342,13 +350,17 @@ export default function TaskForm({ initial, members, allMembers, clusters, stage
             errorId={ids.assigneeError}
           />
 
-          <Field label="Due date">
-            <DatePicker
-              value={form.due_date}
-              onChange={val => setForm(f => ({ ...f, due_date: val }))}
-              placeholder="dd-mm-yyyy"
-            />
-          </Field>
+          <Field label="Due date" required>
+  <DatePicker
+    value={form.due_date}
+    onChange={val => {
+      setForm(f => ({ ...f, due_date: val }));
+      setDueDateError('');
+    }}
+    placeholder="dd-mm-yyyy"
+  />
+  <FieldError id={ids.dueDateError}>{dueDateError}</FieldError>
+</Field>
         </div>
       )}
 

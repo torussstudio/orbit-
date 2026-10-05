@@ -150,7 +150,7 @@ export default function RequestedTasks() {
   const hasRows = !loading && requests.length > 0;
 
   return (
-    <main className="mx-auto w-full max-w-[1400px] px-4 py-6 sm:px-6 md:py-10">
+    <div className="mx-auto w-full max-w-[1400px] px-4 py-6 sm:px-6 md:py-10">
       <header className="flex items-end justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold leading-tight tracking-[-0.03em] text-[var(--text)] [text-wrap:balance]">
@@ -291,6 +291,6 @@ export default function RequestedTasks() {
         onCancel={() => setToDelete(null)}
         loading={deleting}
       />
-    </main>
+    </div>
   );
 }

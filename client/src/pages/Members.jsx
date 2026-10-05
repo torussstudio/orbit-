@@ -2,6 +2,7 @@ import { Fragment, memo, useCallback, useDeferredValue, useEffect, useMemo, useR
 import { Link } from "react-router-dom";
 import { createPortal } from "react-dom";
 import api from "../api/client";
+import { cachedMembers, rememberMembers } from "../api/membersCache";
 import { useAuth } from "../context/AuthContext";
 import { formatDate } from "../utils/helpers";
 import ConfirmModal from "../components/ui/ConfirmModal";
@@ -117,7 +118,7 @@ const Segmented = memo(function Segmented({ label, value, onChange, options }) {
             type="button"
             aria-pressed={on}
             onClick={() => onChange(o.value)}
-            className={`cursor-pointer whitespace-nowrap rounded-md border-0 px-3 py-1 text-xs font-medium transition-colors ${FOCUS} ${
+            className={`cursor-pointer whitespace-nowrap rounded-md border-0 px-3 py-1 text-xs font-medium transition-colors max-[640px]:min-h-10 ${FOCUS} ${
               on
                 ? "bg-[color:var(--bg-2)] text-[color:var(--text)] shadow-sm"
                 : "bg-transparent text-[color:var(--text-2)] hover:text-[color:var(--text)]"
@@ -588,10 +589,13 @@ const MEMBER_ACTIONS = {
 // Member list. Cancels superseded requests; a failed refresh after a successful
 // first load becomes a notice instead of replacing the table with an error.
 function useMembersData(onNotice) {
-  const [members, setMembers] = useState([]);
-  const [loading, setLoading] = useState(true);
+  // If an earlier page already loaded the list this session, show it straight
+  // away (no skeleton). It is still fetched again on every mount and after
+  // every add / edit / delete, and the fresh list replaces it.
+  const [members, setMembers] = useState(() => cachedMembers() || []);
+  const [loading, setLoading] = useState(() => !cachedMembers());
   const [loadError, setLoadError] = useState(false);
-  const hasLoaded = useRef(false);
+  const hasLoaded = useRef(Boolean(cachedMembers()));
   const controller = useRef(null);
 
   const load = useCallback(() => {
@@ -605,7 +609,7 @@ function useMembersData(onNotice) {
         if (c.signal.aborted) return;
         hasLoaded.current = true;
         setLoadError(false);
-        setMembers(r.data);
+        setMembers(rememberMembers(r.data));
       })
       .catch((e) => {
         if (isAbort(e) || c.signal.aborted) return;

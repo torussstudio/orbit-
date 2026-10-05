@@ -108,6 +108,65 @@ function EyeIcon({ open }) {
   );
 }
 
+// ── Profile photo: shrink before upload ───────────────────────
+// Photos are stored inside the member record and sent with member lists, so
+// a full-size camera photo (often 1 MB or more) slows those pages down for
+// everyone. The chosen photo is redrawn at most 256 px on its longest side
+// and saved as JPEG (about 10-40 KB). Photos are shown at 32-100 px, so this
+// is still sharp. If the browser cannot do it, the original is sent as before.
+const AVATAR_MAX_SIDE = 256;
+const AVATAR_JPEG_QUALITY = 0.82;
+
+const readAsDataUrl = (file) =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (ev) => resolve(ev.target.result);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+
+async function shrinkPhoto(file) {
+  const original = await readAsDataUrl(file);
+
+  try {
+    const img = await new Promise((resolve, reject) => {
+      const el = new Image();
+      el.onload = () => resolve(el);
+      el.onerror = reject;
+      el.src = original;
+    });
+
+    const longest = Math.max(img.naturalWidth, img.naturalHeight);
+    if (!longest) return original;
+
+    const scale = Math.min(1, AVATAR_MAX_SIDE / longest);
+    const width = Math.max(1, Math.round(img.naturalWidth * scale));
+    const height = Math.max(1, Math.round(img.naturalHeight * scale));
+
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return original;
+
+    // JPEG has no transparency: put the photo on white.
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, width, height);
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(img, 0, 0, width, height);
+
+    const shrunk = canvas.toDataURL('image/jpeg', AVATAR_JPEG_QUALITY);
+
+    return shrunk.startsWith('data:image/jpeg') && shrunk.length < original.length
+      ? shrunk
+      : original;
+  } catch {
+    return original;
+  }
+}
+
 export default function AccountSettings() {
   const { user, logout, updateUser } = useAuth();
 
@@ -125,6 +184,9 @@ export default function AccountSettings() {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [showCurrentPassword, setShowCurrentPassword] = useState(false);
+  const [currentPasswordError, setCurrentPasswordError] = useState('');
 
   // ── UI ─────────────────────────────────────────────────────
   const [saving, setSaving] = useState(false);
@@ -161,6 +223,11 @@ export default function AccountSettings() {
   const handleChange = (field) => (e) =>
     setForm((prev) => ({ ...prev, [field]: e.target.value }));
 
+  // Changing the password or the email needs the current password.
+  const emailChanged =
+    form.email.trim().toLowerCase() !== (user?.email || '').trim().toLowerCase();
+  const needsCurrentPassword = Boolean(newPassword) || emailChanged;
+
   // handleSave now also serves as the form's onSubmit handler
   const handleSave = async (e) => {
     if (e && e.preventDefault) e.preventDefault();
@@ -171,6 +238,7 @@ export default function AccountSettings() {
     }
     setSaving(true);
     setSaveMsg(null);
+    setCurrentPasswordError('');
     try {
       const payload = {
         name: form.name,
@@ -181,14 +249,11 @@ export default function AccountSettings() {
         birthday: form.dob || null,
       };
       if (newPassword) payload.password = newPassword;
+      if (needsCurrentPassword) payload.current_password = currentPassword;
 
-      // Encode avatar as base64 if a new file was selected
+      // A new photo is shrunk in the browser before upload (see shrinkPhoto)
       if (avatarFile) {
-        await new Promise((resolve) => {
-          const reader = new FileReader();
-          reader.onload = (ev) => { payload.avatar_base64 = ev.target.result; resolve(); };
-          reader.readAsDataURL(avatarFile);
-        });
+        payload.avatar_base64 = await shrinkPhoto(avatarFile);
       }
 
       const res = await api.put('/auth/profile', payload);
@@ -205,9 +270,16 @@ export default function AccountSettings() {
       setSaveMsg({ type: 'success', text: 'Changes saved successfully.' });
       setNewPassword('');
       setConfirmPassword('');
+      setCurrentPassword('');
       setAvatarFile(null);
     } catch (err) {
-      setSaveMsg({ type: 'error', text: err.response?.data?.error || 'Failed to save changes.' });
+      const message = err.response?.data?.error || 'Failed to save changes.';
+      // Current-password problems are shown under that field.
+      if (err.response?.status === 400 && /current password/i.test(message)) {
+        setCurrentPasswordError(message);
+      } else {
+        setSaveMsg({ type: 'error', text: message });
+      }
     } finally {
       setSaving(false);
       setTimeout(() => setSaveMsg(null), 4000);
@@ -481,6 +553,41 @@ export default function AccountSettings() {
                 </div>
               </div>
             </div>
+
+            {/* Current Password — only when changing the password or email */}
+            {needsCurrentPassword && (
+              <div className="account-settings-form-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '16px' }}>
+                <div>
+                  <label style={labelStyle} htmlFor="account-current-password">Current Password</label>
+                  <div style={{ position: 'relative' }}>
+                    <input id="account-current-password"
+                      style={{ ...inputStyle, paddingRight: '38px', ...(currentPasswordError ? { borderColor: 'var(--danger)' } : null) }}
+                      value={currentPassword}
+                      type={showCurrentPassword ? 'text' : 'password'} autoComplete="current-password"
+                      onChange={e => { setCurrentPassword(e.target.value); setCurrentPasswordError(''); }}
+                      placeholder="Enter your current password"
+                      aria-invalid={currentPasswordError ? true : undefined}
+                      aria-describedby={currentPasswordError ? 'account-current-password-error' : undefined}
+                      onFocus={e => e.target.style.borderColor = 'var(--accent)'}
+                      onBlur={e => e.target.style.borderColor = currentPasswordError ? 'var(--danger)' : 'var(--border)'} />
+                    <button type="button" style={eyeToggleStyle}
+                      onClick={() => setShowCurrentPassword(v => !v)}
+                      title={showCurrentPassword ? 'Hide password' : 'Show password'}
+                      aria-label={showCurrentPassword ? 'Hide password' : 'Show password'}>
+                      <EyeIcon open={showCurrentPassword} />
+                    </button>
+                  </div>
+                  {currentPasswordError && (
+                    <div id="account-current-password-error" role="alert" style={{
+                      fontSize: '12px', fontWeight: 500, color: 'var(--danger)',
+                      display: 'flex', alignItems: 'center', gap: '6px', marginTop: '6px',
+                    }}>
+                      ✕ {currentPasswordError}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
 
             {/* Bio */}
             <div style={{ marginBottom: '20px' }}>

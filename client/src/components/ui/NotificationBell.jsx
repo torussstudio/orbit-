@@ -19,6 +19,28 @@ import { useNavigate } from 'react-router-dom';
 import api from '../../api/client';
 import { useAuth } from '../../context/AuthContext';
 import { LoadingSkeleton } from './Loader';
+import { useLiveRefetch, NOTIFICATION_EVENTS } from '../../hooks/useLiveEvents';
+
+// ── "Permission denied" warning: once per browser session ─────────
+// Push setup runs on every mount/login, so without this the same warning
+// filled the console. sessionStorage survives reloads in the tab; the
+// module flag covers browsers where storage is blocked.
+const DENIED_WARNED_KEY = 'orbit_push_denied_warned';
+let deniedWarned = false;
+
+function warnPermissionDeniedOnce() {
+  if (deniedWarned) return;
+  deniedWarned = true;
+  try {
+    if (window.sessionStorage.getItem(DENIED_WARNED_KEY)) return;
+    window.sessionStorage.setItem(DENIED_WARNED_KEY, '1');
+  } catch {
+    // Storage unavailable: the module flag still limits it to once per load.
+  }
+  console.warn(
+    "[NotificationBell] Browser notification permission is denied."
+  );
+}
 
 // ── VAPID key decoder ─────────────────────────────────────────────
 function urlBase64ToUint8Array(base64String) {
@@ -88,13 +110,23 @@ export default function NotificationBell() {
   const dropdownRef    = useRef(null);
 
   // ── Load notifications ──────────────────────────────────────────
-  const loadNotifications = useCallback(async () => {
+  // `silent` (live updates): no loading state, and a failure keeps the list
+  // and any message already on screen. This function is also used directly
+  // as a click handler, so the argument may be a click event (not silent).
+  const loadNotifications = useCallback(async (options) => {
+  const silent = options?.silent === true;
   try {
-    setLoading(true);
-    setLoadError('');
+    if (!silent) {
+      setLoading(true);
+      setLoadError('');
+    }
 
-    const notificationsResponse =
-      await api.get('/notifications');
+    // Fetch the list and the count together. The count is secondary:
+    // if it fails, fall back to counting unread items in the list.
+    const [notificationsResponse, countResponse] = await Promise.all([
+      api.get('/notifications'),
+      api.get('/notifications/unread-count').catch(() => null),
+    ]);
 
     const notifs = Array.isArray(
       notificationsResponse.data,
@@ -104,31 +136,12 @@ export default function NotificationBell() {
 
     setNotifications(notifs);
 
-    // Count is secondary.
-    // Even if unread-count fails, notification list
-    // should still work.
-    try {
-      const countResponse =
-        await api.get('/notifications/unread-count');
+    const count =
+      Number(countResponse?.data?.count);
 
-      const count =
-        Number(countResponse.data?.count);
-
-      if (Number.isInteger(count) && count >= 0) {
-        setUnreadCount(count);
-      } else {
-        setUnreadCount(
-          notifs.filter(
-            (notification) => !notification.read,
-          ).length,
-        );
-      }
-    } catch (countError) {
-      console.warn(
-        '[NotificationBell] Failed to load unread count:',
-        countError,
-      );
-
+    if (countResponse && Number.isInteger(count) && count >= 0) {
+      setUnreadCount(count);
+    } else {
       setUnreadCount(
         notifs.filter(
           (notification) => !notification.read,
@@ -136,6 +149,8 @@ export default function NotificationBell() {
       );
     }
   } catch (err) {
+    if (silent) return;
+
     const serverMessage =
       err?.response?.data?.error ||
       err?.response?.data?.message;
@@ -150,9 +165,45 @@ export default function NotificationBell() {
       err,
     );
   } finally {
-    setLoading(false);
+    if (!silent) setLoading(false);
   }
 }, []);
+
+  // ── Background refresh ──────────────────────────────────────────
+  // While the dropdown is closed only the badge is visible, so only the
+  // unread count is fetched (1 request instead of 2). The list is loaded
+  // when the dropdown opens, and kept fresh while it is open.
+  // If the count request fails, fall back to the full load, which counts
+  // unread items in the list (same fallback as before).
+  const openRef = useRef(false);
+  openRef.current = showDropdown;
+
+  const loadUnreadCount = useCallback(async () => {
+    try {
+      const { data } = await api.get('/notifications/unread-count');
+      const count = Number(data?.count);
+
+      if (!Number.isInteger(count) || count < 0) {
+        throw new Error('Unexpected unread count');
+      }
+
+      setUnreadCount(count);
+    } catch {
+      await loadNotifications({ silent: true });
+    }
+  }, [loadNotifications]);
+
+  const refreshInBackground = useCallback(
+    (options) => (openRef.current ? loadNotifications(options) : loadUnreadCount()),
+    [loadNotifications, loadUnreadCount],
+  );
+
+  // Live updates: a new notification was saved for this user.
+  const refreshSilently = useCallback(
+    () => refreshInBackground({ silent: true }),
+    [refreshInBackground],
+  );
+  useLiveRefetch(NOTIFICATION_EVENTS, refreshSilently);
 
   // ── Register SW + subscribe to push ────────────────────────────
 const setupPush = useCallback(async () => {
@@ -185,9 +236,7 @@ const setupPush = useCallback(async () => {
   // ==========================================================
 
   if (Notification.permission === "denied") {
-    console.warn(
-      "[NotificationBell] Browser notification permission is denied."
-    );
+    warnPermissionDeniedOnce();
 
     setPushStatus("denied");
     return;
@@ -197,10 +246,6 @@ const setupPush = useCallback(async () => {
     // ========================================================
     // 3. REGISTER SERVICE WORKER
     // ========================================================
-
-    console.log(
-      "[NotificationBell] Registering /sw.js..."
-    );
 
     const registration =
       await navigator.serviceWorker.register(
@@ -213,11 +258,6 @@ const setupPush = useCallback(async () => {
 
     swRegRef.current = registration;
 
-    console.log(
-      "[NotificationBell] ✅ Service worker registered:",
-      registration.scope
-    );
-
     // ========================================================
     // 4. WAIT FOR SERVICE WORKER
     // ========================================================
@@ -226,10 +266,6 @@ const setupPush = useCallback(async () => {
       await navigator.serviceWorker.ready;
 
     swRegRef.current = readyRegistration;
-
-    console.log(
-      "[NotificationBell] ✅ Service worker ready"
-    );
 
     // ========================================================
     // 5. REQUEST NOTIFICATION PERMISSION
@@ -242,11 +278,6 @@ const setupPush = useCallback(async () => {
 
     setPushStatus(permission);
 
-    console.log(
-      "[NotificationBell] Notification permission:",
-      permission
-    );
-
     if (permission !== "granted") {
       return;
     }
@@ -254,10 +285,6 @@ const setupPush = useCallback(async () => {
     // ========================================================
     // 6. GET VAPID PUBLIC KEY
     // ========================================================
-
-    console.log(
-      "[NotificationBell] Fetching VAPID public key..."
-    );
 
     const vapidResponse =
       await api.get(
@@ -278,10 +305,6 @@ const setupPush = useCallback(async () => {
       return;
     }
 
-    console.log(
-      "[NotificationBell] ✅ VAPID public key received."
-    );
-
     // ========================================================
     // 7. GET EXISTING PUSH SUBSCRIPTION
     // ========================================================
@@ -289,28 +312,14 @@ const setupPush = useCallback(async () => {
     let subscription =
       await readyRegistration.pushManager.getSubscription();
 
-    if (subscription) {
-      console.log(
-        "[NotificationBell] ✅ Existing push subscription found."
-      );
-    }
-
     // ========================================================
     // 8. CREATE NEW PUSH SUBSCRIPTION
     // ========================================================
 
     if (!subscription) {
-      console.log(
-        "[NotificationBell] Creating new push subscription..."
-      );
 
       const applicationServerKey =
         urlBase64ToUint8Array(publicKey);
-
-      console.log(
-        "[NotificationBell] VAPID key byte length:",
-        applicationServerKey.length
-      );
 
       /*
        * A valid VAPID P-256 public key
@@ -333,9 +342,6 @@ const setupPush = useCallback(async () => {
             applicationServerKey,
           });
 
-        console.log(
-          "[NotificationBell] ✅ PushManager.subscribe() succeeded."
-        );
       } catch (subscribeError) {
         console.error(
           "[NotificationBell] ❌ PushManager.subscribe() failed:",
@@ -361,23 +367,11 @@ const setupPush = useCallback(async () => {
       );
     }
 
-    console.log(
-      "[NotificationBell] ✅ Browser push subscription ready."
-    );
-
     // ========================================================
     // 10. SAVE SUBSCRIPTION TO BACKEND
     // ========================================================
 
-    console.log(
-      "[NotificationBell] Saving push subscription to server..."
-    );
-
     await savePushSubscription(subscription);
-
-    console.log(
-      "[NotificationBell] ✅ Push subscription saved to server."
-    );
 
     // ========================================================
     // 11. MARK PUSH AS READY
@@ -388,10 +382,6 @@ const setupPush = useCallback(async () => {
 
     setPushStatus("granted");
 
-    console.log(
-      "[NotificationBell] ✅ Push subscribed for:",
-      user?.name
-    );
   } catch (err) {
     console.error(
       "[NotificationBell] ❌ Push setup failed:",
@@ -418,7 +408,6 @@ const setupPush = useCallback(async () => {
       if (event.data?.type === 'PUSH_SUBSCRIPTION_CHANGED') {
         try {
           await savePushSubscription(event.data.subscription);
-          console.log('[NotificationBell] 🔄 Push subscription refreshed automatically');
         } catch (err) {
           console.error('[NotificationBell] Failed to refresh push subscription:', err);
         }
@@ -449,22 +438,28 @@ useEffect(() => {
     );
   });
 
-  // Poll in-app notifications
-  const interval = setInterval(
-    loadNotifications,
-    30_000
-  );
+  // Poll in-app notifications (skipped while the tab is hidden; refreshed
+  // as soon as it becomes visible again).
+  const interval = setInterval(() => {
+    if (!document.hidden) refreshInBackground();
+  }, 30_000);
+
+  const onVisible = () => {
+    if (document.visibilityState === 'visible') refreshInBackground();
+  };
+  document.addEventListener('visibilitychange', onVisible);
 
   return () => {
     clearInterval(interval);
+    document.removeEventListener('visibilitychange', onVisible);
   };
-}, [user, loadNotifications, setupPush]);
+}, [user, loadNotifications, refreshInBackground, setupPush]);
 
   useEffect(() => {
-    const refresh = () => loadNotifications();
+    const refresh = () => refreshInBackground();
     window.addEventListener('orbit:notifications-updated', refresh);
     return () => window.removeEventListener('orbit:notifications-updated', refresh);
-  }, [loadNotifications]);
+  }, [refreshInBackground]);
 
   // ── Close dropdown on outside click ────────────────────────────
   useEffect(() => {
@@ -549,6 +544,10 @@ useEffect(() => {
     }
   }}
         title="Notifications"
+        aria-label="Notifications"
+        aria-haspopup="true"
+        aria-expanded={showDropdown}
+        className="max-md:min-h-10 max-md:min-w-10"
         style={{
           position: 'relative',
           background: 'none',

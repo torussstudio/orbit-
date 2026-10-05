@@ -15,6 +15,7 @@ const {
 
 const {
   apiLimiter,
+  streamLimiter,
 } = require("./middleware/rateLimit");
 
 const {
@@ -50,6 +51,9 @@ const calendarRoutes =
 
 const notificationRoutes =
   require("./routes/notifications");
+
+const eventRoutes =
+  require("./routes/events");
 
 const app = express();
 
@@ -138,6 +142,14 @@ app.use(
       "Authorization",
       "X-Orbit-Client",
     ],
+
+    /*
+     * Lets a cross-origin client read the real list total
+     * sent by capped list endpoints.
+     */
+    exposedHeaders: [
+      "X-Total-Count",
+    ],
   }),
 );
 
@@ -152,6 +164,24 @@ app.use(
     extended: true,
     limit: "2mb",
   }),
+);
+
+/*
+ * Live events stream (SSE). OFF unless
+ * LIVE_EVENTS_ENABLED=true (answers 204).
+ *
+ * Mounted before the general API limiter:
+ * the stream is one long-lived request with
+ * its own limit, so reconnects never use up
+ * the normal API budget.
+ *
+ * There is no compression middleware in this
+ * app, so nothing buffers the stream here.
+ */
+app.use(
+  "/api/events",
+  streamLimiter,
+  eventRoutes,
 );
 
 app.use(
@@ -281,6 +311,16 @@ const {
 } = require("./utils/dailyReminder");
 
 scheduleDailyReminders();
+
+/*
+ * Deadline reminders are OFF unless
+ * DEADLINE_REMINDERS_ENABLED=true.
+ */
+const {
+  scheduleDeadlineReminders,
+} = require("./utils/deadlineReminder");
+
+scheduleDeadlineReminders();
 
 /*
  * Local development server.

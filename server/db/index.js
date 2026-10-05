@@ -5,11 +5,23 @@ const { Pool } = require("pg");
 // dev server, production, and anything else pointed at the same
 // DATABASE_URL. Leaving max low here means one crash-restart loop can't
 // eat the whole budget on its own.
+//
+// Unused connections are kept for 5 minutes by default
+// (DB_POOL_IDLE_TIMEOUT_MS). With the old 30 s, a quiet moment closed every
+// connection and the next request had to open a new one through the pooler
+// (about 200 ms extra).
+const DEFAULT_IDLE_TIMEOUT_MS = 300000;
+
+function readIdleTimeout() {
+  const value = Number.parseInt(process.env.DB_POOL_IDLE_TIMEOUT_MS, 10);
+  return Number.isInteger(value) && value >= 0 ? value : DEFAULT_IDLE_TIMEOUT_MS;
+}
+
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: process.env.DB_SSL === "true" ? { rejectUnauthorized: false } : false,
   max: 5,
-  idleTimeoutMillis: 30000,
+  idleTimeoutMillis: readIdleTimeout(),
   connectionTimeoutMillis: 5000,
 });
 
@@ -313,6 +325,12 @@ const initDB = async () => {
     `);
   });
 
+  // Used by every task update (time tracking + rework counter) but never
+  // created here, so a fresh database couldn't update tasks. No-op on
+  // databases that already have them.
+  await ensureColumn("tasks", "time_taken INTEGER");
+  await ensureColumn("tasks", "rework_count INTEGER DEFAULT 0");
+
   // Drag-and-drop task ordering within a board column (and moving a card
   // between columns). Backfill preserves the current created_at DESC
   // order per (project, stage) column so nothing visibly reshuffles the
@@ -597,6 +615,26 @@ const initDB = async () => {
     ON cluster_reviews (cluster_id)
   `);
 
+  // Hot lookups that were doing sequential scans: sub task lists and
+  // parent stage/due-date recomputes (parent_task_id), cluster task
+  // lists, the In Review queue, per-project clusters / credentials /
+  // knowledge folders, folder file lists, and the unread badge count.
+  // Additive and idempotent.
+  const extraIndexes = [
+    ["idx_tasks_parent_task_id", "tasks (parent_task_id)"],
+    ["idx_tasks_cluster_id", "tasks (cluster_id)"],
+    ["idx_tasks_stage_updated", "tasks (stage, updated_at DESC)"],
+    ["idx_clusters_project_id", "clusters (project_id)"],
+    ["idx_credential_clusters_project_id", "credential_clusters (project_id)"],
+    ["idx_knowledge_folders_project_id", "knowledge_folders (project_id)"],
+    ["idx_knowledge_files_folder_id", "knowledge_files (folder_id)"],
+    ["idx_notifications_member_unread", "notifications (member_id) WHERE read = false"],
+    ["idx_calendar_events_start_date", "calendar_events (start_date)"],
+  ];
+  for (const [name, definition] of extraIndexes) {
+    await pool.query(`CREATE INDEX IF NOT EXISTS ${name} ON ${definition}`);
+  }
+
   // Task requests: members ask for a task, managers review them on the
   // "Requested Tasks" page and delete them once handled.
   await pool.query(`
@@ -614,10 +652,20 @@ const initDB = async () => {
     CREATE INDEX IF NOT EXISTS task_requests_created_at_idx
     ON task_requests (created_at DESC)
   `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_task_requests_requested_by
+    ON task_requests (requested_by)
+  `);
 
   console.log("Database schema ready");
 };
 
-initDB().catch(console.error);
+// The app always prepares the schema when this module is first loaded.
+// One-off scripts in server/scripts/ that only need the pool set
+// DB_SKIP_INIT=true before requiring it, so they send nothing but their
+// own statements.
+if (process.env.DB_SKIP_INIT !== "true") {
+  initDB().catch(console.error);
+}
 
 module.exports = pool;

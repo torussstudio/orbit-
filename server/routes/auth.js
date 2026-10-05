@@ -86,10 +86,29 @@ router.get(
 
 /*
  * UPDATE PROFILE
+ *
+ * Saves that change the password or email
+ * must send current_password; those go
+ * through the auth rate limiter (same
+ * limiter as login) so the current
+ * password can't be brute-forced. Plain
+ * name/photo saves are not limited.
  */
+function limitPasswordChecks(req, res, next) {
+  if (
+    req.body?.current_password ||
+    req.body?.password
+  ) {
+    return authLimiter(req, res, next);
+  }
+
+  return next();
+}
+
 router.put(
   "/profile",
   auth,
+  limitPasswordChecks,
   authController.updateProfile,
 );
 

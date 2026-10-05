@@ -1,5 +1,6 @@
 const db = require("../db");
 const { assertProjectAccess } = require("./accessControl");
+const liveEvents = require("./liveEvents");
 
 /* -------------------------------------------------------------------------- */
 /* Project links (Milanote / Docs)                                            */
@@ -41,17 +42,46 @@ const parseAllLinks = (data) => ({
 
 /* -------------------------------------------------------------------------- */
 
+// Progress counts for the Projects page, same rule as the client used to
+// compute from GET /tasks/project/:id: count only leaf tasks of the
+// project (sub tasks, and tasks with no sub task in the same project);
+// "done" means stage is "Done" (ignoring case and surrounding spaces).
+// Projects with no tasks get 0 / 0.
+const TASK_COUNTS_JOIN = `
+  LEFT JOIN LATERAL (
+    SELECT
+      COUNT(*)::int AS task_total_count,
+      COUNT(*) FILTER (
+        WHERE LOWER(BTRIM(t.stage, E' \\t\\n\\r')) = 'done'
+      )::int AS task_done_count
+    FROM tasks t
+    WHERE t.project_id = p.id
+      AND NOT EXISTS (
+        SELECT 1
+        FROM tasks s
+        WHERE s.parent_task_id = t.id
+          AND s.project_id = p.id
+      )
+  ) task_counts ON true
+`;
+
 const getAllProjects = async (user) => {
   let q, params;
   if (user.role === "manager") {
-    q = `SELECT p.*, m.name as created_by_name FROM projects p
+    q = `SELECT p.*, m.name as created_by_name,
+                task_counts.task_done_count, task_counts.task_total_count
+         FROM projects p
          LEFT JOIN members m ON p.created_by=m.id
+         ${TASK_COUNTS_JOIN}
          ORDER BY p.sort_order ASC NULLS LAST, p.created_at DESC`;
     params = [];
   } else {
-    q = `SELECT p.*, m.name as created_by_name FROM projects p
+    q = `SELECT p.*, m.name as created_by_name,
+                task_counts.task_done_count, task_counts.task_total_count
+         FROM projects p
          LEFT JOIN members m ON p.created_by=m.id
          JOIN project_members pm ON pm.project_id=p.id
+         ${TASK_COUNTS_JOIN}
          WHERE pm.member_id=$1 AND p.status != 'archived'
          ORDER BY p.sort_order ASC NULLS LAST, p.created_at DESC`;
     params = [user.id];
@@ -74,6 +104,8 @@ const reorderProjects = async (project_ids) => {
       ]);
     }
     await client.query("COMMIT");
+    // Live update, after the commit.
+    liveEvents.projectChanged("project.updated", project_ids[0]);
   } catch (e) {
     await client.query("ROLLBACK");
     throw e;
@@ -84,18 +116,20 @@ const reorderProjects = async (project_ids) => {
 
 const getProjectById = async (user, projectId) => {
   await assertProjectAccess(user, projectId);
-  const { rows } = await db.query(
-    `SELECT p.*, m.name as created_by_name FROM projects p
-     LEFT JOIN members m ON p.created_by=m.id WHERE p.id=$1`,
-    [projectId]
-  );
-  if (!rows[0]) return null;
-  const members = await db.query(
-    `SELECT m.id,m.name,m.email,m.role FROM members m
-     JOIN project_members pm ON pm.member_id=m.id WHERE pm.project_id=$1`,
-    [projectId]
-  );
-  return { ...rows[0], members: members.rows };
+  const [project, members] = await Promise.all([
+    db.query(
+      `SELECT p.*, m.name as created_by_name FROM projects p
+       LEFT JOIN members m ON p.created_by=m.id WHERE p.id=$1`,
+      [projectId]
+    ),
+    db.query(
+      `SELECT m.id,m.name,m.email,m.role FROM members m
+       JOIN project_members pm ON pm.member_id=m.id WHERE pm.project_id=$1`,
+      [projectId]
+    ),
+  ]);
+  if (!project.rows[0]) return null;
+  return { ...project.rows[0], members: members.rows };
 };
 
 const createProject = async (user, data) => {
@@ -161,6 +195,8 @@ const createProject = async (user, data) => {
         }).catch(() => {});
       });
     }
+    // Live update, after the commit.
+    liveEvents.projectChanged("project.created", proj.id);
     return proj;
   } catch (e) {
     await client.query("ROLLBACK");
@@ -224,6 +260,14 @@ const updateProject = async (projectId, data) => {
     }
     await client.query("COMMIT");
 
+    // Live update, after the commit. Previous members are included so a
+    // member who was just removed hears about it too.
+    liveEvents.projectChanged(
+      "project.updated",
+      projectId,
+      previousMembers.map((row) => row.member_id),
+    );
+
     if (member_ids) {
       const previousIds = new Set(previousMembers.map((row) => String(row.member_id)));
       const nextIds = new Set(member_ids.map((id) => String(id)));
@@ -263,12 +307,14 @@ const archiveProject = async (projectId) => {
   await db.query("UPDATE projects SET status='archived' WHERE id=$1", [
     projectId,
   ]);
+  liveEvents.projectChanged("project.updated", projectId);
 };
 
 const unarchiveProject = async (projectId) => {
   await db.query("UPDATE projects SET status='active' WHERE id=$1", [
     projectId,
   ]);
+  liveEvents.projectChanged("project.updated", projectId);
 };
 
 const deleteProject = async (projectId) => {
@@ -286,6 +332,9 @@ const deleteProject = async (projectId) => {
   }
 
   await db.query("DELETE FROM projects WHERE id=$1", [projectId]);
+  // Live update. The project's member rows are gone with it, so this
+  // reaches the managers.
+  liveEvents.projectChanged("project.deleted", projectId);
 };
 
 module.exports = {

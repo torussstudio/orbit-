@@ -1,6 +1,7 @@
 import { useState, useEffect, useId } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import api from '../api/client';
+import { takePrefetched } from '../api/prefetch';
 import { useAuth } from '../context/AuthContext';
 import { formatDate } from '../utils/helpers';
 import DatePicker from '../components/ui/DatePicker';
@@ -283,7 +284,10 @@ export default function Clusters({ project: propProject, active = true }) {
 
   const load = async () => {
     try {
-      const response = await api.get(`/clusters/project/${projectId}`);
+      // The first load picks up the request Project Detail already started
+      // from the URL id (api/prefetch.js); every later load sends its own.
+      const url = `/clusters/project/${projectId}`;
+      const response = await (takePrefetched(url) || api.get(url));
       setClusters(response.data);
       setLoadError(false);
     } catch (error) {

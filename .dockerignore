@@ -1,0 +1,28 @@
+# Keep the Docker build context small and free of local artefacts.
+# NOTE: .env files are intentionally NOT excluded yet — see AUDIT.md D9.
+
+.git
+.github
+.vscode
+.idea
+
+**/node_modules
+**/dist
+**/coverage
+**/.cache
+
+**/*.log
+npm-debug.log*
+
+# Local reports, test output and design originals (not needed in the image)
+AUDIT.md
+CHANGELOG.md
+TEST_REPORT.md
+test-results
+client/design-originals
+
+# Backups and dumps must never enter the build context
+**/*.dump
+**/*.sql.gz
+orbit-backups
+avatar-backup*.json

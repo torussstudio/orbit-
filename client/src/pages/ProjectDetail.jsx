@@ -1,11 +1,13 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useSearchParams, Link } from "react-router-dom";
 import api from "../api/client";
+import { prefetch, dropPrefetched } from "../api/prefetch";
 import Tasks from "./Tasks";
 import Clusters from "./Clusters";
 import Credentials from "./Credentials";
 import Knowledge from "./Knowledge";
    import ProjectLinks from "../components/projects/ProjectLinks";
+import { useLiveRefetch, PROJECT_EVENTS } from "../hooks/useLiveEvents";
 
 /* -------------------------------------------------------------------------- */
 /* Tabs                                                                       */
@@ -77,6 +79,14 @@ const TABS = [
 const DEFAULT_TAB = TABS[0].key;
 const TAB_KEYS = TABS.map((t) => t.key);
 
+// The requests each tab sends on its first load (same URLs as in the tab).
+const TAB_FIRST_REQUESTS = {
+  tasks: (id) => [`/tasks/project/${id}`, `/clusters/project/${id}`, "/members"],
+  clusters: (id) => [`/clusters/project/${id}`],
+  credentials: (id) => [`/credentials/project/${id}`],
+  knowledge: (id) => [`/knowledge/project/${id}`],
+};
+
 /* -------------------------------------------------------------------------- */
 /* Tailwind class groups                                                      */
 /* -------------------------------------------------------------------------- */
@@ -136,10 +146,32 @@ function useProject(id) {
 
   const retry = useCallback(() => setReloadKey((k) => k + 1), []);
 
+  // Live updates: fetch the project again without touching the error or
+  // skeleton state. The project on screen is only replaced when something
+  // really changed, so the tabs below don't re-render for nothing.
+  const liveCtl = useRef(null);
+  const refresh = useCallback(() => {
+    liveCtl.current?.abort();
+    const c = new AbortController();
+    liveCtl.current = c;
+
+    return api
+      .get(`/projects/${id}`, { signal: c.signal })
+      .then((r) => {
+        if (c.signal.aborted) return;
+        setProject((prev) =>
+          prev && JSON.stringify(prev) === JSON.stringify(r.data) ? prev : r.data,
+        );
+      })
+      .catch(() => {});
+  }, [id]);
+
+  useEffect(() => () => liveCtl.current?.abort(), [id]);
+
   // Until the project for *this* id has arrived, show the skeleton.
   const loading = !error && (!project || String(project.id) !== String(id));
 
-  return { project, error, loading, retry };
+  return { project, error, loading, retry, refresh };
 }
 
 /* -------------------------------------------------------------------------- */
@@ -197,7 +229,10 @@ const ProjectSummary = memo(function ProjectSummary({ project }) {
           aria-label="Breadcrumb"
           className="mb-1 flex items-center gap-1.5 text-xs text-[var(--text-3)]"
         >
-          <Link to="/projects" className="text-inherit no-underline hover:text-[var(--accent)]">
+          <Link
+            to="/projects"
+            className="text-inherit no-underline hover:text-[var(--accent)] max-[640px]:relative max-[640px]:after:absolute max-[640px]:after:-inset-x-1 max-[640px]:after:-inset-y-3.5 max-[640px]:after:content-['']"
+          >
             Projects
           </Link>
           <span aria-hidden="true">›</span>
@@ -284,10 +319,30 @@ export default function ProjectDetail() {
   const [searchParams, setSearchParams] = useSearchParams();
   const tabRefs = useRef({});
 
-  const { project, error, loading, retry } = useProject(id);
+  const { project, error, loading, retry, refresh } = useProject(id);
+
+  // Live updates for this project's own details (name, links, members,
+  // stages). The task list refreshes itself in the Tasks tab.
+  const isThisProject = useCallback(
+    (event) => String(event.projectId) === String(id),
+    [id],
+  );
+  useLiveRefetch(PROJECT_EVENTS, refresh, { match: isThisProject, enabled: !loading && !error });
 
   const tabParam = searchParams.get("tab");
   const activeKey = TAB_KEYS.includes(tabParam) ? tabParam : DEFAULT_TAB;
+
+  // The tabs below only mount once the project has loaded, but the project
+  // id is already in the URL. Start the open tab's first requests now, side
+  // by side with the project request; the tab picks them up when it mounts
+  // (api/prefetch.js). Nothing on screen changes, the tab is just ready sooner.
+  const openTabRef = useRef(activeKey);
+  openTabRef.current = activeKey;
+  useEffect(() => {
+    const urls = (TAB_FIRST_REQUESTS[openTabRef.current] || (() => []))(id);
+    urls.forEach(prefetch);
+    return () => dropPrefetched(urls);
+  }, [id]);
 
   const registerRef = useCallback((key, el) => {
     tabRefs.current[key] = el;

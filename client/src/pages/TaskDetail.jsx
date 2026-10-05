@@ -1,6 +1,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import api from "../api/client";
+import { cachedMembers, rememberMembers } from "../api/membersCache";
 import { useAuth } from "../context/AuthContext";
 import { formatDate, isOverdue } from "../utils/helpers";
 import DatePicker from "../components/ui/DatePicker";
@@ -9,6 +10,7 @@ import ConfirmModal from "../components/ui/ConfirmModal";
 import TaskForm from "../components/tasks/TaskForm";
 import Loader from "../components/ui/Loader";
 import ProjectLinks from "../components/projects/ProjectLinks";
+import { useLiveRefetch, TASK_AND_PROJECT_EVENTS } from "../hooks/useLiveEvents";
 
 /* ===========================================================================
  * Constants & helpers
@@ -145,6 +147,7 @@ function useTaskDetail({ taskId, projectId, isManager, onNotice }) {
   const hasLoaded = useRef(false);
   const fullCtl = useRef(null);
   const taskCtl = useRef(null);
+  const liveCtl = useRef(null);
 
   // Latest values without re-creating `load` (and re-fetching) when they change.
   const ctx = useRef({ projectId, isManager });
@@ -161,12 +164,35 @@ function useTaskDetail({ taskId, projectId, isManager, onNotice }) {
     // re-fetches the task: 1 request instead of 3.
     const first = !hasLoaded.current;
 
+    // Members: always fetched on the first load. If an earlier page already
+    // loaded the list this session, show that one now and swap in the fresh
+    // list when it arrives, instead of holding the whole page back for it.
+    const known = first ? cachedMembers() : null;
+    const membersRequest = first
+      ? api.get("/members", { signal }).then((r) => {
+          rememberMembers(r.data);
+          return r;
+        })
+      : null;
+
+    if (known) {
+      membersRequest
+        .then((r) => {
+          if (!signal.aborted) setMembers(r.data);
+        })
+        .catch(() => {});
+    }
+
     return Promise.all([
       api.get(`/tasks/${taskId}`, { signal }),
       first && manager
         ? api.get(`/projects/${pid}`, { signal }).catch(() => ({ data: null }))
         : null,
-      first ? api.get("/members", { signal }).catch(() => ({ data: EMPTY })) : null,
+      first
+        ? known
+          ? { data: known }
+          : membersRequest.catch(() => ({ data: EMPTY }))
+        : null,
     ])
       .then(([t, p, m]) => {
         if (signal.aborted) return;
@@ -210,6 +236,23 @@ function useTaskDetail({ taskId, projectId, isManager, onNotice }) {
       });
   }, [taskId, onNotice]);
 
+  // Live updates: re-fetch only the task, and stay quiet. No loader, and a
+  // failure shows nothing (the page keeps what it has). Uses its own
+  // controller so it never cancels a refresh started by the user's action.
+  const refreshSilently = useCallback(() => {
+    if (!hasLoaded.current) return undefined;
+    liveCtl.current?.abort();
+    const c = new AbortController();
+    liveCtl.current = c;
+
+    return api
+      .get(`/tasks/${taskId}`, { signal: c.signal })
+      .then((r) => {
+        if (!c.signal.aborted) setTask(r.data);
+      })
+      .catch(() => {});
+  }, [taskId]);
+
   useEffect(() => {
     hasLoaded.current = false;
     setLoading(true);
@@ -217,8 +260,10 @@ function useTaskDetail({ taskId, projectId, isManager, onNotice }) {
     return () => {
       fullCtl.current?.abort();
       taskCtl.current?.abort();
+      liveCtl.current?.abort();
       fullCtl.current = null;
       taskCtl.current = null;
+      liveCtl.current = null;
     };
   }, [load]);
 
@@ -228,7 +273,7 @@ function useTaskDetail({ taskId, projectId, isManager, onNotice }) {
     load();
   }, [load]);
 
-  return { task, project, members, loading, loadError, load, loadTaskOnly, retry };
+  return { task, project, members, loading, loadError, load, loadTaskOnly, refreshSilently, retry };
 }
 
 /* ===========================================================================
@@ -764,7 +809,10 @@ const CommentItem = memo(function CommentItem({ comment: c }) {
 });
 
 // Owns its draft state so typing never re-renders the rest of the page.
-const CommentsPanel = memo(function CommentsPanel({ taskId, comments, onPosted, onError }) {
+// Same limit the server enforces (taskController COMMENT_MAX_LENGTH).
+const COMMENT_MAX_LENGTH = 10000;
+
+const CommentsPanel = memo(function CommentsPanel({ taskId, comments, onPosted }) {
   const [comment, setComment] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
@@ -777,7 +825,8 @@ const CommentsPanel = memo(function CommentsPanel({ taskId, comments, onPosted, 
       setComment("");
       await onPosted();
     } catch {
-      onError("We couldn't post your comment. Please try again.");
+      // The API client already shows the server's error message as a toast;
+      // keep the draft so nothing typed is lost.
     } finally {
       setSubmitting(false);
     }
@@ -795,6 +844,7 @@ const CommentsPanel = memo(function CommentsPanel({ taskId, comments, onPosted, 
           }}
           placeholder="Write a comment… (Ctrl+Enter to post)"
           aria-label="Write a comment"
+          maxLength={COMMENT_MAX_LENGTH}
           rows={3}
         />
         <div className="flex justify-end mt-2">
@@ -888,23 +938,34 @@ const MODAL_TEXT = "m-0 mb-4 text-[13px] leading-[1.55] text-[color:var(--text-2
 
 // Members moving a sub task to In Review must say how long it took.
 function TimeTakenModal({ subtask, nextStage, onClose, onSaved }) {
-  const [value, setValue] = useState("");
+  const [hours, setHours] = useState("");
+  const [mins, setMins] = useState("");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
 
   const submit = async (e) => {
     e?.preventDefault();
     if (saving) return;
-    const minutes = Number(value);
+    const h = hours === "" ? 0 : Number(hours);
+    const m = mins === "" ? 0 : Number(mins);
 
-    if (!value || !Number.isInteger(minutes) || minutes <= 0 || minutes > 100000) {
-      setError("Please enter a valid time between 1 and 100,000 minutes.");
+    if (!Number.isInteger(h) || !Number.isInteger(m) || h < 0 || m < 0) {
+      setError("Enter whole numbers for hours and minutes.");
+      return;
+    }
+    if (m > 59) {
+      setError("Minutes must be between 0 and 59.");
+      return;
+    }
+    const total = h * 60 + m;
+    if (total <= 0 || total > 100000) {
+      setError("Please enter a valid time between 1 minute and 100,000 minutes.");
       return;
     }
 
     setSaving(true);
     try {
-      await api.put(`/tasks/${subtask.id}`, { stage: nextStage, time_taken: minutes });
+      await api.put(`/tasks/${subtask.id}`, { stage: nextStage, time_taken: total });
       onClose();
       await onSaved(subtask);
     } catch (err) {
@@ -926,27 +987,52 @@ function TimeTakenModal({ subtask, nextStage, onClose, onSaved }) {
           task take?
         </p>
         <div className="form-group">
-          <label className="form-label" htmlFor="td-time-taken">
-            Time taken (minutes) *
-          </label>
-          <input
-            id="td-time-taken"
-            className="form-input"
-            type="number"
-            inputMode="numeric"
-            min="1"
-            max="100000"
-            step="1"
-            value={value}
-            onChange={(e) => {
-              setValue(e.target.value);
-              setError("");
-            }}
-            placeholder="e.g. 45"
-            aria-invalid={!!error}
-            aria-describedby={error ? "td-time-taken-error" : undefined}
-            autoFocus
-          />
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="form-label" htmlFor="td-time-hours">
+                Hours
+              </label>
+              <input
+                id="td-time-hours"
+                className="form-input"
+                type="number"
+                inputMode="numeric"
+                min="0"
+                step="1"
+                value={hours}
+                onChange={(e) => {
+                  setHours(e.target.value);
+                  setError("");
+                }}
+                placeholder="0"
+                aria-invalid={!!error}
+                aria-describedby={error ? "td-time-taken-error" : undefined}
+                autoFocus
+              />
+            </div>
+            <div>
+              <label className="form-label" htmlFor="td-time-mins">
+                Minutes
+              </label>
+              <input
+                id="td-time-mins"
+                className="form-input"
+                type="number"
+                inputMode="numeric"
+                min="0"
+                max="59"
+                step="1"
+                value={mins}
+                onChange={(e) => {
+                  setMins(e.target.value);
+                  setError("");
+                }}
+                placeholder="45"
+                aria-invalid={!!error}
+                aria-describedby={error ? "td-time-taken-error" : undefined}
+              />
+            </div>
+          </div>
           {error && (
             <div
               id="td-time-taken-error"
@@ -983,7 +1069,6 @@ function ReviewModal({ subtask, onClose, onSaved }) {
     setError("");
     try {
       await api.put(`/tasks/${subtask.id}`, {
-        ...subtask,
         stage: action === "done" ? "Done" : "Rework",
         time_taken: null,
         new_due_date: action === "rework" && deadline ? deadline : null,
@@ -1097,8 +1182,20 @@ export default function TaskDetail() {
   const { user, isManager } = useAuth();
 
   const [notice, setNotice] = useState("");
-  const { task, project, members, loading, loadError, load, loadTaskOnly, retry } =
+  const { task, project, members, loading, loadError, load, loadTaskOnly, refreshSilently, retry } =
     useTaskDetail({ taskId, projectId, isManager, onNotice: setNotice });
+
+  // Live updates: someone else changed this task (stage, assignees, a sub
+  // task, a comment) or this project. Only the task data is replaced; open
+  // modals, menus and the comment being typed are separate state.
+  const isThisTask = useCallback(
+    (event) =>
+      event.taskId != null
+        ? String(event.taskId) === String(taskId)
+        : String(event.projectId) === String(projectId),
+    [taskId, projectId],
+  );
+  useLiveRefetch(TASK_AND_PROJECT_EVENTS, refreshSilently, { match: isThisTask });
 
   const [changingStage, setChangingStage] = useState(null);
   const [stageLoading, setStageLoading] = useState(null); // sub task id being moved
@@ -1217,7 +1314,9 @@ export default function TaskDetail() {
     async (st, stage, extra, refresh) => {
       setStageLoading(st.id);
       try {
-        await api.put(`/tasks/${st.id}`, { ...st, stage, ...extra });
+        // Only the changed fields: resending the whole task would also
+        // resend its due date, title, etc.
+        await api.put(`/tasks/${st.id}`, { stage, ...extra });
         await refresh();
       } catch {
         setNotice(`We couldn't move "${st.title}" to ${stage}. Please try again.`);
@@ -1229,23 +1328,24 @@ export default function TaskDetail() {
   );
 
   const handleSubTaskStageSelect = useCallback(
-    async (st, chosen) => {
-      setStageDropdown(null);
-      if (!chosen || chosen === st.stage) return;
-      // Members can't reopen a Done sub task.
-      if (!isManager && st.stage === "Done") return;
+  async (st, chosen) => {
+    setStageDropdown(null);
+    if (!chosen || chosen === st.stage) return;
+    // Members can't reopen a Done sub task.
+    if (!isManager && st.stage === "Done") return;
 
-      if (!isManager) {
-        if (chosen === "Done") return;
-        if (chosen === "In Review") return openTimeTaken(st, chosen);
-        return moveSubTask(st, chosen, { time_taken: null }, loadTaskOnly);
-      }
+    if (!isManager) {
+      if (chosen === "Done") return;
+      if (chosen === "In Review") return openTimeTaken(st, chosen);
+      return moveSubTask(st, chosen, { time_taken: null }, loadTaskOnly);
+    }
 
-      if (chosen === "Done") return openReview(st);
-      return moveSubTask(st, chosen, null, () => refreshFor(st));
-    },
-    [isManager, openTimeTaken, openReview, moveSubTask, loadTaskOnly, refreshFor],
-  );
+    if (chosen === "In Review") return openTimeTaken(st, chosen); // ← new line
+    if (chosen === "Done") return openReview(st);
+    return moveSubTask(st, chosen, null, () => refreshFor(st));
+  },
+  [isManager, openTimeTaken, openReview, moveSubTask, loadTaskOnly, refreshFor],
+);
 
   // Stage buttons on a leaf task (main task stage is derived, never edited).
   const handleStageChange = useCallback(
@@ -1255,19 +1355,19 @@ export default function TaskDetail() {
       if (!isManager && task.stage === "Done") return;
 
       if (view.isLeaf) {
-        // Members moving into In Review must enter time taken.
-        if (!isManager && stage === "In Review" && task.stage !== "In Review") {
-          return openTimeTaken(task, stage);
-        }
-        // Managers moving to Done go through the review decision.
-        if (isManager && stage === "Done" && task.stage !== "Done") {
-          return openReview(task);
-        }
-      }
+  // Anyone moving into In Review must enter time taken.
+  if (stage === "In Review" && task.stage !== "In Review") {
+    return openTimeTaken(task, stage);
+  }
+  // Managers moving to Done go through the review decision.
+  if (isManager && stage === "Done" && task.stage !== "Done") {
+    return openReview(task);
+  }
+}
 
       setChangingStage(stage);
       try {
-        await api.put(`/tasks/${taskId}`, { ...task, stage });
+        await api.put(`/tasks/${taskId}`, { stage });
         await load();
       } catch {
         setNotice(`We couldn't move this task to ${stage}. Please try again.`);
@@ -1394,7 +1494,7 @@ export default function TaskDetail() {
           assigneeLabel={assigneeLabel}
         />
 
-        <main className={cx("page-body", PAGE_PAD)}>
+        <div className={cx("page-body", PAGE_PAD)}>
           {notice && <Notice message={notice} onClose={dismissNotice} />}
 
           <div className={GRID}>
@@ -1441,7 +1541,6 @@ export default function TaskDetail() {
                 taskId={taskId}
                 comments={task.comments}
                 onPosted={load}
-                onError={setNotice}
               />
             </div>
 
@@ -1450,7 +1549,7 @@ export default function TaskDetail() {
               <ActivityPanel activity={task.activity} />
             </aside>
           </div>
-        </main>
+        </div>
 
         {subModal && (
           <Modal

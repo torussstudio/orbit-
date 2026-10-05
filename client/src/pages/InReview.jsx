@@ -287,7 +287,7 @@ export default function InReview() {
     setBusy({ id: subtask.id, type: 'done' });
     setNotice('');
     try {
-      await api.put(`/tasks/${subtask.id}`, { ...subtask, stage: 'Done', time_taken: null });
+      await api.put(`/tasks/${subtask.id}`, { stage: 'Done', time_taken: null });
       await load();
     } catch (error) {
       console.error('Failed to approve task:', error);
@@ -313,7 +313,6 @@ export default function InReview() {
     setNotice('');
     try {
       await api.put(`/tasks/${subtask.id}`, {
-        ...subtask,
         stage: 'Rework',
         time_taken: null,
         new_due_date: reworkDeadline || null,

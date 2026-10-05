@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import axios from "../api/client";
+import { takePrefetched } from "../api/prefetch";
 import Modal from "../components/ui/Modal";
 import ConfirmModal from "../components/ui/ConfirmModal";
 import Select from "../components/ui/Select";
@@ -326,9 +327,10 @@ export default function Credentials({ project, active = true }) {
     const requestId = ++requestIdRef.current;
 
     try {
-      const response = await axios.get(
-        `/credentials/project/${projectId}`
-      );
+      // The first load picks up the request Project Detail already started
+      // from the URL id (api/prefetch.js); every later load sends its own.
+      const url = `/credentials/project/${projectId}`;
+      const response = await (takePrefetched(url) || axios.get(url));
 
       if (requestId !== requestIdRef.current) return;
 

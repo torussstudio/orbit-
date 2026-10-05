@@ -4,8 +4,9 @@ import { useAuth } from '../../context/AuthContext';
 import NotificationBell from '../ui/NotificationBell';
 import ConfirmModal from '../ui/ConfirmModal';
 import api from '../../api/client';
-import { animateEntrance } from '../../utils/entranceAnimation';
+import { animateEntrance, preloadMotion } from '../../utils/motion';
 import Loader from '../ui/Loader';
+import ErrorBoundary from '../ui/ErrorBoundary';
 
 /* ------------------------------------------------------------------ */
 /* Shared bits                                                         */
@@ -83,6 +84,38 @@ function Avatar({ user, size = 'md' }) {
 
 const REQUESTS_PATH = '/requested-tasks';
 const REQUESTS_POLL_MS = 60000;
+
+// One shared "the user came back to this tab" signal for the sidebar badges.
+// Coming back fires both `focus` and `visibilitychange`; with one listener per
+// badge on each event, every badge was refetched twice. Here both events go
+// through one handler that runs each badge check once.
+const tabReturnListeners = new Set();
+let lastTabReturn = 0;
+
+const onTabReturn = () => {
+  if (document.visibilityState !== 'visible') return;
+  const now = Date.now();
+  // `focus` and `visibilitychange` arrive together: act on the first one only.
+  if (now - lastTabReturn < 1000) return;
+  lastTabReturn = now;
+  [...tabReturnListeners].forEach((listener) => listener());
+};
+
+const subscribeTabReturn = (listener) => {
+  if (tabReturnListeners.size === 0) {
+    window.addEventListener('focus', onTabReturn);
+    document.addEventListener('visibilitychange', onTabReturn);
+  }
+  tabReturnListeners.add(listener);
+
+  return () => {
+    tabReturnListeners.delete(listener);
+    if (tabReturnListeners.size === 0) {
+      window.removeEventListener('focus', onTabReturn);
+      document.removeEventListener('visibilitychange', onTabReturn);
+    }
+  };
+};
 
 // Per-user "last seen" marker: the newest request timestamp the manager has already looked at.
 const seenKey = (userId) => `orbit_requests_seen_${userId}`;
@@ -482,6 +515,8 @@ export default function Layout() {
     setMobileSearchOpen(false);
   }, [location.pathname]);
 
+  // GSAP loads in its own chunk once the browser is idle; until then pages simply appear.
+  useEffect(() => { preloadMotion(); }, []);
   useEffect(() => animateEntrance(mainRef.current), [location.pathname]);
 
   // New task-request badge (manager only).
@@ -528,16 +563,14 @@ export default function Layout() {
     };
 
     check();
-    const timer = setInterval(check, REQUESTS_POLL_MS);
-    const onVisible = () => { if (document.visibilityState === 'visible') check(); };
-    window.addEventListener('focus', check);
-    document.addEventListener('visibilitychange', onVisible);
+    // Skip ticks in background tabs; the visibility/focus handlers below catch up on return.
+    const timer = setInterval(() => { if (!document.hidden) check(); }, REQUESTS_POLL_MS);
+    const stopTabReturn = subscribeTabReturn(check);
 
     return () => {
       cancelled = true;
       clearInterval(timer);
-      window.removeEventListener('focus', check);
-      document.removeEventListener('visibilitychange', onVisible);
+      stopTabReturn();
     };
   }, [isManager, user?.id, onRequestsPage]);
 
@@ -581,16 +614,14 @@ export default function Layout() {
     };
 
     check();
-    const timer = setInterval(check, REQUESTS_POLL_MS);
-    const onVisible = () => { if (document.visibilityState === 'visible') check(); };
-    window.addEventListener('focus', check);
-    document.addEventListener('visibilitychange', onVisible);
+    // Skip ticks in background tabs; the visibility/focus handlers below catch up on return.
+    const timer = setInterval(() => { if (!document.hidden) check(); }, REQUESTS_POLL_MS);
+    const stopTabReturn = subscribeTabReturn(check);
 
     return () => {
       cancelled = true;
       clearInterval(timer);
-      window.removeEventListener('focus', check);
-      document.removeEventListener('visibilitychange', onVisible);
+      stopTabReturn();
     };
   }, [isManager, user?.id, onReviewPage]);
 
@@ -635,16 +666,14 @@ export default function Layout() {
     };
 
     check();
-    const timer = setInterval(check, REQUESTS_POLL_MS);
-    const onVisible = () => { if (document.visibilityState === 'visible') check(); };
-    window.addEventListener('focus', check);
-    document.addEventListener('visibilitychange', onVisible);
+    // Skip ticks in background tabs; the visibility/focus handlers below catch up on return.
+    const timer = setInterval(() => { if (!document.hidden) check(); }, REQUESTS_POLL_MS);
+    const stopTabReturn = subscribeTabReturn(check);
 
     return () => {
       cancelled = true;
       clearInterval(timer);
-      window.removeEventListener('focus', check);
-      document.removeEventListener('visibilitychange', onVisible);
+      stopTabReturn();
     };
   }, [isManager, user?.id, onTaskViewPage]);
 
@@ -775,7 +804,7 @@ export default function Layout() {
             {/* Close drawer: mobile only */}
             <button
               type="button"
-              className={`-mr-1 shrink-0 cursor-pointer rounded-lg border-none bg-transparent p-1.5 text-[var(--text-3)] hover:bg-[var(--bg-3)] hover:text-[var(--text)] md:hidden ${focusRing}`}
+              className={`-mr-1 flex min-h-10 min-w-10 shrink-0 cursor-pointer items-center justify-center rounded-lg border-none bg-transparent p-1.5 text-[var(--text-3)] hover:bg-[var(--bg-3)] hover:text-[var(--text)] md:hidden ${focusRing}`}
               onClick={() => setMobileOpen(false)}
               aria-label="Close menu"
             >
@@ -795,7 +824,7 @@ export default function Layout() {
                     title={item.badge > 0 ? `${item.label} (${item.badge} new)` : item.label}
                     onClick={() => setMobileOpen(false)}
                     className={({ isActive }) => [
-                      'group relative flex items-center gap-2.5 rounded-lg px-3 py-2.5 text-[14px] font-medium no-underline md:py-2 md:text-[13.5px]',
+                      'group relative flex items-center gap-2.5 rounded-lg px-3 py-2.5 text-[14px] font-medium no-underline md:py-2 md:text-[13.5px] max-[640px]:min-h-10',
                       'transition-colors duration-150 motion-reduce:transition-none active:scale-[0.99]',
                       focusRing,
                       centerClass,
@@ -838,7 +867,7 @@ export default function Layout() {
           {/* Mobile hamburger */}
           <button
             type="button"
-            className={`relative flex shrink-0 cursor-pointer items-center justify-center rounded-lg border-none bg-transparent p-1.5 text-[var(--text-2)] hover:bg-[var(--bg-3)] hover:text-[var(--text)] md:hidden ${focusRing}`}
+            className={`relative flex min-h-10 min-w-10 shrink-0 cursor-pointer items-center justify-center rounded-lg border-none bg-transparent p-1.5 text-[var(--text-2)] hover:bg-[var(--bg-3)] hover:text-[var(--text)] md:hidden ${focusRing}`}
             onClick={() => setMobileOpen(true)}
             aria-label={totalNew > 0 ? `Open menu, ${totalNew} new` : 'Open menu'}
             aria-expanded={mobileOpen}
@@ -857,7 +886,7 @@ export default function Layout() {
             {/* Search trigger: mobile only */}
             <button
               type="button"
-              className={`flex shrink-0 cursor-pointer items-center justify-center rounded-lg border-none bg-transparent p-1.5 text-[var(--text-2)] hover:bg-[var(--bg-3)] hover:text-[var(--text)] md:hidden ${focusRing}`}
+              className={`flex min-h-10 min-w-10 shrink-0 cursor-pointer items-center justify-center rounded-lg border-none bg-transparent p-1.5 text-[var(--text-2)] hover:bg-[var(--bg-3)] hover:text-[var(--text)] md:hidden ${focusRing}`}
               onClick={() => setMobileSearchOpen(true)}
               aria-label="Search"
             >
@@ -924,7 +953,7 @@ export default function Layout() {
               <button
                 type="button"
                 onClick={() => setMobileSearchOpen(false)}
-                className={`shrink-0 cursor-pointer rounded-md border-none bg-transparent px-2 py-2 text-[13px] font-medium text-[var(--text-2)] hover:text-[var(--text)] ${focusRing}`}
+                className={`min-h-10 shrink-0 cursor-pointer rounded-md border-none bg-transparent px-2 py-2 text-[13px] font-medium text-[var(--text-2)] hover:text-[var(--text)] ${focusRing}`}
               >
                 Cancel
               </button>
@@ -947,7 +976,9 @@ export default function Layout() {
           tabIndex={-1}
           className="flex-1 overflow-y-auto overflow-x-hidden bg-[var(--bg)] outline-none"
         >
-          <Outlet />
+          <ErrorBoundary resetKey={location.pathname}>
+            <Outlet />
+          </ErrorBoundary>
         </main>
       </div>
 

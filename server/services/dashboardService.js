@@ -1,16 +1,25 @@
 const db = require("../db");
+const { LIST_SAFETY_LIMIT, TOTAL_COLUMN, splitTotal } = require("../utils/listLimit");
 
 async function getDashboardData(user) {
   if (user.role === "manager") {
+    // Five round trips instead of eight, so one dashboard load fits in the
+    // pool (max 5) without waiting. The stage breakdown and the three totals
+    // travel together as one multi-statement query: each statement is
+    // unchanged and still returns its own result, in the same order.
     const [
-      projects, tasksByStage, overdue, clusterRework, workload,
-      totalProjectsCount, totalMainTasksCount, overdueCount,
+      projects, stageAndTotals, overdue, clusterRework, workload,
     ] = await Promise.all([
       db.query(`SELECT id,name,status,
         (SELECT COUNT(*) FROM tasks WHERE project_id=p.id) as total_tasks,
         (SELECT COUNT(*) FROM tasks WHERE project_id=p.id AND stage='Done') as done_tasks
         FROM projects p WHERE status!='archived' ORDER BY created_at DESC LIMIT 10`),
-      db.query(`SELECT stage, COUNT(*) as count FROM tasks WHERE parent_task_id IS NULL GROUP BY stage ORDER BY count DESC`),
+      db.query(
+        `SELECT stage, COUNT(*) as count FROM tasks WHERE parent_task_id IS NULL GROUP BY stage ORDER BY count DESC;
+         SELECT COUNT(*) as count FROM projects WHERE status!='archived';
+         SELECT COUNT(*) as count FROM tasks WHERE parent_task_id IS NULL;
+         SELECT COUNT(*) as count FROM tasks WHERE due_date < NOW() AND stage NOT IN ('Done')`,
+      ),
             db.query(`SELECT t.id,t.title,t.due_date,t.stage,t.project_id,t.parent_task_id,p.name as project_name, assignee_agg.assignee_name,
         (SELECT title FROM tasks pt WHERE pt.id = t.parent_task_id) as parent_title
         FROM tasks t JOIN projects p ON t.project_id=p.id
@@ -28,10 +37,10 @@ async function getDashboardData(user) {
         LEFT JOIN task_assignees ta ON ta.member_id = m.id
         LEFT JOIN tasks t ON t.id = ta.task_id AND t.stage NOT IN ('Done')
         WHERE m.role='member' AND m.active=true GROUP BY m.id,m.name,m.avatar_url`),
-      db.query(`SELECT COUNT(*) as count FROM projects WHERE status!='archived'`),
-      db.query(`SELECT COUNT(*) as count FROM tasks WHERE parent_task_id IS NULL`),
-      db.query(`SELECT COUNT(*) as count FROM tasks WHERE due_date < NOW() AND stage NOT IN ('Done')`),
     ]);
+    const [
+      tasksByStage, totalProjectsCount, totalMainTasksCount, overdueCount,
+    ] = stageAndTotals;
     return {
       projects: projects.rows,
       tasks_by_stage: tasksByStage.rows,
@@ -100,23 +109,27 @@ async function getTasksList(stage) {
   return tasks.rows;
 }
 
+// Returns { rows, total }: rows are capped at LIST_SAFETY_LIMIT, total is
+// the real number of tasks assigned to the user.
 async function getMyTasks(userId) {
   const tasks = await db.query(
     `SELECT t.*, p.name AS project_name,
       p.milanote_url AS project_milanote_url,
       p.docs_url AS project_docs_url,
       pt.title AS parent_title,
-      COALESCE(c.name, pc.name) AS cluster_name
+      COALESCE(c.name, pc.name) AS cluster_name,
+      COUNT(*) OVER() AS ${TOTAL_COLUMN}
      FROM tasks t
      JOIN projects p ON t.project_id = p.id
      LEFT JOIN tasks pt ON pt.id = t.parent_task_id
      LEFT JOIN clusters c ON c.id = t.cluster_id
      LEFT JOIN clusters pc ON pc.id = pt.cluster_id
      WHERE EXISTS (SELECT 1 FROM task_assignees ta WHERE ta.task_id=t.id AND ta.member_id=$1)
-     ORDER BY t.due_date NULLS LAST`,
-    [userId],
+     ORDER BY t.due_date NULLS LAST
+     LIMIT $2`,
+    [userId, LIST_SAFETY_LIMIT],
   );
-  return tasks.rows;
+  return splitTotal(tasks.rows);
 }
 
 module.exports = { getDashboardData, getMemberTasks, getTasksList, getMyTasks };

@@ -4,6 +4,7 @@ const router = express.Router();
 // ADJUST THIS IMPORT to match how server/routes/tasks.js does it.
 const { authenticate } = require('../middleware/auth');
 const taskRequestService = require('../services/taskRequestService');
+const { setTotalHeader } = require('../utils/listLimit');
 
 // Only managers can view or delete requests (roles in members: manager / member).
 const requireManager = (req, res, next) => {
@@ -50,7 +51,9 @@ router.post('/', authenticate, async (req, res) => {
 // GET /task-requests: managers see all requests, newest first
 router.get('/', authenticate, requireManager, async (req, res) => {
   try {
-    res.json(await taskRequestService.listRequests());
+    const { rows, total } = await taskRequestService.listRequests();
+    setTotalHeader(res, total);
+    res.json(rows);
   } catch (err) {
     console.error('GET /task-requests failed:', err);
     res.status(500).json({ error: 'Could not load requests.' });
@@ -60,8 +63,11 @@ router.get('/', authenticate, requireManager, async (req, res) => {
 // DELETE /task-requests/:id: managers remove a handled request
 router.delete('/:id', authenticate, requireManager, async (req, res) => {
   try {
-    const id = Number(req.params.id);
-    if (!Number.isInteger(id)) return res.status(400).json({ error: 'Invalid id.' });
+    // task_requests.id follows the members id type: integer or UUID.
+    const id = String(req.params.id);
+    const isIntegerId = /^\d{1,18}$/.test(id);
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+    if (!isIntegerId && !isUuid) return res.status(400).json({ error: 'Invalid id.' });
 
     await taskRequestService.deleteRequest(id);
     res.json({ success: true });

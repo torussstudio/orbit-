@@ -224,7 +224,7 @@ export default function Modal({ title, onClose, children, size = 'lg' }) {
             type="button"
             onClick={() => onCloseRef.current?.()}
             aria-label="Close dialog"
-            className={`-mr-2 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-[var(--text-3)] transition-[background-color,color,transform] duration-200 hover:bg-[var(--bg-3)] hover:text-[var(--text)] active:scale-95 ${focusRing}`}
+            className={`-mr-2 inline-flex h-10 w-10 shrink-0 sm:h-8 sm:w-8 items-center justify-center rounded-md text-[var(--text-3)] transition-[background-color,color,transform] duration-200 hover:bg-[var(--bg-3)] hover:text-[var(--text)] active:scale-95 ${focusRing}`}
           >
             <svg
               width="16"

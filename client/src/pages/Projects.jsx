@@ -7,6 +7,7 @@ import ConfirmModal from '../components/ui/ConfirmModal';
 import ProjectForm from '../components/projects/ProjectForm';
 import Loader from '../components/ui/Loader';
    import ProjectLinks from '../components/projects/ProjectLinks';
+import { useLiveRefetch, TASK_AND_PROJECT_EVENTS } from '../hooks/useLiveEvents';
 
 /* -------------------------------------------------------------------------- */
 /* Task statistics                                                            */
@@ -76,9 +77,23 @@ async function mapPool(items, limit, fn) {
   await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
 }
 
-// Projects + per-project progress. Progress is fetched in the background with
-// limited concurrency, cards fill in as each count arrives, counts are cached
-// (archive / restore / edit don't refetch them), and superseded loads are cancelled.
+// Progress counts sent by GET /projects (task_done_count / task_total_count),
+// computed on the server with the same rule as computeStats. Returns null when
+// any project is missing them (older server), so the page falls back to the
+// per-project fetch.
+const serverStats = (list) => {
+  const ok = list.every(
+    (p) => Number.isFinite(p.task_total_count) && Number.isFinite(p.task_done_count),
+  );
+  return ok
+    ? Object.fromEntries(list.map((p) => [p.id, { total: p.task_total_count, done: p.task_done_count }]))
+    : null;
+};
+
+// Projects + per-project progress. Progress normally comes with GET /projects.
+// Fallback (older server): fetched in the background with limited concurrency,
+// cards fill in as each count arrives, counts are cached (archive / restore /
+// edit don't refetch them), and superseded loads are cancelled.
 function useProjects(onError) {
   const [projects, setProjects] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -95,6 +110,14 @@ function useProjects(onError) {
     try {
       const { data: list } = await api.get('/projects', { signal });
       if (signal.aborted) return;
+
+      const fromServer = serverStats(list);
+      if (fromServer) {
+        setTaskStats(fromServer);
+        setProjects(list);
+        setLoading(false);
+        return;
+      }
 
       const cache = statsCache.current;
       setProjects(list);
@@ -298,6 +321,10 @@ export default function Projects() {
   const [errorMsg, setErrorMsg] = useState('');
   const { projects, loading, taskStats, load } = useProjects(setErrorMsg);
 
+  // Live updates: projects and their progress counts. `load` only shows the
+  // skeleton on the first load, so this refresh is silent.
+  useLiveRefetch(TASK_AND_PROJECT_EVENTS, load);
+
   const [modal, setModal] = useState(null); // null | { editing: project | null }
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState('');
@@ -494,7 +521,7 @@ export default function Projects() {
         )}
       </div>
 
-      <main className="page-body">
+      <div className="page-body">
         {errorMsg && (
           <div
             className="mb-4 flex items-center justify-between gap-3 rounded-[10px] border border-[color:color-mix(in_srgb,var(--danger)_28%,transparent)] bg-[color:color-mix(in_srgb,var(--danger)_10%,transparent)] px-3.5 py-2.5 text-[13px] text-[color:var(--danger)]"
@@ -612,7 +639,7 @@ export default function Projects() {
             </div>
           </section>
         )}
-      </main>
+      </div>
 
       {modal && (
         <Modal title={modal.editing ? 'Edit project' : 'New project'} onClose={closeModal}>

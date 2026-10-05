@@ -1,6 +1,7 @@
 // Uses the same pg pool as the rest of the server.
 const pool = require('../db');
 const { sendToMany } = require('../utils/pushNotify');
+const { LIST_SAFETY_LIMIT, TOTAL_COLUMN, splitTotal } = require('../utils/listLimit');
 
 async function createRequest({ title, project_name, description, due_date, requested_by }) {
   const { rows } = await pool.query(
@@ -13,14 +14,19 @@ async function createRequest({ title, project_name, description, due_date, reque
 }
 
 // All requests, newest first, with the requester's name included.
+// Returns { rows, total }: rows are capped at LIST_SAFETY_LIMIT, total is
+// the real number of requests.
 async function listRequests() {
   const { rows } = await pool.query(
-    `select tr.*, m.name as requested_by_name
+    `select tr.*, m.name as requested_by_name,
+            count(*) over() as ${TOTAL_COLUMN}
        from task_requests tr
        left join members m on m.id = tr.requested_by
-      order by tr.created_at desc`
+      order by tr.created_at desc
+      limit $1`,
+    [LIST_SAFETY_LIMIT]
   );
-  return rows;
+  return splitTotal(rows);
 }
 
 async function deleteRequest(id) {

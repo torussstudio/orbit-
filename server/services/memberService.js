@@ -1,5 +1,15 @@
 const bcrypt = require("bcryptjs");
 const db = require("../db");
+const {
+  normalizeEmail,
+  assertPasswordLength,
+  assertEmailAvailable,
+  isEmailUniqueViolation,
+  emailTakenError,
+  deleteMemberRecord,
+} = require("../utils/accountRules");
+const liveEvents = require("./liveEvents");
+const { revokeAllRefreshTokensForMember } = require("../models/refreshTokens");
 
 async function getAllMembers() {
   const { rows } = await db.query(
@@ -27,33 +37,80 @@ async function getMemberSuggestions(search) {
   return rows;
 }
 
-async function createMember({ name, email, password, role, birthday, skills }) {
-  const hash = await bcrypt.hash(password, 10);
-  const { rows } = await db.query(
-    "INSERT INTO members(name,email,password_hash,role,birthday,skills) VALUES($1,$2,$3,$4,$5,$6) RETURNING id,name,email,role,birthday,skills,active",
-    [name, email, hash, role, birthday || null, skills || []],
-  );
-  return rows[0];
-}
+// A manager sets this member's password, so no current password is needed.
+async function createMember({ name, email: rawEmail, password, role, birthday, skills }) {
+  const email = normalizeEmail(rawEmail);
+  assertPasswordLength(password);
+  await assertEmailAvailable(email);
 
-async function updateMember(id, { name, email, role, birthday, skills, password }) {
-  if (password) {
-    const hash = await bcrypt.hash(password, 10);
+  const hash = await bcrypt.hash(password, 10);
+  try {
     const { rows } = await db.query(
-      "UPDATE members SET name=$1,email=$2,role=$3,birthday=$4,skills=$5,password_hash=$6 WHERE id=$7 RETURNING id,name,email,role,birthday,skills",
-      [name, email, role, birthday || null, skills, hash, id],
+      "INSERT INTO members(name,email,password_hash,role,birthday,skills) VALUES($1,$2,$3,$4,$5,$6) RETURNING id,name,email,role,birthday,skills,active",
+      [name, email, hash, role, birthday || null, skills || []],
     );
     return rows[0];
+  } catch (err) {
+    if (isEmailUniqueViolation(err)) throw emailTakenError();
+    throw err;
   }
-  const { rows } = await db.query(
-    "UPDATE members SET name=$1,email=$2,role=$3,birthday=$4,skills=$5 WHERE id=$6 RETURNING id,name,email,role,birthday,skills",
-    [name, email, role, birthday || null, skills, id],
+}
+
+async function updateMember(id, { name, email: rawEmail, role, birthday, skills, password }) {
+  const email = normalizeEmail(rawEmail);
+  if (password) assertPasswordLength(password);
+  await assertEmailAvailable(email, id);
+
+  // Role before the save, to tell a real role change from a plain edit.
+  const { rows: before } = await db.query(
+    "SELECT role FROM members WHERE id=$1",
+    [id],
   );
-  return rows[0];
+  const previousRole = before[0]?.role;
+  const roleChanged = (row) =>
+    Boolean(row) && previousRole !== undefined && row.role !== previousRole;
+
+  try {
+    if (password) {
+      const hash = await bcrypt.hash(password, 10);
+      const { rows } = await db.query(
+        "UPDATE members SET name=$1,email=$2,role=$3,birthday=$4,skills=$5,password_hash=$6 WHERE id=$7 RETURNING id,name,email,role,birthday,skills",
+        [name, email, role, birthday || null, skills, hash, id],
+      );
+      // Saved. A manager set a new password for this member (and maybe a
+      // new role). Same as when a member changes their own password
+      // (authService.updateProfile): every session of that member is
+      // revoked, so each device has to log in again with the new password.
+      await revokeAllRefreshTokensForMember(id, "password_changed_by_manager");
+
+      // End the member's live streams (this also clears their auth cache).
+      liveEvents.accessChanged(
+        id,
+        roleChanged(rows[0])
+          ? "role changed and password reset by a manager"
+          : "password reset by a manager",
+      );
+      return rows[0];
+    }
+    const { rows } = await db.query(
+      "UPDATE members SET name=$1,email=$2,role=$3,birthday=$4,skills=$5 WHERE id=$6 RETURNING id,name,email,role,birthday,skills",
+      [name, email, role, birthday || null, skills, id],
+    );
+    // Saved. Role changed: end the member's live streams.
+    if (roleChanged(rows[0])) {
+      liveEvents.accessChanged(id, "role changed");
+    }
+    return rows[0];
+  } catch (err) {
+    if (isEmailUniqueViolation(err)) throw emailTakenError();
+    throw err;
+  }
 }
 
 async function deactivateMember(id) {
   await db.query("UPDATE members SET active=false WHERE id=$1", [id]);
+  // Saved: end the member's live streams now.
+  liveEvents.accessChanged(id, "deactivated");
 }
 
 async function activateMember(id) {
@@ -75,8 +132,16 @@ async function deleteMember(id) {
     err.expose = true;
     throw err;
   }
-  await db.query("DELETE FROM task_assignees WHERE member_id=$1", [id]);
-  await db.query("DELETE FROM members WHERE id=$1", [id]);
+  // One transaction: last-active-manager block, the member's own
+  // notifications, then the member (task assignments go with the member:
+  // task_assignees.member_id is ON DELETE CASCADE). A failed delete changes
+  // nothing.
+  await deleteMemberRecord(id, {
+    lastManagerMessage:
+      "This member is the only active manager and cannot be deleted. Make another member a manager first.",
+    linkedMessage:
+      "This member is still linked to projects, tasks or comments and cannot be deleted. Deactivate the member instead.",
+  });
 }
 
 module.exports = { getAllMembers, getMemberSuggestions, createMember, updateMember, deactivateMember, activateMember, deleteMember };

@@ -1,5 +1,6 @@
 const { verifyAccessToken } = require("../utils/jwt");
 const db = require("../db");
+const authCache = require("../services/authCache");
 
 async function authenticate(req, res, next) {
   const authHeader =
@@ -53,22 +54,35 @@ async function authenticate(req, res, next) {
       });
     }
 
-    const { rows } = await db.query(
-      `
-        SELECT id, role, active
-        FROM members
-        WHERE id = $1
-        LIMIT 1
-      `,
-      [payload.sub],
-    );
+    /*
+     * The member row is cached for a short
+     * time (services/authCache.js), so most
+     * requests skip this query. The entry is
+     * cleared as soon as the member's access
+     * changes.
+     */
+    let member = authCache.get(payload.sub);
 
-    const member = rows[0];
+    if (!member) {
+      const { rows } = await db.query(
+        `
+          SELECT id, role, active
+          FROM members
+          WHERE id = $1
+          LIMIT 1
+        `,
+        [payload.sub],
+      );
 
-    if (!member || !member.active) {
-      return res.status(401).json({
-        error: "NOT_AUTHENTICATED",
-      });
+      member = rows[0];
+
+      if (!member || !member.active) {
+        return res.status(401).json({
+          error: "NOT_AUTHENTICATED",
+        });
+      }
+
+      authCache.set(member);
     }
 
     /*
@@ -78,10 +92,17 @@ async function authenticate(req, res, next) {
      * an operation needs to identify the
      * current Orbit session.
      */
+    /*
+     * tokenExp: when this (verified) access
+     * token expires, in seconds since 1970.
+     * The live events stream uses it to close
+     * itself when the token runs out.
+     */
     req.user = {
       id: member.id,
       role: member.role,
       sessionId: payload.sid,
+      tokenExp: payload.exp,
     };
 
     return next();

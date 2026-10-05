@@ -75,7 +75,9 @@ const CHIP =
   'inline-flex items-center gap-1.5 rounded-lg border border-[color:var(--border)] bg-[color:var(--bg-3,var(--bg-2))] font-medium text-[color:var(--text-2)] no-underline ' +
   'transition-[border-color,color,background-color,transform] duration-150 motion-reduce:transition-none ' +
   'hover:border-[color:var(--accent)] hover:text-[color:var(--accent)] active:scale-[0.97] ' +
-  'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--accent)]';
+  'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--accent)] ' +
+  // Phones: at least a 40px tap target. No effect above 640px.
+  'max-[640px]:min-h-10';
 
 const SIZES = {
   sm: 'px-2.5 py-1 text-xs',

@@ -278,8 +278,21 @@ class CalendarService {
   }
 
   async notifyGuest(guestData) {
-    const { guest_email, event_title } = guestData;
-    
+    const { guest_email, event_title } = guestData || {};
+
+    if (
+      typeof guest_email !== "string" ||
+      !guest_email.trim() ||
+      guest_email.length > 255 ||
+      typeof event_title !== "string" ||
+      event_title.length > 500
+    ) {
+      const err = new Error("guest_email and event_title are required");
+      err.status = 400;
+      err.expose = true;
+      throw err;
+    }
+
     // Check if guest is a member
     const { rows: memberRows } = await db.query(
       "SELECT id FROM members WHERE LOWER(email) = LOWER($1)",

@@ -1,9 +1,11 @@
 const taskService = require("../services/taskService");
+const { setTotalHeader } = require("../utils/listLimit");
 
 async function getTasksByProject(req, res, next) {
   try {
-    const tasks = await taskService.getTasksByProject(req.params.projectId);
-    res.json(tasks);
+    const { rows, total } = await taskService.getTasksByProject(req.params.projectId);
+    setTotalHeader(res, total);
+    res.json(rows);
   } catch (error) {
     next(error);
   }
@@ -48,28 +50,18 @@ async function createTask(req, res, next) {
 
 async function updateTask(req, res, next) {
   try {
-    console.log("[TASK UPDATE] ENTERED", {
-      taskId: req.params.id,
-      userId: req.user?.id,
-      role: req.user?.role,
-      body: req.body,
-    });
-
     const task = await taskService.updateTask(
       req.params.id,
       req.body,
       req.user
     );
 
-    console.log("[TASK UPDATE] SUCCESS");
-
     res.json(task);
   } catch (error) {
-    console.error("[TASK UPDATE ERROR]", {
+    console.error("[task update] failed:", {
+      taskId: req.params.id,
       status: error.status,
       message: error.message,
-      name: error.name,
-      stack: error.stack,
     });
 
     if (error.status) {
@@ -94,9 +86,19 @@ async function deleteTask(req, res, next) {
   }
 }
 
+const COMMENT_MAX_LENGTH = 10000;
+
 async function createComment(req, res, next) {
   try {
-    const comment = await taskService.createComment(req.params.id, req.user.id, req.body.content);
+    const content = req.body?.content;
+    if (typeof content !== "string" || !content.trim()) {
+      return res.status(400).json({ error: "Comment cannot be empty" });
+    }
+    if (content.length > COMMENT_MAX_LENGTH) {
+      return res.status(400).json({ error: `Comment must be ${COMMENT_MAX_LENGTH} characters or less` });
+    }
+
+    const comment = await taskService.createComment(req.params.id, req.user.id, content);
     res.status(201).json(comment);
   } catch (error) {
     next(error);
@@ -108,7 +110,7 @@ async function getInReviewTasks(req, res, next) {
     const tasks = await taskService.getInReviewTasks();
     res.json(tasks);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    next(error);
   }
 }
 

@@ -14,8 +14,10 @@ function parseMemberEmails(rawMembers) {
 class CalendarController {
   async getCalendarData(req, res, next) {
     try {
-      const memberEmailList = parseMemberEmails(req.query.members);
       const isManager = req.user.role === "manager";
+      // Filtering by other people's emails exposes their tasks/events, so
+      // only managers may use it. Members always get their own calendar.
+      const memberEmailList = isManager ? parseMemberEmails(req.query.members) : [];
       const userId = req.user.id;
       
       const data = await calendarService.getCalendarData(userId, isManager, memberEmailList);

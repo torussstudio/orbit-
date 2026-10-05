@@ -1,12 +1,15 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import api from "../api/client";
+import { cachedMembers, rememberMembers } from "../api/membersCache";
+import { takePrefetched } from "../api/prefetch";
 import { useAuth } from "../context/AuthContext";
 import { formatDate, isOverdue } from "../utils/helpers";
 import Modal from "../components/ui/Modal";
 import ConfirmModal from "../components/ui/ConfirmModal";
 import TaskForm from "../components/tasks/TaskForm";
 import Select from "../components/ui/Select";
+import { useLiveRefetch, TASK_EVENTS } from "../hooks/useLiveEvents";
 
 /* ===========================================================================
  * Constants & helpers
@@ -96,7 +99,7 @@ const PAGE = "pt-6 px-8 pb-12 max-[720px]:pt-4 max-[720px]:px-4 max-[720px]:pb-1
 const BOARD = "grid grid-cols-[repeat(auto-fill,minmax(270px,1fr))] gap-4";
 
 const SEG_BTN =
-  "px-3.5 py-[5px] text-xs font-medium border-0 rounded-[8px] cursor-pointer text-[color:var(--text-3)] bg-transparent transition-[background-color,color,transform] duration-200 hover:text-[color:var(--text)] active:scale-[0.97] aria-pressed:text-[color:var(--text)] aria-pressed:bg-[color:var(--bg-2)] aria-pressed:shadow-[0_1px_3px_rgba(15,23,42,0.14)] motion-reduce:transition-none";
+  "px-3.5 py-[5px] text-xs font-medium border-0 rounded-[8px] max-[640px]:min-h-10 cursor-pointer text-[color:var(--text-3)] bg-transparent transition-[background-color,color,transform] duration-200 hover:text-[color:var(--text)] active:scale-[0.97] aria-pressed:text-[color:var(--text)] aria-pressed:bg-[color:var(--bg-2)] aria-pressed:shadow-[0_1px_3px_rgba(15,23,42,0.14)] motion-reduce:transition-none";
 
 const MONTH_BTN =
   "w-8 border-0 cursor-pointer text-base text-[color:var(--text-2)] bg-transparent transition-colors duration-200 enabled:hover:bg-[color:var(--bg-3)] enabled:hover:text-[color:var(--text)] enabled:active:bg-[color:var(--bg-4)] disabled:opacity-[.35] disabled:cursor-not-allowed motion-reduce:transition-none";
@@ -170,7 +173,8 @@ const MONTH_SELECT_STYLE = {
 // (tab re-activation, after saves) stay silent with no blink.
 function useProjectData(projectId, active) {
   const [tasks, setTasks] = useState(EMPTY);
-  const [members, setMembers] = useState(EMPTY);
+  // Members from the previous page (if any) are shown until the fresh list arrives.
+  const [members, setMembers] = useState(() => cachedMembers() || EMPTY);
   const [clusters, setClusters] = useState(EMPTY);
   const [loading, setLoading] = useState(true);
   const controller = useRef(null);
@@ -181,14 +185,26 @@ function useProjectData(projectId, active) {
     controller.current = c;
     const { signal } = c;
 
+    // The first load picks up the requests Project Detail already started
+    // from the URL id (api/prefetch.js); every later load sends its own.
+    const get = (url) => takePrefetched(url) || api.get(url, { signal });
+
+    // Members only fill the task form, so the list does not wait for them.
+    get("/members")
+      .then((m) => {
+        if (!signal.aborted) setMembers(rememberMembers(m.data));
+      })
+      .catch((e) => {
+        if (!isAbort(e)) console.error(e);
+      });
+
     return Promise.all([
-      api.get(`/tasks/project/${projectId}`, { signal }),
-      api.get("/members", { signal }),
-      api.get(`/clusters/project/${projectId}`, { signal }),
+      get(`/tasks/project/${projectId}`),
+      get(`/clusters/project/${projectId}`),
     ])
-      .then(([t, m, cl]) => {
+      .then(([t, cl]) => {
+        if (signal.aborted) return;
         setTasks(t.data);
-        setMembers(m.data);
         setClusters(cl.data);
       })
       .catch((e) => {
@@ -483,6 +499,15 @@ export default function Tasks({ project: propProject, active = true }) {
   const { isManager } = useAuth();
 
   const { tasks, members, clusters, loading, reload } = useProjectData(projectId, active);
+
+  // Live updates: a task in this project changed (for example a member
+  // moved a sub task). `reload` is silent after the first load. A hidden tab
+  // skips it; it reloads anyway when it becomes active.
+  const isThisProject = useCallback(
+    (event) => String(event.projectId) === String(projectId),
+    [projectId],
+  );
+  useLiveRefetch(TASK_EVENTS, reload, { match: isThisProject, enabled: !!projectId && active });
   const index = useTaskIndex(tasks);
 
   const [view, setView] = useState("list");

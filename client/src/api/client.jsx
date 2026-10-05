@@ -576,4 +576,198 @@ api.interceptors.response.use(
   },
 );
 
+/*
+ * ============================================================
+ * SHARED IN-FLIGHT GET
+ * ============================================================
+ *
+ * Two parts of the page often ask for the same list at the same
+ * moment (a sidebar badge and the page it belongs to). While a
+ * GET is still on its way, another GET with the same URL, params
+ * and access token joins it instead of being sent again.
+ *
+ * - Nothing is kept after the response arrives: this is not a
+ *   cache. The next call after that sends a new request.
+ * - Each caller keeps its own AbortSignal. Cancelling one caller
+ *   does not cancel the others; the request itself is cancelled
+ *   only when every caller has left.
+ * - A GET with any other option (custom headers, responseType,
+ *   ...) is sent on its own, as before.
+ * - Any POST / PUT / PATCH / DELETE ends the sharing (when it is
+ *   sent and again when it finishes), so a refetch after a save
+ *   never joins a request that started before the save.
+ * ============================================================
+ */
+
+const inFlightGets = new Map();
+
+const plainGet = api.get.bind(api);
+
+function forgetInFlightGets() {
+  inFlightGets.clear();
+}
+
+function paramsKey(params) {
+  if (params === undefined || params === null) return "";
+
+  try {
+    if (
+      typeof URLSearchParams !== "undefined" &&
+      params instanceof URLSearchParams
+    ) {
+      return params.toString();
+    }
+
+    return JSON.stringify(
+      Object.keys(params)
+        .sort()
+        .map((name) => [name, params[name]]),
+    );
+  } catch {
+    // Not comparable: do not share this request.
+    return null;
+  }
+}
+
+function canceledError() {
+  return new axios.CanceledError("canceled");
+}
+
+// Later callers get their own copy of the data, so one caller
+// changing its list can never affect another.
+function copyResponse(response) {
+  if (typeof structuredClone !== "function") return response;
+
+  try {
+    return {
+      ...response,
+      data: structuredClone(response.data),
+    };
+  } catch {
+    return response;
+  }
+}
+
+api.get = function sharedGet(url, config) {
+  const { signal, params, ...rest } = config || {};
+  const key = paramsKey(params);
+
+  if (Object.keys(rest).length > 0 || key === null) {
+    return plainGet(url, config);
+  }
+
+  if (signal?.aborted) {
+    return Promise.reject(canceledError());
+  }
+
+  const mapKey = `${getAccessToken() || ""} ${url} ${key}`;
+
+  let entry = inFlightGets.get(mapKey);
+  const isFirst = !entry;
+
+  if (!entry) {
+    const controller = new AbortController();
+
+    entry = { controller, callers: 0, done: false };
+
+    entry.promise = plainGet(url, {
+      params,
+      signal: controller.signal,
+    });
+
+    const finished = () => {
+      entry.done = true;
+
+      if (inFlightGets.get(mapKey) === entry) {
+        inFlightGets.delete(mapKey);
+      }
+    };
+
+    entry.promise.then(finished, finished);
+
+    inFlightGets.set(mapKey, entry);
+  }
+
+  const shared = entry;
+  shared.callers += 1;
+
+  return new Promise((resolve, reject) => {
+    let settled = false;
+
+    const onAbort = () => {
+      if (settled) return;
+      settled = true;
+
+      shared.callers -= 1;
+
+      // Nobody is waiting any more: cancel the real request.
+      if (shared.callers === 0 && !shared.done) {
+        if (inFlightGets.get(mapKey) === shared) {
+          inFlightGets.delete(mapKey);
+        }
+
+        shared.controller.abort();
+      }
+
+      reject(canceledError());
+    };
+
+    if (signal) {
+      signal.addEventListener("abort", onAbort, { once: true });
+    }
+
+    const finish = (settle, value) => {
+      if (settled) return;
+      settled = true;
+
+      if (signal) {
+        signal.removeEventListener("abort", onAbort);
+      }
+
+      settle(value);
+    };
+
+    shared.promise.then(
+      (response) =>
+        finish(
+          resolve,
+          isFirst ? response : copyResponse(response),
+        ),
+      (error) => finish(reject, error),
+    );
+  });
+};
+
+// Saves end the sharing: see the note above.
+function isWrite(config) {
+  return (
+    String(config?.method || "get").toLowerCase() !== "get"
+  );
+}
+
+api.interceptors.request.use((config) => {
+  if (isWrite(config)) {
+    forgetInFlightGets();
+  }
+
+  return config;
+});
+
+api.interceptors.response.use(
+  (response) => {
+    if (isWrite(response.config)) {
+      forgetInFlightGets();
+    }
+
+    return response;
+  },
+  (error) => {
+    if (isWrite(error.config)) {
+      forgetInFlightGets();
+    }
+
+    return Promise.reject(error);
+  },
+);
+
 export default api;

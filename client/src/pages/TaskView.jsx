@@ -6,6 +6,7 @@ import { formatDate, isOverdue } from "../utils/helpers";
 import Select from "../components/ui/Select";
 import Modal from "../components/ui/Modal";
 import ProjectLinks from "../components/projects/ProjectLinks";
+import { useLiveRefetch, TASK_AND_PROJECT_EVENTS } from "../hooks/useLiveEvents";
 
 /* -------------------------------------------------------------------------- */
 /* Constants                                                                  */
@@ -160,7 +161,7 @@ const StageDropdown = memo(function StageDropdown({ task, onChange, locked = fal
         aria-haspopup="menu"
         aria-expanded={open}
         aria-label={`Stage: ${task.stage}. Change stage`}
-        className={`badge badge-${stageKey(task.stage)} cursor-pointer border-0 transition-[transform,filter] duration-150 [font-family:inherit] hover:brightness-95 active:scale-[0.97] motion-reduce:transition-none ${FOCUS}`}
+        className={`badge badge-${stageKey(task.stage)} cursor-pointer border-0 max-[640px]:relative max-[640px]:after:absolute max-[640px]:after:-inset-2.5 max-[640px]:after:content-[''] transition-[transform,filter] duration-150 [font-family:inherit] hover:brightness-95 active:scale-[0.97] motion-reduce:transition-none ${FOCUS}`}
         onClick={() => setOpen((p) => !p)}
       >
         {task.stage}
@@ -233,7 +234,7 @@ const StatusTab = memo(function StatusTab({ status, active, count, onSelect }) {
       type="button"
       aria-pressed={active}
       onClick={() => onSelect(status)}
-      className={`inline-flex cursor-pointer items-center gap-2 rounded-lg border-0 py-1.5 pl-3 pr-2 text-xs tracking-[0.01em] transition-[background-color,color,box-shadow] duration-200 [font-family:inherit] active:scale-[0.98] motion-reduce:transition-none ${FOCUS} ${
+      className={`inline-flex cursor-pointer items-center gap-2 rounded-lg border-0 py-1.5 pl-3 pr-2 text-xs max-[640px]:min-h-10 tracking-[0.01em] transition-[background-color,color,box-shadow] duration-200 [font-family:inherit] active:scale-[0.98] motion-reduce:transition-none ${FOCUS} ${
         active
           ? "bg-[color:var(--bg-2)] font-semibold text-[color:var(--text)] shadow-[0_1px_2px_rgba(15,23,42,0.12)]"
           : "bg-transparent font-medium text-[color:var(--text-2)] hover:bg-[color:color-mix(in_srgb,var(--bg-2)_55%,transparent)] hover:text-[color:var(--text)]"
@@ -312,12 +313,12 @@ const TaskRow = memo(function TaskRow({ task: t, locked, onStageSelect }) {
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0 flex-1">
             {t.parent_title && (
-              <div className="mb-0.5 truncate text-[11px] tracking-[0.01em] text-[color:var(--text-3)]">
+              <div className="mb-0.5 truncate text-[12px] tracking-[0.01em] text-[#000000]">
                 {t.parent_title} ›
               </div>
             )}
             <h2
-              className={`m-0 text-[15px] font-semibold leading-[1.4] tracking-[-0.01em] [overflow-wrap:anywhere] [text-wrap:balance] ${
+              className={`m-0 text-[15px] font-normal leading-[1.4] tracking-[-0.01em] [overflow-wrap:anywhere] [text-wrap:balance] ${
                 done ? "text-[color:var(--text-2)]" : "text-[color:var(--text)]"
               }`}
             >
@@ -364,20 +365,31 @@ const TaskRow = memo(function TaskRow({ task: t, locked, onStageSelect }) {
 
 // Owns its input state, so typing never re-renders the task list.
 function TimeTakenModal({ task, onClose, onConfirm }) {
-  const [value, setValue] = useState("");
+  const [hours, setHours] = useState("");
+  const [mins, setMins] = useState("");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (saving) return;
-    const minutes = Number(value);
-    if (!value || !Number.isInteger(minutes) || minutes <= 0) {
-      setError("Enter the time in whole minutes.");
+    const h = hours === "" ? 0 : Number(hours);
+    const m = mins === "" ? 0 : Number(mins);
+    if (!Number.isInteger(h) || !Number.isInteger(m) || h < 0 || m < 0) {
+      setError("Enter whole numbers for hours and minutes.");
+      return;
+    }
+    if (m > 59) {
+      setError("Minutes must be between 0 and 59.");
+      return;
+    }
+    const total = h * 60 + m;
+    if (total <= 0) {
+      setError("Enter the time taken (at least 1 minute).");
       return;
     }
     setSaving(true);
-    const ok = await onConfirm(task, minutes);
+    const ok = await onConfirm(task, total);
     if (ok) {
       onClose();
     } else {
@@ -393,26 +405,52 @@ function TimeTakenModal({ task, onClose, onConfirm }) {
           Moving <strong>{task?.title}</strong> to <strong>In Review</strong>. How long did this task take?
         </p>
         <div className="form-group">
-          <label className="form-label" htmlFor="tv-time-taken">
-            Time taken (minutes) *
-          </label>
-          <input
-            id="tv-time-taken"
-            className="form-input"
-            type="number"
-            inputMode="numeric"
-            min="1"
-            step="1"
-            value={value}
-            onChange={(e) => {
-              setValue(e.target.value);
-              setError("");
-            }}
-            placeholder="e.g. 45"
-            aria-invalid={!!error}
-            aria-describedby={error ? "tv-time-taken-error" : undefined}
-            autoFocus
-          />
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="form-label" htmlFor="tv-time-hours">
+                Hours
+              </label>
+              <input
+                id="tv-time-hours"
+                className="form-input"
+                type="number"
+                inputMode="numeric"
+                min="0"
+                step="1"
+                value={hours}
+                onChange={(e) => {
+                  setHours(e.target.value);
+                  setError("");
+                }}
+                placeholder="0"
+                aria-invalid={!!error}
+                aria-describedby={error ? "tv-time-taken-error" : undefined}
+                autoFocus
+              />
+            </div>
+            <div>
+              <label className="form-label" htmlFor="tv-time-mins">
+                Minutes
+              </label>
+              <input
+                id="tv-time-mins"
+                className="form-input"
+                type="number"
+                inputMode="numeric"
+                min="0"
+                max="59"
+                step="1"
+                value={mins}
+                onChange={(e) => {
+                  setMins(e.target.value);
+                  setError("");
+                }}
+                placeholder="45"
+                aria-invalid={!!error}
+                aria-describedby={error ? "tv-time-taken-error" : undefined}
+              />
+            </div>
+          </div>
           {error && (
             <div id="tv-time-taken-error" className="mt-1.5 text-xs text-[color:var(--danger)]" role="alert">
               {error}
@@ -447,19 +485,45 @@ export default function TaskView() {
   const [limit, setLimit] = useState(PAGE_SIZE);
   const [timeTakenTask, setTimeTakenTask] = useState(null);
 
-  useEffect(() => {
+  const listCtl = useRef(null);
+  // Stage changes being saved right now (see liveRefresh).
+  const pendingSaves = useRef(0);
+  const refreshAfterSave = useRef(false);
+
+  // `silent` is used by live updates: no skeleton and no error screen, the
+  // list on screen stays as it is until the new one arrives.
+  const load = useCallback(({ silent = false } = {}) => {
+    listCtl.current?.abort();
     const controller = new AbortController();
-    api
+    listCtl.current = controller;
+    return api
       .get("/dashboard/my-tasks", { signal: controller.signal })
       .then((r) => setTasks(r.data.tasks || []))
       .catch((e) => {
-        if (!isAbort(e)) setLoadError(true);
+        if (!isAbort(e) && !silent) setLoadError(true);
       })
       .finally(() => {
         if (!controller.signal.aborted) setLoading(false);
       });
-    return () => controller.abort();
   }, []);
+
+  useEffect(() => {
+    load();
+    return () => listCtl.current?.abort();
+  }, [load]);
+
+  // Live updates: a manager assigned, changed or removed one of my tasks.
+  // While one of my own stage changes is still saving, wait for it, so an
+  // older list can't briefly undo the change on screen.
+  const liveRefresh = useCallback(() => {
+    if (pendingSaves.current > 0) {
+      refreshAfterSave.current = true;
+      return;
+    }
+    load({ silent: true });
+  }, [load]);
+
+  useLiveRefetch(TASK_AND_PROJECT_EVENTS, liveRefresh);
 
   // Auto-dismiss the inline notice.
   useEffect(() => {
@@ -522,6 +586,7 @@ export default function TaskView() {
   // Optimistic update; resolves true on success so the modal knows whether to close.
   const handleStageChange = useCallback(async (task, newStage, extra = {}) => {
     setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, stage: newStage, ...extra } : t)));
+    pendingSaves.current += 1;
     try {
       await api.put(`/tasks/${task.id}`, { ...task, stage: newStage, ...extra });
       return true;
@@ -531,8 +596,15 @@ export default function TaskView() {
       setTasks((prev) => prev.map((t) => (t.id === task.id ? task : t)));
       setNotice(`We couldn't move "${task.title}" to ${newStage}. Please try again.`);
       return false;
+    } finally {
+      pendingSaves.current -= 1;
+      // A live update arrived while saving: apply it now.
+      if (pendingSaves.current === 0 && refreshAfterSave.current) {
+        refreshAfterSave.current = false;
+        load({ silent: true });
+      }
     }
-  }, []);
+  }, [load]);
 
   // In Review needs a time-taken value first (same popup as the task detail page).
   const handleStageSelect = useCallback(

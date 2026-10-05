@@ -2,6 +2,7 @@
 
 const db = require('../db');
 const webpush = require('web-push');
+const liveEvents = require('../services/liveEvents');
 
 // ── VAPID setup ──────────────────────────────────────────────────
 // web-push was already a dependency in package.json but nothing ever
@@ -115,6 +116,12 @@ async function createNotification(userId, title, body, data = {}) {
       : null);
 
     if (!notification) return null;
+
+    // Live update for the bell: sent once the row is saved, so the member's
+    // refetch always finds it. Does nothing when live events are off.
+    if (created) {
+      liveEvents.notificationCreated(userId);
+    }
 
     // Fire-and-forget: don't let a push delivery failure block the
     // in-app notification from being saved/returned.

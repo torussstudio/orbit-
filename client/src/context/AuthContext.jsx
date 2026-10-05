@@ -2,6 +2,7 @@ import {
   createContext,
   useContext,
   useEffect,
+  useMemo,
   useState,
 } from "react";
 
@@ -61,10 +62,6 @@ async function removeCurrentPushSubscription() {
           endpoint: subJson.endpoint,
         },
       },
-    );
-
-    console.log(
-      "[AuthContext] Push subscription removed from server.",
     );
 
     /*
@@ -524,27 +521,41 @@ export function AuthProvider({
    * ==========================================================
    */
 
+  /*
+   * Memoised so useAuth() consumers (most of the app) only
+   * re-render when auth state actually changes.
+   *
+   * updateUser / login / logout only use state setters and
+   * module-level helpers, so the copies captured here never
+   * go stale.
+   */
+  const value = useMemo(
+    () => ({
+      user,
+
+      updateUser,
+
+      accessToken,
+
+      login,
+
+      logout,
+
+      loading,
+
+      error,
+
+      isManager:
+        user?.role ===
+        "manager",
+    }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [user, accessToken, loading, error],
+  );
+
   return (
     <AuthContext.Provider
-      value={{
-        user,
-
-        updateUser,
-
-        accessToken,
-
-        login,
-
-        logout,
-
-        loading,
-
-        error,
-
-        isManager:
-          user?.role ===
-          "manager",
-      }}
+      value={value}
     >
       {children}
     </AuthContext.Provider>

@@ -115,7 +115,7 @@ export default function TaskRequest() {
   };
 
   return (
-    <main className="mx-auto w-full max-w-[640px] px-4 py-6 sm:px-6 md:py-10">
+    <div className="mx-auto w-full max-w-[640px] px-4 py-6 sm:px-6 md:py-10">
       <header>
         <h1 className="text-2xl font-semibold leading-tight tracking-[-0.03em] text-[var(--text)] [text-wrap:balance]">
           Task request
@@ -252,6 +252,6 @@ export default function TaskRequest() {
           </button>
         </div>
       </form>
-    </main>
+    </div>
   );
 }

@@ -11,25 +11,27 @@ async function getClustersByProject(projectId) {
 }
 
 async function getClusterById(id) {
-  const { rows } = await db.query(
-    `SELECT c.*, p.name as project_name FROM clusters c JOIN projects p ON c.project_id = p.id WHERE c.id=$1`,
-    [id],
-  );
-  if (!rows[0]) return null;
-  const tasks = await db.query(
-    `SELECT t.*, assignee_agg.assignee_name FROM tasks t
-     LEFT JOIN LATERAL (
-       SELECT STRING_AGG(m.name, ', ' ORDER BY m.name) AS assignee_name
-       FROM task_assignees ta JOIN members m ON m.id=ta.member_id WHERE ta.task_id=t.id
-     ) assignee_agg ON true WHERE t.cluster_id=$1`,
-    [id],
-  );
-  const reviews = await db.query(
-    `SELECT cr.*, m.name as reviewer_name FROM cluster_reviews cr
-     JOIN members m ON cr.reviewer_id=m.id WHERE cr.cluster_id=$1 ORDER BY cr.created_at DESC`,
-    [id],
-  );
-  return { ...rows[0], tasks: tasks.rows, reviews: reviews.rows };
+  const [cluster, tasks, reviews] = await Promise.all([
+    db.query(
+      `SELECT c.*, p.name as project_name FROM clusters c JOIN projects p ON c.project_id = p.id WHERE c.id=$1`,
+      [id],
+    ),
+    db.query(
+      `SELECT t.*, assignee_agg.assignee_name FROM tasks t
+       LEFT JOIN LATERAL (
+         SELECT STRING_AGG(m.name, ', ' ORDER BY m.name) AS assignee_name
+         FROM task_assignees ta JOIN members m ON m.id=ta.member_id WHERE ta.task_id=t.id
+       ) assignee_agg ON true WHERE t.cluster_id=$1`,
+      [id],
+    ),
+    db.query(
+      `SELECT cr.*, m.name as reviewer_name FROM cluster_reviews cr
+       JOIN members m ON cr.reviewer_id=m.id WHERE cr.cluster_id=$1 ORDER BY cr.created_at DESC`,
+      [id],
+    ),
+  ]);
+  if (!cluster.rows[0]) return null;
+  return { ...cluster.rows[0], tasks: tasks.rows, reviews: reviews.rows };
 }
 
 async function createCluster({ project_id, name, description, target_date, userId }) {

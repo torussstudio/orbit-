@@ -1,4 +1,5 @@
 const dashboardService = require("../services/dashboardService");
+const { setTotalHeader } = require("../utils/listLimit");
 
 async function getDashboard(req, res, next) {
   try {
@@ -23,7 +24,8 @@ async function getTasksList(req, res, next) {
 
 async function getMyTasks(req, res, next) {
   try {
-    const tasks = await dashboardService.getMyTasks(req.user.id);
+    const { rows: tasks, total } = await dashboardService.getMyTasks(req.user.id);
+    setTotalHeader(res, total);
     res.json({ tasks });
   } catch (err) { next(err); }
 }

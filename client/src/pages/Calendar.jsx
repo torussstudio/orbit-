@@ -1,6 +1,7 @@
 import { Fragment, memo, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../api/client';
+import { cachedMembers, rememberMembers } from '../api/membersCache';
 import { useAuth } from '../context/AuthContext';
 import Modal from '../components/ui/Modal';
 import ConfirmModal from '../components/ui/ConfirmModal';
@@ -310,10 +311,13 @@ function useCalendarData(isManager, memberParams) {
       setMembers(EMPTY_ITEMS);
       return undefined;
     }
+    // Show the list an earlier page loaded this session until the fresh one arrives.
+    const known = cachedMembers();
+    if (known) setMembers(known);
     const current = new AbortController();
     api
       .get('/members', { signal: current.signal })
-      .then((response) => setMembers(response.data))
+      .then((response) => setMembers(rememberMembers(response.data)))
       .catch((error) => {
         if (!isAbort(error)) console.error('Error loading members:', error);
       });
@@ -685,7 +689,7 @@ export default function Calendar() {
                 onClick={() => setView(nextView)}
                 aria-pressed={view === nextView}
                 className={[
-                  'rounded-md px-3.5 py-1.5 text-[13px] capitalize transition duration-150 motion-reduce:transition-none',
+                  'rounded-md px-3.5 py-1.5 text-[13px] capitalize transition duration-150 motion-reduce:transition-none max-[640px]:min-h-10',
                   focusRing,
                   view === nextView
                     ? 'bg-[var(--bg-2)] font-semibold text-[color:var(--accent)] shadow-sm'

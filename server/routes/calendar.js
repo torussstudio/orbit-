@@ -20,7 +20,7 @@ router.get("/member/:memberId", auth, requireSelfOrRole("memberId", "manager"), 
 // Search members by email
 router.get("/search-members", auth, calendarController.searchMembers);
 
-// Send notification to event guest
-router.post("/notify-guest", auth, calendarController.notifyGuest);
+// Send notification to event guest (pushes to another member, so managers only)
+router.post("/notify-guest", auth, managerOnly, calendarController.notifyGuest);
 
 module.exports = router;
