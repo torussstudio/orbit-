@@ -1650,6 +1650,8 @@ function EventForm({ initial, prefillStart = '', members, onSave, onCancel, savi
     type: initial?.type || 'event',
     member_ids: initial?.attendees?.map((attendee) => attendee.id) || [],
   });
+  // What the form opened with, to tell which times the user changed.
+  const [opened] = useState(form);
   const [errors, setErrors] = useState({});
   const [memberQuery, setMemberQuery] = useState('');
 
@@ -1756,12 +1758,20 @@ function EventForm({ initial, prefillStart = '', members, onSave, onCancel, savi
       document.getElementById(id(target))?.focus();
       return;
     }
-    onSave({
+    const payload = {
       ...form,
       title: form.title.trim(),
       // A birthday has no end time.
       end_date: isBirthday ? '' : form.end_date,
-    });
+    };
+    // Editing: times the user did not change are left out, so the server
+    // keeps the stored values exactly (the inputs show only minutes, in the
+    // browser's time zone).
+    if (initial && form.start_date === opened.start_date && form.type === opened.type) {
+      delete payload.start_date;
+      if (form.end_date === opened.end_date) delete payload.end_date;
+    }
+    onSave(payload);
   };
 
   const memberHint = members.length

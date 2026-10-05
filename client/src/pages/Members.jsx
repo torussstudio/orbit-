@@ -2,7 +2,11 @@ import { Fragment, memo, useCallback, useDeferredValue, useEffect, useMemo, useR
 import { Link } from "react-router-dom";
 import { createPortal } from "react-dom";
 import api from "../api/client";
-import { cachedMembers, rememberMembers } from "../api/membersCache";
+import {
+  cachedMembers,
+  rememberMembers,
+  clearMembersCache,
+} from "../api/membersCache";
 import { useAuth } from "../context/AuthContext";
 import { formatDate } from "../utils/helpers";
 import ConfirmModal from "../components/ui/ConfirmModal";
@@ -1110,14 +1114,21 @@ export default function Members() {
 
   /* ---------- actions ---------- */
 
-  const afterChange = useCallback(
-    async (message) => {
-      resetTasks();
-      await load();
-      if (message) setToast({ id: Date.now(), text: message });
-    },
-    [resetTasks, load],
-  );
+ const afterChange = useCallback(
+  async (message) => {
+    clearMembersCache();
+    resetTasks();
+    await load();
+
+    if (message) {
+      setToast({
+        id: Date.now(),
+        text: message,
+      });
+    }
+  },
+  [resetTasks, load],
+);
 
   const openCreate = useCallback(() => setPanel({ editing: null }), []);
   const openEdit = useCallback((m) => setPanel({ editing: m }), []);

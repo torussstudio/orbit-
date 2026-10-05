@@ -2,6 +2,7 @@ const db = require("../db");
 const { assertProjectAccess } = require("./accessControl");
 const { createNotification } = require("../utils/pushNotify");
 const liveEvents = require("./liveEvents");
+const { keepStoredDate } = require("../utils/dateInput");
 const {
   LIST_SAFETY_LIMIT,
   TOTAL_COLUMN,
@@ -754,15 +755,17 @@ async function updateTask(taskId, data, user) {
   const newClusterId =
     cluster_id === undefined ? existing.cluster_id : cluster_id || null;
 
+  // Missing, or sent back exactly as the API returned it: keep the stored
+  // value (see utils/dateInput.js).
+  const keepDueDate = keepStoredDate(due_date, existing.due_date);
+
   const finalDueDate = isRework
     ? data.new_due_date ||
-      (due_date !== undefined ? due_date : existing.due_date) ||
+      (keepDueDate ? existing.due_date : due_date) ||
       null
-    : taskHasSubtasks
+    : taskHasSubtasks || keepDueDate
       ? existing.due_date
-      : due_date !== undefined
-        ? due_date || null
-        : existing.due_date;
+      : due_date || null;
 
   /*
    * Capture old due date (calendar day) before UPDATE.

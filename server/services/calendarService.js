@@ -1,4 +1,5 @@
 const db = require("../db");
+const { keepStoredDate } = require("../utils/dateInput");
 
 const COMPLETED_TASK_STAGES = ["Done"];
 
@@ -212,14 +213,24 @@ class CalendarService {
     const client = await db.connect();
     try {
       await client.query("BEGIN");
+      // Start / end missing (the form leaves out times the user did not
+      // change), or sent back exactly as the API returned them: keep the
+      // stored values (see utils/dateInput.js).
+      const { rows: storedRows } = await client.query(
+        "SELECT start_date, end_date FROM calendar_events WHERE id=$1",
+        [id],
+      );
+      const stored = storedRows[0] || {};
+      const startToSave = keepStoredDate(start_date, stored.start_date) ? stored.start_date : start_date;
+      const endToSave = keepStoredDate(end_date, stored.end_date) ? stored.end_date : end_date || startToSave;
       const { rows } = await client.query(
         `UPDATE calendar_events SET title=$1,description=$2,start_date=$3,end_date=$4,type=$5
          WHERE id=$6 RETURNING *`,
         [
           title,
           description,
-          start_date,
-          end_date || start_date,
+          startToSave,
+          endToSave,
           type,
           id,
         ],

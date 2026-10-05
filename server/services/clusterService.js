@@ -1,4 +1,5 @@
 const db = require("../db");
+const { keepStoredDate } = require("../utils/dateInput");
 
 async function getClustersByProject(projectId) {
   const { rows } = await db.query(
@@ -43,9 +44,13 @@ async function createCluster({ project_id, name, description, target_date, userI
 }
 
 async function updateCluster(id, { name, description, target_date }) {
+  // Target date missing, or sent back exactly as the API returned it: keep
+  // the stored value (see utils/dateInput.js).
+  const { rows: stored } = await db.query("SELECT target_date FROM clusters WHERE id=$1", [id]);
+  const storedDate = stored[0]?.target_date ?? null;
   const { rows } = await db.query(
     "UPDATE clusters SET name=$1,description=$2,target_date=$3 WHERE id=$4 RETURNING *",
-    [name, description, target_date || null, id],
+    [name, description, keepStoredDate(target_date, storedDate) ? storedDate : target_date || null, id],
   );
   return rows[0];
 }

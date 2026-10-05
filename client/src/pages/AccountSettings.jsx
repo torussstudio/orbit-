@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { useAuth } from '../context/AuthContext';
 import api from '../api/client';
+import { updateCachedMember } from '../api/membersCache';
 import DatePicker from '../components/ui/DatePicker';
 import Loader from '../components/ui/Loader';
 
@@ -193,7 +194,12 @@ export default function AccountSettings() {
   const [saveMsg, setSaveMsg] = useState(null);
   const [deleteConfirm, setDeleteConfirm] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [removePhotoConfirm, setRemovePhotoConfirm] = useState(false);
+  const [removingPhoto, setRemovingPhoto] = useState(false);
+  const [photoMsg, setPhotoMsg] = useState(null);
 
+  // Filled from the saved profile. Keyed on the profile fields rather than the
+  // user object, so removing the photo does not undo edits not saved yet.
   useEffect(() => {
     if (user) {
       setForm({
@@ -205,9 +211,12 @@ export default function AccountSettings() {
         bio: user.bio || '',
         dob: user.birthday || '',
       });
-      if (user.avatar_url) setAvatarPreview(user.avatar_url);
     }
-  }, [user]);
+  }, [user?.id, user?.name, user?.email, user?.phone, user?.role, user?.location, user?.bio, user?.birthday]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (user?.avatar_url) setAvatarPreview(user.avatar_url);
+  }, [user?.avatar_url]);
 
   const handleAvatarChange = (e) => {
     const file = e.target.files[0];
@@ -246,8 +255,11 @@ export default function AccountSettings() {
         phone: form.phone,
         location: form.location,
         bio: form.bio,
-        birthday: form.dob || null,
       };
+      // The date of birth is sent only when it was picked again: the value
+      // the form opened with is the API's UTC string, and sent back it would
+      // be stored as the day before.
+      if (form.dob !== (user?.birthday || '')) payload.birthday = form.dob || null;
       if (newPassword) payload.password = newPassword;
       if (needsCurrentPassword) payload.current_password = currentPassword;
 
@@ -283,6 +295,29 @@ export default function AccountSettings() {
     } finally {
       setSaving(false);
       setTimeout(() => setSaveMsg(null), 4000);
+    }
+  };
+
+  // Removes the saved photo straight away (the rest of the form is not saved).
+  const handleRemovePhoto = async () => {
+    setRemovingPhoto(true);
+    setPhotoMsg(null);
+    try {
+      await api.put('/auth/profile', { remove_avatar: true });
+      // The top bar and this page show the initials at once; the member list
+      // a page starts from no longer has the old photo either.
+      if (updateUser) updateUser({ avatar_url: null });
+      updateCachedMember(user?.id, { avatar_url: null });
+      setAvatarPreview(null);
+      setAvatarFile(null);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      setRemovePhotoConfirm(false);
+      setPhotoMsg({ type: 'success', text: 'Profile photo removed.' });
+    } catch (err) {
+      setPhotoMsg({ type: 'error', text: err.response?.data?.error || "We couldn't remove your photo. Please try again." });
+    } finally {
+      setRemovingPhoto(false);
+      setTimeout(() => setPhotoMsg(null), 4000);
     }
   };
 
@@ -412,6 +447,57 @@ export default function AccountSettings() {
             <p style={{ fontSize: '11px', color: 'var(--text-3)', marginTop: '7px' }}>
               JPG, PNG or GIF · Max 2MB
             </p>
+
+            {/* Remove photo: only when a photo is saved, with an inline confirm step */}
+            {user?.avatar_url && (
+              !removePhotoConfirm ? (
+                <button
+                  type="button"
+                  onClick={() => { setRemovePhotoConfirm(true); setPhotoMsg(null); }}
+                  style={{
+                    marginTop: '8px', padding: '4px 8px', borderRadius: '6px',
+                    background: 'none', border: 'none', color: 'var(--danger)',
+                    fontSize: '12px', fontWeight: 600, cursor: 'pointer',
+                    fontFamily: 'var(--font-body)',
+                  }}
+                >
+                  Remove photo
+                </button>
+              ) : (
+                <div style={{
+                  marginTop: '10px', background: 'rgba(239,68,68,0.08)', borderRadius: '10px',
+                  padding: '12px', border: '1px solid rgba(239,68,68,0.2)', textAlign: 'left',
+                }}>
+                  <p style={{ fontSize: '12px', color: 'var(--text)', marginBottom: '10px', fontWeight: 500 }}>
+                    Remove your profile photo? Your initials will show instead.
+                  </p>
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <button type="button" onClick={handleRemovePhoto} disabled={removingPhoto} style={{
+                      padding: '6px 14px', borderRadius: '7px', background: 'var(--danger)',
+                      color: '#fff', border: 'none', fontSize: '12px', fontWeight: 600,
+                      cursor: removingPhoto ? 'not-allowed' : 'pointer', opacity: removingPhoto ? 0.7 : 1,
+                      fontFamily: 'var(--font-body)', display: 'flex', alignItems: 'center', gap: '6px',
+                    }}>
+                      {removingPhoto ? <Loader label="Removing..." size="sm" variant="button" /> : 'Yes, remove'}
+                    </button>
+                    <button type="button" onClick={() => setRemovePhotoConfirm(false)} disabled={removingPhoto} style={{
+                      padding: '6px 14px', borderRadius: '7px', background: 'var(--bg-3)',
+                      color: 'var(--text-2)', border: '1px solid var(--border)', fontSize: '12px',
+                      fontWeight: 600, cursor: removingPhoto ? 'not-allowed' : 'pointer', fontFamily: 'var(--font-body)',
+                    }}>Cancel</button>
+                  </div>
+                </div>
+              )
+            )}
+            {photoMsg && (
+              <div role={photoMsg.type === 'error' ? 'alert' : 'status'} style={{
+                marginTop: '8px', fontSize: '12px', fontWeight: 500,
+                color: photoMsg.type === 'success' ? 'var(--success)' : 'var(--danger)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px',
+              }}>
+                {photoMsg.type === 'success' ? '✓' : '✕'} {photoMsg.text}
+              </div>
+            )}
           </div>
 
           {/* Bottom: Basic Information — mirrors form in real-time */}

@@ -185,18 +185,27 @@ function useProjectData(projectId, active) {
     controller.current = c;
     const { signal } = c;
 
-    // The first load picks up the requests Project Detail already started
-    // from the URL id (api/prefetch.js); every later load sends its own.
-    const get = (url) => takePrefetched(url) || api.get(url, { signal });
+    // The first load picks up requests Project Detail already started
+// from the URL id (api/prefetch.js); later task/cluster loads send their own.
+const get = (url) => takePrefetched(url) || api.get(url, { signal });
 
-    // Members only fill the task form, so the list does not wait for them.
-    get("/members")
-      .then((m) => {
-        if (!signal.aborted) setMembers(rememberMembers(m.data));
-      })
-      .catch((e) => {
-        if (!isAbort(e)) console.error(e);
-      });
+// Members are shared across Tasks, Calendar, Task Detail and Members.
+// Reuse the in-memory list when available. Only fetch when the cache is empty.
+const knownMembers = cachedMembers();
+
+if (knownMembers) {
+  setMembers(knownMembers);
+} else {
+  get("/members")
+    .then((m) => {
+      if (!signal.aborted) {
+        setMembers(rememberMembers(m.data));
+      }
+    })
+    .catch((e) => {
+      if (!isAbort(e)) console.error(e);
+    });
+}
 
     return Promise.all([
       get(`/tasks/project/${projectId}`),

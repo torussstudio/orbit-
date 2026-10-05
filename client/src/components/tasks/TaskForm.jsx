@@ -244,7 +244,10 @@ export default function TaskForm({ initial, members, allMembers, clusters, stage
     const payload = { ...rest, title: form.title.trim(), time_taken: form.time_taken ? parseInt(form.time_taken) : null };
     if (ownsAssignees) {
       payload.assignee_ids = assignee_ids;
-      if (due_date) payload.due_date = due_date;
+      // On edit the due date is sent only when it was picked again: the value
+      // the form opened with is the API's UTC string, and sending that back
+      // would store it 5 h 30 min (one day on screen) earlier.
+      if (due_date && due_date !== (initial?.due_date || '')) payload.due_date = due_date;
     }
     onSave(payload);
   };

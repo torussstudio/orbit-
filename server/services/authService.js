@@ -31,6 +31,7 @@ const {
 } = require("../utils/accountRules");
 
 const liveEvents = require("./liveEvents");
+const { keepStoredDate } = require("../utils/dateInput");
 
 function publicUser(row) {
   return {
@@ -565,6 +566,7 @@ async function updateProfile(
     password,
     current_password,
     avatar_base64,
+    remove_avatar,
   } = body;
 
   const {
@@ -690,7 +692,12 @@ async function updateProfile(
     );
   }
 
-  if (birthday !== undefined) {
+  /*
+   * A birthday sent back exactly as the API
+   * returned it is left as stored (see
+   * utils/dateInput.js).
+   */
+  if (!keepStoredDate(birthday, current[0].birthday)) {
     updates.push(
       `birthday = $${idx++}`,
     );
@@ -698,6 +705,29 @@ async function updateProfile(
     values.push(
       birthday || null,
     );
+  }
+
+  /*
+   * remove_avatar: true clears this member's
+   * own photo (NULL, the same as a member who
+   * never added one). The member id comes
+   * from the session, never from the body.
+   * Removing when there is no photo writes
+   * nothing.
+   */
+  if (remove_avatar === true && avatar_base64) {
+    throw authError(
+      "Choose a new photo or remove the current one, not both.",
+      400,
+    );
+  }
+
+  if (remove_avatar === true && current[0].avatar_url) {
+    updates.push(
+      `avatar_url = $${idx++}`,
+    );
+
+    values.push(null);
   }
 
   if (avatar_base64) {

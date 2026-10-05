@@ -588,7 +588,9 @@ export default function TaskView() {
     setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, stage: newStage, ...extra } : t)));
     pendingSaves.current += 1;
     try {
-      await api.put(`/tasks/${task.id}`, { ...task, stage: newStage, ...extra });
+      // Only the changed fields: resending the whole task would also resend
+      // its due date, which the server would then store 5 h 30 min earlier.
+      await api.put(`/tasks/${task.id}`, { stage: newStage, ...extra });
       return true;
     } catch (err) {
       console.error("Failed to update stage:", err.message);

@@ -1,6 +1,7 @@
 const db = require("../db");
 const { assertProjectAccess } = require("./accessControl");
 const liveEvents = require("./liveEvents");
+const { keepStoredDate } = require("../utils/dateInput");
 
 /* -------------------------------------------------------------------------- */
 /* Project links (Milanote / Docs)                                            */
@@ -229,6 +230,15 @@ const updateProject = async (projectId, data) => {
     const { rows: previousMembers } = member_ids
       ? await client.query("SELECT member_id FROM project_members WHERE project_id=$1", [projectId])
       : { rows: [] };
+    // Start / end date missing, or sent back exactly as the API returned
+    // them: keep the stored values (see utils/dateInput.js).
+    const { rows: storedDates } = await client.query(
+      "SELECT start_date, end_date FROM projects WHERE id=$1",
+      [projectId]
+    );
+    const stored = storedDates[0] || {};
+    const dateToSave = (value, storedValue) =>
+      keepStoredDate(value, storedValue) ? storedValue ?? null : value || null;
     const { rows } = await client.query(
       `UPDATE projects SET name=$1,client_name=$2,description=$3,status=$4,start_date=$5,end_date=$6,custom_stages=$7,
          milanote_url = CASE WHEN $9::text IS NULL THEN milanote_url WHEN $9::text = '' THEN NULL ELSE $9::text END,
@@ -239,8 +249,8 @@ const updateProject = async (projectId, data) => {
         client_name,
         description,
         status,
-        start_date || null,
-        end_date || null,
+        dateToSave(start_date, stored.start_date),
+        dateToSave(end_date, stored.end_date),
         JSON.stringify(custom_stages),
         projectId,
         keepIfUndefined(links.milanote_url),

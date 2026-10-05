@@ -10,6 +10,7 @@ const {
 } = require("../utils/accountRules");
 const liveEvents = require("./liveEvents");
 const { revokeAllRefreshTokensForMember } = require("../models/refreshTokens");
+const { keepStoredDate } = require("../utils/dateInput");
 
 async function getAllMembers() {
   const { rows } = await db.query(
@@ -63,10 +64,15 @@ async function updateMember(id, { name, email: rawEmail, role, birthday, skills,
 
   // Role before the save, to tell a real role change from a plain edit.
   const { rows: before } = await db.query(
-    "SELECT role FROM members WHERE id=$1",
+    "SELECT role, birthday FROM members WHERE id=$1",
     [id],
   );
   const previousRole = before[0]?.role;
+  // The Members form has no birthday field: a birthday that is missing, or
+  // sent back exactly as the API returned it, keeps the stored value (see
+  // utils/dateInput.js).
+  const storedBirthday = before[0]?.birthday ?? null;
+  const birthdayToSave = keepStoredDate(birthday, storedBirthday) ? storedBirthday : birthday || null;
   const roleChanged = (row) =>
     Boolean(row) && previousRole !== undefined && row.role !== previousRole;
 
@@ -75,7 +81,7 @@ async function updateMember(id, { name, email: rawEmail, role, birthday, skills,
       const hash = await bcrypt.hash(password, 10);
       const { rows } = await db.query(
         "UPDATE members SET name=$1,email=$2,role=$3,birthday=$4,skills=$5,password_hash=$6 WHERE id=$7 RETURNING id,name,email,role,birthday,skills",
-        [name, email, role, birthday || null, skills, hash, id],
+        [name, email, role, birthdayToSave, skills, hash, id],
       );
       // Saved. A manager set a new password for this member (and maybe a
       // new role). Same as when a member changes their own password
@@ -94,7 +100,7 @@ async function updateMember(id, { name, email: rawEmail, role, birthday, skills,
     }
     const { rows } = await db.query(
       "UPDATE members SET name=$1,email=$2,role=$3,birthday=$4,skills=$5 WHERE id=$6 RETURNING id,name,email,role,birthday,skills",
-      [name, email, role, birthday || null, skills, id],
+      [name, email, role, birthdayToSave, skills, id],
     );
     // Saved. Role changed: end the member's live streams.
     if (roleChanged(rows[0])) {

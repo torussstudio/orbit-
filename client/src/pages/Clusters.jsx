@@ -204,7 +204,12 @@ function ClusterForm({ initial, saving, error, onSave, onCancel }) {
       document.getElementById(`${uid}-name`)?.focus();
       return;
     }
-    onSave({ ...form, name: form.name.trim() });
+    const payload = { ...form, name: form.name.trim() };
+    // On edit the target date is sent only when it was picked again: the
+    // value the form opened with is the API's UTC string, and sent back it
+    // would be stored as the day before.
+    if (initial.id && form.target_date === initial.target_date) delete payload.target_date;
+    onSave(payload);
   };
 
   return (

@@ -1,26 +1,50 @@
 /*
- * The member list (GET /members), remembered for this browser tab's session.
+ * Shared in-memory member list for the current browser tab.
  *
- * Tasks, Task Detail, Calendar and Members all need the same list. Each page
- * still fetches it every time it opens, and again after a member is added,
- * edited or deleted, exactly as before. The only difference: while that
- * request is on its way, the page can already show the list from the previous
- * page instead of an empty one.
+ * The first page that needs members fetches them from the API.
+ * Other pages can reuse the cached list instead of requesting the same
+ * data again.
  *
- * Memory only (never written to storage) and forgotten on logout.
+ * Memory only:
+ * - never written to localStorage/sessionStorage
+ * - cleared on logout
+ * - explicitly invalidated when member data changes
  */
 
 let members = null;
 
-// The list from the last successful fetch, or null if there is none yet.
+// Returns the latest successfully fetched member list, or null if none exists.
 export function cachedMembers() {
   return members;
 }
 
-// Call with the data of every successful GET /members. Returns the same list.
+// Stores the latest successful GET /members response.
 export function rememberMembers(list) {
-  if (Array.isArray(list)) members = list;
+  if (Array.isArray(list)) {
+    members = list;
+  }
+
   return list;
+}
+
+// Clears the shared member cache.
+// Used when the member list may have changed and a fresh GET /members
+// should be performed.
+export function clearMembersCache() {
+  members = null;
+}
+
+// Applies a local change to the cached member without requiring another
+// request immediately. Useful for changes such as updating the current
+// user's avatar.
+export function updateCachedMember(id, changes) {
+  if (!members) return;
+
+  members = members.map((member) =>
+    String(member.id) === String(id)
+      ? { ...member, ...changes }
+      : member,
+  );
 }
 
 if (typeof window !== "undefined") {

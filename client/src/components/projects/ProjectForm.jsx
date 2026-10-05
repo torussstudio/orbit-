@@ -117,7 +117,9 @@ export default function ProjectForm({ initial, onSave, onCancel, saving = false,
     client_name: initial?.client_name || '',
     description: initial?.description || '',
     status: initial?.status || 'active',
-    start_date: initial?.start_date || '',
+    // No start / end date here: this form has no date fields, so it leaves
+    // them out and the server keeps the stored dates. (Sending the API's UTC
+    // string back stored the start date 5 h 30 min earlier.)
     // An empty array is truthy, so check the length: a project saved with
     // no stages should fall back to the defaults, not render an empty board.
     custom_stages: initial?.custom_stages?.length ? initial.custom_stages : [...DEFAULT_STAGES],
