@@ -24,6 +24,7 @@ const InReview = lazy(() => import('./pages/InReview'));
 const AccountSettings = lazy(() => import('./pages/AccountSettings'));
 const TaskRequest = lazy(() => import('./pages/Taskrequest'));
 const RequestedTasks = lazy(() => import('./pages/Requestedtasks'));
+const TimeLog = lazy(() => import('./pages/TimeLog'));
 
 const SuspenseFallback = () => (
   <Loader label="Loading page" size="lg" variant="page" />
@@ -53,6 +54,7 @@ export default function App() {
             <Route path="calendar" element={<Suspense fallback={<SuspenseFallback />}><Calendar /></Suspense>} />
             <Route path="in-review" element={<RequireManager><Suspense fallback={<SuspenseFallback />}><InReview /></Suspense></RequireManager>} />
             <Route path="requested-tasks" element={<RequireManager><Suspense fallback={<SuspenseFallback />}><RequestedTasks /></Suspense></RequireManager>} />
+            <Route path="time-log" element={<RequireManager><Suspense fallback={<SuspenseFallback />}><TimeLog /></Suspense></RequireManager>} />
             <Route path="account-settings" element={<Suspense fallback={<SuspenseFallback />}><AccountSettings /></Suspense>} />
           </Route>
         </Routes>

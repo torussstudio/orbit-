@@ -55,6 +55,9 @@ const notificationRoutes =
 const eventRoutes =
   require("./routes/events");
 
+const timeLogRoutes =
+  require("./routes/timeLog");
+
 const app = express();
 
 /*
@@ -250,6 +253,15 @@ app.use(
 app.use(
   '/api/task-requests',
    require('./routes/taskRequests')
+);
+
+/*
+ * Time Log (managers only): time spent on
+ * completed tasks, per project and per member.
+ */
+app.use(
+  "/api/time-log",
+  timeLogRoutes,
 );
 
 /*

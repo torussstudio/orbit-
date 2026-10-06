@@ -11,7 +11,7 @@ router.get("/", auth, managerOnly, projectController.getAllProjects);
 router.put("/reorder", auth, managerOnly, projectController.reorderProjects);
 
 // Managers can open any project; members only projects they belong to
-// (TaskDetail still needs this for the project name and custom_stages).
+// (TaskDetail still needs this for the project name and custom_stages).a
 router.get("/:id", auth, requireProjectAccess("id"), projectController.getProjectById);
 
 router.post("/", auth, managerOnly, projectController.createProject);
