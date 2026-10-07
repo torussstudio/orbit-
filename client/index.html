@@ -1,6 +1,19 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+  <meta name="theme-color" content="#ffffff" />
+<script>
+  (function () {
+    try {
+      var c = localStorage.getItem('orbit_theme_last') || 'light';
+      var dark = c === 'dark' || (c === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
+      var r = document.documentElement;
+      r.dataset.theme = dark ? 'dark' : 'light';
+      r.style.colorScheme = dark ? 'dark' : 'light';
+      if (dark) document.querySelector('meta[name="theme-color"]').setAttribute('content', '#17191c');
+    } catch (e) {}
+  })();
+</script>
   <meta charset="utf-8" />
   <meta name="robots" content="noindex, nofollow, noarchive" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />

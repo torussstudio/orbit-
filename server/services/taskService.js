@@ -25,6 +25,21 @@ function dueDay(value) {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 }
 
+/*
+ * Time tracking (minutes).
+ *
+ * Every time a task is sent to In Review the member enters how long that
+ * round took, and it is ADDED to what is already logged. A rework keeps the
+ * time already logged, so the total covers every cycle (first attempt +
+ * each rework). Requests without a time entry keep the stored total.
+ */
+function nextTimeTaken(existingTime, incoming) {
+  const current = Number(existingTime) || 0;
+  const added = parseInt(incoming, 10);
+  const total = Number.isFinite(added) && added > 0 ? current + added : current;
+  return total > 0 ? total : null;
+}
+
 const ASSIGNEE_JOIN = `
   LEFT JOIN LATERAL (
     SELECT
@@ -604,20 +619,8 @@ async function updateTask(taskId, data, user) {
     const isRework = stage === "Rework";
     const actualStage = isRework ? "Todo" : stage;
 
-    const incomingTime =
-      data.time_taken && data.time_taken !== existing.time_taken
-        ? parseInt(data.time_taken)
-        : 0;
-
-    const existingTime = existing.time_taken || 0;
-
-    const time_taken = isRework
-      ? null
-      : incomingTime > 0
-        ? existingTime + incomingTime
-        : existingTime > 0
-          ? existingTime
-          : null;
+    // Adds this round's time to what is already logged (see nextTimeTaken).
+    const time_taken = nextTimeTaken(existing.time_taken, data.time_taken);
 
     /*
      * Detect actual transition to In Review.
@@ -723,20 +726,9 @@ async function updateTask(taskId, data, user) {
    */
   const actualStage = isRework ? "Todo" : requestedStage;
 
-  const incomingTime =
-    data.time_taken && data.time_taken !== existing.time_taken
-      ? parseInt(data.time_taken)
-      : 0;
-
-  const existingTime = existing.time_taken || 0;
-
-  const time_taken = isRework
-    ? null
-    : incomingTime > 0
-      ? existingTime + incomingTime
-      : existingTime > 0
-        ? existingTime
-        : null;
+  // Adds this round's time to what is already logged. A rework keeps the
+  // time from earlier rounds (see nextTimeTaken).
+  const time_taken = nextTimeTaken(existing.time_taken, data.time_taken);
 
   const { rows: existingSubtasks } = await db.query(
     `SELECT 1

@@ -1,772 +1,3 @@
-// import { useState, useRef, useEffect } from 'react';
-// import { createPortal } from 'react-dom';
-// import { useAuth } from '../context/AuthContext';
-// import api from '../api/client';
-// import { updateCachedMember } from '../api/membersCache';
-// import DatePicker from '../components/ui/DatePicker';
-// import Loader from '../components/ui/Loader';
-
-// // Full-size avatar preview shown in a modal overlay. Shared by the top-bar
-// // avatar and the details-page avatar so both "click to expand" the same way.
-// function AvatarLightbox({ src, name, onClose }) {
-//   useEffect(() => {
-//     const handleKey = (e) => { if (e.key === 'Escape') onClose(); };
-//     document.addEventListener('keydown', handleKey);
-//     return () => document.removeEventListener('keydown', handleKey);
-//   }, [onClose]);
-
-//   return createPortal(
-//     <div
-//       onClick={onClose}
-//       style={{
-//         position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)',
-//         display: 'flex', alignItems: 'center', justifyContent: 'center',
-//         zIndex: 3000, padding: '24px', cursor: 'zoom-out',
-//       }}
-//     >
-//       <button
-//         type="button"
-//         onClick={onClose}
-//         aria-label="Close"
-//         style={{
-//           position: 'absolute', top: '20px', right: '24px',
-//           width: '36px', height: '36px', borderRadius: '50%',
-//           background: 'rgba(255,255,255,0.15)', border: 'none',
-//           color: '#fff', fontSize: '18px', cursor: 'pointer',
-//           display: 'flex', alignItems: 'center', justifyContent: 'center',
-//         }}
-//       >
-//         ✕
-//       </button>
-//       <img
-//   src={src}
-//   alt={name || 'avatar'}
-//   onClick={(e) => e.stopPropagation()}
-//   style={{
-//     width: 'min(80vw, 80vh, 480px)',
-//     height: 'min(80vw, 80vh, 480px)',
-//     borderRadius: '50%',
-//     objectFit: 'cover',
-//     boxShadow: '0 20px 60px rgba(0,0,0,0.5)',
-//     cursor: 'default',
-//   }}
-// />
-//     </div>,
-//     document.body
-//   );
-// }
-
-// // Reusable avatar renderer — shows image if url exists, else initial letter.
-// // Clicking an image avatar opens it full-size in a lightbox (initials-only
-// // avatars aren't clickable since there's nothing to expand).
-// export function UserAvatar({ avatarUrl, name, size = 34, fontSize = 13 }) {
-//   const [expanded, setExpanded] = useState(false);
-
-//   if (avatarUrl) {
-//     return (
-//       <>
-//         <img
-//           src={avatarUrl}
-//           alt={name || 'avatar'}
-//           onClick={() => setExpanded(true)}
-//           title="View photo"
-//           style={{
-//             width: size, height: size, borderRadius: '50%',
-//             objectFit: 'cover', display: 'block', cursor: 'pointer',
-//           }}
-//         />
-//         {expanded && (
-//           <AvatarLightbox src={avatarUrl} name={name} onClose={() => setExpanded(false)} />
-//         )}
-//       </>
-//     );
-//   }
-//   return (
-//     <div style={{
-//       width: size, height: size, borderRadius: '50%',
-//       background: 'linear-gradient(135deg, var(--accent), var(--accent-2))',
-//       display: 'flex', alignItems: 'center', justifyContent: 'center',
-//       fontSize, fontWeight: 700, color: 'white', fontFamily: 'var(--font-body)',
-//       flexShrink: 0,
-//     }}>
-//       {name?.[0]?.toUpperCase()}
-//     </div>
-//   );
-// }
-
-// // Small eye / eye-off icon used for the password visibility toggle
-// function EyeIcon({ open }) {
-//   return open ? (
-//     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-//       <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-//       <circle cx="12" cy="12" r="3" />
-//     </svg>
-//   ) : (
-//     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-//       <path d="M17.94 17.94A10.94 10.94 0 0112 20c-7 0-11-8-11-8a19.4 19.4 0 015.06-5.94M9.9 4.24A10.58 10.58 0 0112 4c7 0 11 8 11 8a19.5 19.5 0 01-2.16 3.19m-6.72-1.07a3 3 0 11-4.24-4.24" />
-//       <line x1="1" y1="1" x2="23" y2="23" />
-//     </svg>
-//   );
-// }
-
-// // ── Profile photo: shrink before upload ───────────────────────
-// // Photos are stored inside the member record and sent with member lists, so
-// // a full-size camera photo (often 1 MB or more) slows those pages down for
-// // everyone. The chosen photo is redrawn at most 256 px on its longest side
-// // and saved as JPEG (about 10-40 KB). Photos are shown at 32-100 px, so this
-// // is still sharp. If the browser cannot do it, the original is sent as before.
-// const AVATAR_MAX_SIDE = 256;
-// const AVATAR_JPEG_QUALITY = 0.82;
-
-// const readAsDataUrl = (file) =>
-//   new Promise((resolve, reject) => {
-//     const reader = new FileReader();
-//     reader.onload = (ev) => resolve(ev.target.result);
-//     reader.onerror = () => reject(reader.error);
-//     reader.readAsDataURL(file);
-//   });
-
-// async function shrinkPhoto(file) {
-//   const original = await readAsDataUrl(file);
-
-//   try {
-//     const img = await new Promise((resolve, reject) => {
-//       const el = new Image();
-//       el.onload = () => resolve(el);
-//       el.onerror = reject;
-//       el.src = original;
-//     });
-
-//     const longest = Math.max(img.naturalWidth, img.naturalHeight);
-//     if (!longest) return original;
-
-//     const scale = Math.min(1, AVATAR_MAX_SIDE / longest);
-//     const width = Math.max(1, Math.round(img.naturalWidth * scale));
-//     const height = Math.max(1, Math.round(img.naturalHeight * scale));
-
-//     const canvas = document.createElement('canvas');
-//     canvas.width = width;
-//     canvas.height = height;
-
-//     const ctx = canvas.getContext('2d');
-//     if (!ctx) return original;
-
-//     // JPEG has no transparency: put the photo on white.
-//     ctx.fillStyle = '#ffffff';
-//     ctx.fillRect(0, 0, width, height);
-//     ctx.imageSmoothingEnabled = true;
-//     ctx.imageSmoothingQuality = 'high';
-//     ctx.drawImage(img, 0, 0, width, height);
-
-//     const shrunk = canvas.toDataURL('image/jpeg', AVATAR_JPEG_QUALITY);
-
-//     return shrunk.startsWith('data:image/jpeg') && shrunk.length < original.length
-//       ? shrunk
-//       : original;
-//   } catch {
-//     return original;
-//   }
-// }
-
-// export default function AccountSettings() {
-//   const { user, logout, updateUser } = useAuth();
-
-//   // ── Avatar ─────────────────────────────────────────────────
-//   const [avatarPreview, setAvatarPreview] = useState(null);
-//   const [avatarFile, setAvatarFile] = useState(null);
-//   const [avatarExpanded, setAvatarExpanded] = useState(false);
-//   const fileInputRef = useRef(null);
-
-//   // ── Form (right side) — these drive left side too ──────────
-//   const [form, setForm] = useState({
-//     name: '', email: '', phone: '', role: '', location: '', bio: '', dob: '',
-//   });
-//   const [newPassword, setNewPassword] = useState('');
-//   const [confirmPassword, setConfirmPassword] = useState('');
-//   const [showNewPassword, setShowNewPassword] = useState(false);
-//   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
-//   const [currentPassword, setCurrentPassword] = useState('');
-//   const [showCurrentPassword, setShowCurrentPassword] = useState(false);
-//   const [currentPasswordError, setCurrentPasswordError] = useState('');
-
-//   // ── UI ─────────────────────────────────────────────────────
-//   const [saving, setSaving] = useState(false);
-//   const [saveMsg, setSaveMsg] = useState(null);
-//   const [deleteConfirm, setDeleteConfirm] = useState(false);
-//   const [deleting, setDeleting] = useState(false);
-//   const [removePhotoConfirm, setRemovePhotoConfirm] = useState(false);
-//   const [removingPhoto, setRemovingPhoto] = useState(false);
-//   const [photoMsg, setPhotoMsg] = useState(null);
-
-//   // Filled from the saved profile. Keyed on the profile fields rather than the
-//   // user object, so removing the photo does not undo edits not saved yet.
-//   useEffect(() => {
-//     if (user) {
-//       setForm({
-//         name: user.name || '',
-//         email: user.email || '',
-//         phone: user.phone || '',
-//         role: user.role || '',
-//         location: user.location || '',
-//         bio: user.bio || '',
-//         dob: user.birthday || '',
-//       });
-//     }
-//   }, [user?.id, user?.name, user?.email, user?.phone, user?.role, user?.location, user?.bio, user?.birthday]); // eslint-disable-line react-hooks/exhaustive-deps
-
-//   useEffect(() => {
-//     if (user?.avatar_url) setAvatarPreview(user.avatar_url);
-//   }, [user?.avatar_url]);
-
-//   const handleAvatarChange = (e) => {
-//     const file = e.target.files[0];
-//     if (!file) return;
-//     setAvatarFile(file);
-//     const reader = new FileReader();
-//     reader.onload = (ev) => {
-//       setAvatarPreview(ev.target.result);
-//     };
-//     reader.readAsDataURL(file);
-//   };
-
-//   const handleChange = (field) => (e) =>
-//     setForm((prev) => ({ ...prev, [field]: e.target.value }));
-
-//   // Changing the password or the email needs the current password.
-//   const emailChanged =
-//     form.email.trim().toLowerCase() !== (user?.email || '').trim().toLowerCase();
-//   const needsCurrentPassword = Boolean(newPassword) || emailChanged;
-
-//   // handleSave now also serves as the form's onSubmit handler
-//   const handleSave = async (e) => {
-//     if (e && e.preventDefault) e.preventDefault();
-
-//     if (newPassword && newPassword !== confirmPassword) {
-//       setSaveMsg({ type: 'error', text: 'Passwords do not match.' });
-//       return;
-//     }
-//     setSaving(true);
-//     setSaveMsg(null);
-//     setCurrentPasswordError('');
-//     try {
-//       const payload = {
-//         name: form.name,
-//         email: form.email,
-//         phone: form.phone,
-//         location: form.location,
-//         bio: form.bio,
-//       };
-//       // The date of birth is sent only when it was picked again: the value
-//       // the form opened with is the API's UTC string, and sent back it would
-//       // be stored as the day before.
-//       if (form.dob !== (user?.birthday || '')) payload.birthday = form.dob || null;
-//       if (newPassword) payload.password = newPassword;
-//       if (needsCurrentPassword) payload.current_password = currentPassword;
-
-//       // A new photo is shrunk in the browser before upload (see shrinkPhoto)
-//       if (avatarFile) {
-//         payload.avatar_base64 = await shrinkPhoto(avatarFile);
-//       }
-
-//       const res = await api.put('/auth/profile', payload);
-
-//       // Update user in AuthContext so header avatar & name refresh immediately
-//       if (updateUser) {
-//         updateUser({
-//           ...user,
-//           ...res.data.user,
-//           avatar_url: payload.avatar_base64 || res.data.user?.avatar_url || user?.avatar_url,
-//         });
-//       }
-
-//       setSaveMsg({ type: 'success', text: 'Changes saved successfully.' });
-//       setNewPassword('');
-//       setConfirmPassword('');
-//       setCurrentPassword('');
-//       setAvatarFile(null);
-//     } catch (err) {
-//       const message = err.response?.data?.error || 'Failed to save changes.';
-//       // Current-password problems are shown under that field.
-//       if (err.response?.status === 400 && /current password/i.test(message)) {
-//         setCurrentPasswordError(message);
-//       } else {
-//         setSaveMsg({ type: 'error', text: message });
-//       }
-//     } finally {
-//       setSaving(false);
-//       setTimeout(() => setSaveMsg(null), 4000);
-//     }
-//   };
-
-//   // Removes the saved photo straight away (the rest of the form is not saved).
-//   const handleRemovePhoto = async () => {
-//     setRemovingPhoto(true);
-//     setPhotoMsg(null);
-//     try {
-//       await api.put('/auth/profile', { remove_avatar: true });
-//       // The top bar and this page show the initials at once; the member list
-//       // a page starts from no longer has the old photo either.
-//       if (updateUser) updateUser({ avatar_url: null });
-//       updateCachedMember(user?.id, { avatar_url: null });
-//       setAvatarPreview(null);
-//       setAvatarFile(null);
-//       if (fileInputRef.current) fileInputRef.current.value = '';
-//       setRemovePhotoConfirm(false);
-//       setPhotoMsg({ type: 'success', text: 'Profile photo removed.' });
-//     } catch (err) {
-//       setPhotoMsg({ type: 'error', text: err.response?.data?.error || "We couldn't remove your photo. Please try again." });
-//     } finally {
-//       setRemovingPhoto(false);
-//       setTimeout(() => setPhotoMsg(null), 4000);
-//     }
-//   };
-
-//   const handleDeleteAccount = async () => {
-//     setDeleting(true);
-//     try {
-//       await api.delete('/auth/account');
-//       await logout();
-//     } catch (err) {
-//       setSaveMsg({ type: 'error', text: err.response?.data?.error || 'Failed to delete account.' });
-//       setDeleting(false);
-//       setDeleteConfirm(false);
-//     }
-//   };
-
-//   // ── Shared styles ──────────────────────────────────────────
-//   const inputStyle = {
-//     width: '100%', padding: '9px 12px', borderRadius: '8px',
-//     border: '1.5px solid var(--border)', background: 'var(--bg-3)',
-//     fontSize: '13px', color: 'var(--text)', outline: 'none',
-//     fontFamily: 'var(--font-body)', transition: 'border-color 0.15s',
-//     boxSizing: 'border-box',
-//   };
-//   const labelStyle = {
-//     display: 'block', fontSize: '11px', fontWeight: 600,
-//     color: 'var(--text-2)', marginBottom: '6px', letterSpacing: '0.2px',
-//   };
-//   const eyeToggleStyle = {
-//     position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)',
-//     background: 'none', border: 'none', padding: 0, margin: 0,
-//     display: 'flex', alignItems: 'center', justifyContent: 'center',
-//     color: 'var(--text-3)', cursor: 'pointer', lineHeight: 0,
-//   };
-
-//   // Format dob for display in left panel
-//   const formatDob = (val) => {
-//     if (!val) return '—';
-//     try {
-//       return new Date(val).toLocaleDateString('en-US', { day: 'numeric', month: 'long', year: 'numeric' });
-//     } catch { return val; }
-//   };
-
-//   return (
-//     <div className="account-settings-page" style={{ padding: '32px'}}>
-//       {/* Page title */}
-//       <div style={{ marginBottom: '28px' }}>
-//         <h1 style={{ fontSize: '22px', fontWeight: 700, color: 'var(--text)', letterSpacing: '-0.4px' }}>
-//           Account Settings
-//         </h1>
-//         <p style={{ fontSize: '13px', color: 'var(--text-2)', marginTop: '4px' }}>
-//           Manage your profile and account preferences
-//         </p>
-//       </div>
-
-//       <div className="account-settings-grid" style={{ display: 'grid', gridTemplateColumns: '350px 1fr', gap: '24px', alignItems: 'start' }}>
-
-//         {/* ══ LEFT PANEL ══════════════════════════════════════ */}
-//         <div style={{
-//           background: 'var(--bg-2)', border: '1px solid var(--border)',
-//           borderRadius: '14px', overflow: 'hidden', boxShadow: 'var(--shadow)',
-//         }}>
-//           {/* Top: avatar + name + role */}
-//           <div style={{ padding: '28px 20px 20px', textAlign: 'center', borderBottom: '1px solid var(--border)' }}>
-
-//             {/* Avatar with camera button */}
-//             <div style={{ position: 'relative', display: 'inline-block', marginBottom: '14px' }}>
-//               <div style={{
-//                 width: '88px', height: '88px', borderRadius: '50%',
-//                 overflow: 'hidden', margin: '0 auto',
-//                 border: '3px solid var(--border)',
-//                 background: avatarPreview ? 'transparent' : 'linear-gradient(135deg, var(--accent), var(--accent-2))',
-//                 display: 'flex', alignItems: 'center', justifyContent: 'center',
-//                 fontSize: '30px', fontWeight: 700, color: 'white',
-//               }}>
-//                 {avatarPreview
-//                   ? <img
-//                       src={avatarPreview}
-//                       alt="avatar"
-//                       onClick={() => setAvatarExpanded(true)}
-//                       title="View photo"
-//                       style={{ width: '100%', height: '100%', objectFit: 'cover', cursor: 'pointer' }}
-//                     />
-//                   : form.name?.[0]?.toUpperCase() || user?.name?.[0]?.toUpperCase()
-//                 }
-//               </div>
-//               <button
-//                 type="button"
-//                 onClick={() => fileInputRef.current?.click()}
-//                 title="Change profile photo"
-//                 style={{
-//                   position: 'absolute', bottom: '2px', right: '2px',
-//                   width: '26px', height: '26px', borderRadius: '50%',
-//                   background: 'var(--accent)', border: '2px solid var(--bg-2)',
-//                   display: 'flex', alignItems: 'center', justifyContent: 'center',
-//                   cursor: 'pointer', color: 'white',
-//                 }}
-//               >
-//                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-//                   <path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z" />
-//                   <circle cx="12" cy="13" r="4" />
-//                 </svg>
-//               </button>
-//               <input ref={fileInputRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={handleAvatarChange} />
-//             </div>
-
-//             <div style={{ fontSize: '16px', fontWeight: 700, color: 'var(--text)', marginBottom: '3px' }}>
-//               {form.name || user?.name || '—'}
-//             </div>
-//             <div style={{ fontSize: '12px', color: 'var(--text-3)', textTransform: 'capitalize', marginBottom: '14px' }}>
-//               {form.role || user?.role}
-//             </div>
-
-//             <button
-//               type="button"
-//               onClick={() => fileInputRef.current?.click()}
-//               style={{
-//                 width: '100%', padding: '7px', borderRadius: '8px',
-//                 border: '1.5px dashed var(--border)', background: 'var(--bg-3)',
-//                 color: 'var(--text-2)', fontSize: '12px', cursor: 'pointer',
-//                 fontFamily: 'var(--font-body)', transition: 'all 0.15s',
-//               }}
-//               onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--accent)'; e.currentTarget.style.color = 'var(--accent)'; }}
-//               onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--text-2)'; }}
-//             >
-//               {avatarFile ? '✓ Image selected' : 'Upload photo'}
-//             </button>
-//             <p style={{ fontSize: '11px', color: 'var(--text-3)', marginTop: '7px' }}>
-//               JPG, PNG or GIF · Max 2MB
-//             </p>
-
-//             {/* Remove photo: only when a photo is saved, with an inline confirm step */}
-//             {user?.avatar_url && (
-//               !removePhotoConfirm ? (
-//                 <button
-//                   type="button"
-//                   onClick={() => { setRemovePhotoConfirm(true); setPhotoMsg(null); }}
-//                   style={{
-//                     marginTop: '8px', padding: '4px 8px', borderRadius: '6px',
-//                     background: 'none', border: 'none', color: 'var(--danger)',
-//                     fontSize: '12px', fontWeight: 600, cursor: 'pointer',
-//                     fontFamily: 'var(--font-body)',
-//                   }}
-//                 >
-//                   Remove photo
-//                 </button>
-//               ) : (
-//                 <div style={{
-//                   marginTop: '10px', background: 'rgba(239,68,68,0.08)', borderRadius: '10px',
-//                   padding: '12px', border: '1px solid rgba(239,68,68,0.2)', textAlign: 'left',
-//                 }}>
-//                   <p style={{ fontSize: '12px', color: 'var(--text)', marginBottom: '10px', fontWeight: 500 }}>
-//                     Remove your profile photo? Your initials will show instead.
-//                   </p>
-//                   <div style={{ display: 'flex', gap: '8px' }}>
-//                     <button type="button" onClick={handleRemovePhoto} disabled={removingPhoto} style={{
-//                       padding: '6px 14px', borderRadius: '7px', background: 'var(--danger)',
-//                       color: '#fff', border: 'none', fontSize: '12px', fontWeight: 600,
-//                       cursor: removingPhoto ? 'not-allowed' : 'pointer', opacity: removingPhoto ? 0.7 : 1,
-//                       fontFamily: 'var(--font-body)', display: 'flex', alignItems: 'center', gap: '6px',
-//                     }}>
-//                       {removingPhoto ? <Loader label="Removing..." size="sm" variant="button" /> : 'Yes, remove'}
-//                     </button>
-//                     <button type="button" onClick={() => setRemovePhotoConfirm(false)} disabled={removingPhoto} style={{
-//                       padding: '6px 14px', borderRadius: '7px', background: 'var(--bg-3)',
-//                       color: 'var(--text-2)', border: '1px solid var(--border)', fontSize: '12px',
-//                       fontWeight: 600, cursor: removingPhoto ? 'not-allowed' : 'pointer', fontFamily: 'var(--font-body)',
-//                     }}>Cancel</button>
-//                   </div>
-//                 </div>
-//               )
-//             )}
-//             {photoMsg && (
-//               <div role={photoMsg.type === 'error' ? 'alert' : 'status'} style={{
-//                 marginTop: '8px', fontSize: '12px', fontWeight: 500,
-//                 color: photoMsg.type === 'success' ? 'var(--success)' : 'var(--danger)',
-//                 display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px',
-//               }}>
-//                 {photoMsg.type === 'success' ? '✓' : '✕'} {photoMsg.text}
-//               </div>
-//             )}
-//           </div>
-
-//           {/* Bottom: Basic Information — mirrors form in real-time */}
-//           <div style={{ padding: '20px' }}>
-//             <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text)', marginBottom: '16px' }}>
-//               Basic Information
-//             </div>
-
-//             {[
-//               { label: 'Full Name',     value: form.name },
-//               { label: 'Email',         value: form.email },
-//               { label: 'Phone',         value: form.phone },
-//               { label: 'Date of Birth', value: formatDob(form.dob) },
-//               { label: 'Location',      value: form.location },
-//             ].map(({ label, value }) => (
-//               <div key={label} style={{ marginBottom: '14px' }}>
-//                 <div style={{ fontSize: '11px', color: 'var(--text-3)', marginBottom: '2px', fontWeight: 500 }}>
-//                   {label}
-//                 </div>
-//                 <div style={{
-//                   fontSize: '13px', fontWeight: 600, color: value ? 'var(--text)' : 'var(--text-3)',
-//                   wordBreak: 'break-word',
-//                 }}>
-//                   {value || '—'}
-//                 </div>
-//               </div>
-//             ))}
-//           </div>
-//         </div>
-
-//         {/* ══ RIGHT PANEL ═════════════════════════════════════ */}
-//         <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-
-//           {/* Account Settings card — wrapped in a <form> so the password
-//               fields are properly associated with a form (fixes the Chrome
-//               DevTools "Password field is not contained in a form" warning
-//               and lets browser password managers work correctly). */}
-//           <form
-//             onSubmit={handleSave}
-//             style={{
-//               background: 'var(--bg-2)', border: '1px solid var(--border)',
-//               borderRadius: '14px', padding: '24px', boxShadow: 'var(--shadow)',
-//             }}
-//           >
-//             <h2 style={{ fontSize: '15px', fontWeight: 700, color: 'var(--text)', marginBottom: '20px' }}>
-//               Account Settings
-//             </h2>
-
-//             {/* Hidden username field helps password managers associate the
-//                 credentials with the right account (accessibility best practice) */}
-//             <input
-//               type="text"
-//               name="username"
-//               autoComplete="username"
-//               value={form.email}
-//               readOnly
-//               style={{ display: 'none' }}
-//               tabIndex={-1}
-//               aria-hidden="true"
-//             />
-
-//             {/* Name + Email */}
-//             <div className="account-settings-form-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '16px' }}>
-//               <div>
-//                 <label style={labelStyle}>Full Name</label>
-//                 <input style={inputStyle} value={form.name} onChange={handleChange('name')} placeholder="Your full name"
-//                   onFocus={e => e.target.style.borderColor = 'var(--accent)'}
-//                   onBlur={e => e.target.style.borderColor = 'var(--border)'} />
-//               </div>
-//               <div>
-//                 <label style={labelStyle}>Email</label>
-//                 <input style={inputStyle} value={form.email} type="email" autoComplete="email" onChange={handleChange('email')} placeholder="your@email.com"
-//                   onFocus={e => e.target.style.borderColor = 'var(--accent)'}
-//                   onBlur={e => e.target.style.borderColor = 'var(--border)'} />
-//               </div>
-//             </div>
-
-//             {/* Phone + Role */}
-//             <div className="account-settings-form-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '16px' }}>
-//               <div>
-//                 <label style={labelStyle}>Phone</label>
-//                 <input style={inputStyle} value={form.phone} onChange={handleChange('phone')} placeholder="+91 00000 00000"
-//                   onFocus={e => e.target.style.borderColor = 'var(--accent)'}
-//                   onBlur={e => e.target.style.borderColor = 'var(--border)'} />
-//               </div>
-//               <div>
-//                 <label style={labelStyle}>Role</label>
-//                 <input style={{ ...inputStyle, background: 'var(--bg-4)', color: 'var(--text-3)', cursor: 'not-allowed' }}
-//                   value={form.role} readOnly title="Role can only be changed by a manager" />
-//               </div>
-//             </div>
-
-//             {/* Location + DOB */}
-//             <div className="account-settings-form-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '16px' }}>
-//               <div>
-//                 <label style={labelStyle}>Location</label>
-//                 <input style={inputStyle} value={form.location} onChange={handleChange('location')} placeholder="City, Country"
-//                   onFocus={e => e.target.style.borderColor = 'var(--accent)'}
-//                   onBlur={e => e.target.style.borderColor = 'var(--border)'} />
-//               </div>
-//               <div>
-//                 <label style={labelStyle}>Date of Birth</label>
-//                 <DatePicker value={form.dob} onChange={val => setForm(prev => ({ ...prev, dob: val }))} placeholder="dd-mm-yyyy" />
-//               </div>
-//             </div>
-
-//             {/* New Password + Confirm */}
-//             <div className="account-settings-form-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '16px' }}>
-//               <div>
-//                 <label style={labelStyle}>New Password</label>
-//                 <div style={{ position: 'relative' }}>
-//                   <input style={{ ...inputStyle, paddingRight: '38px' }} value={newPassword}
-//                     type={showNewPassword ? 'text' : 'password'} autoComplete="new-password"
-//                     onChange={e => setNewPassword(e.target.value)} placeholder="Leave blank to keep current"
-//                     onFocus={e => e.target.style.borderColor = 'var(--accent)'}
-//                     onBlur={e => e.target.style.borderColor = 'var(--border)'} />
-//                   <button type="button" style={eyeToggleStyle}
-//                     onClick={() => setShowNewPassword(v => !v)}
-//                     title={showNewPassword ? 'Hide password' : 'Show password'}
-//                     aria-label={showNewPassword ? 'Hide password' : 'Show password'}>
-//                     <EyeIcon open={showNewPassword} />
-//                   </button>
-//                 </div>
-//               </div>
-//               <div>
-//                 <label style={labelStyle}>Confirm Password</label>
-//                 <div style={{ position: 'relative' }}>
-//                   <input style={{ ...inputStyle, paddingRight: '38px' }} value={confirmPassword}
-//                     type={showConfirmPassword ? 'text' : 'password'} autoComplete="new-password"
-//                     onChange={e => setConfirmPassword(e.target.value)} placeholder="Confirm new password"
-//                     onFocus={e => e.target.style.borderColor = 'var(--accent)'}
-//                     onBlur={e => e.target.style.borderColor = 'var(--border)'} />
-//                   <button type="button" style={eyeToggleStyle}
-//                     onClick={() => setShowConfirmPassword(v => !v)}
-//                     title={showConfirmPassword ? 'Hide password' : 'Show password'}
-//                     aria-label={showConfirmPassword ? 'Hide password' : 'Show password'}>
-//                     <EyeIcon open={showConfirmPassword} />
-//                   </button>
-//                 </div>
-//               </div>
-//             </div>
-
-//             {/* Current Password — only when changing the password or email */}
-//             {needsCurrentPassword && (
-//               <div className="account-settings-form-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '16px' }}>
-//                 <div>
-//                   <label style={labelStyle} htmlFor="account-current-password">Current Password</label>
-//                   <div style={{ position: 'relative' }}>
-//                     <input id="account-current-password"
-//                       style={{ ...inputStyle, paddingRight: '38px', ...(currentPasswordError ? { borderColor: 'var(--danger)' } : null) }}
-//                       value={currentPassword}
-//                       type={showCurrentPassword ? 'text' : 'password'} autoComplete="current-password"
-//                       onChange={e => { setCurrentPassword(e.target.value); setCurrentPasswordError(''); }}
-//                       placeholder="Enter your current password"
-//                       aria-invalid={currentPasswordError ? true : undefined}
-//                       aria-describedby={currentPasswordError ? 'account-current-password-error' : undefined}
-//                       onFocus={e => e.target.style.borderColor = 'var(--accent)'}
-//                       onBlur={e => e.target.style.borderColor = currentPasswordError ? 'var(--danger)' : 'var(--border)'} />
-//                     <button type="button" style={eyeToggleStyle}
-//                       onClick={() => setShowCurrentPassword(v => !v)}
-//                       title={showCurrentPassword ? 'Hide password' : 'Show password'}
-//                       aria-label={showCurrentPassword ? 'Hide password' : 'Show password'}>
-//                       <EyeIcon open={showCurrentPassword} />
-//                     </button>
-//                   </div>
-//                   {currentPasswordError && (
-//                     <div id="account-current-password-error" role="alert" style={{
-//                       fontSize: '12px', fontWeight: 500, color: 'var(--danger)',
-//                       display: 'flex', alignItems: 'center', gap: '6px', marginTop: '6px',
-//                     }}>
-//                       ✕ {currentPasswordError}
-//                     </div>
-//                   )}
-//                 </div>
-//               </div>
-//             )}
-
-//             {/* Bio */}
-//             <div style={{ marginBottom: '20px' }}>
-//               <label style={labelStyle}>Bio</label>
-//               <textarea style={{ ...inputStyle, minHeight: '90px', resize: 'vertical' }}
-//                 value={form.bio} onChange={handleChange('bio')} placeholder="Tell your team a bit about yourself..."
-//                 onFocus={e => e.target.style.borderColor = 'var(--accent)'}
-//                 onBlur={e => e.target.style.borderColor = 'var(--border)'} />
-//             </div>
-
-//             {/* Save row */}
-//             <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-//               {saveMsg && (
-//                 <div style={{
-//                   fontSize: '12px', fontWeight: 500,
-//                   color: saveMsg.type === 'success' ? 'var(--success)' : 'var(--danger)',
-//                   display: 'flex', alignItems: 'center', gap: '6px',
-//                 }}>
-//                   {saveMsg.type === 'success' ? '✓' : '✕'} {saveMsg.text}
-//                 </div>
-//               )}
-//               <button type="submit" disabled={saving} style={{
-//                 marginLeft: 'auto', padding: '9px 22px', borderRadius: '8px',
-//                 background: 'linear-gradient(135deg, var(--accent), var(--accent-2))',
-//                 color: '#fff', border: 'none', fontSize: '13px', fontWeight: 600,
-//                 cursor: saving ? 'not-allowed' : 'pointer', opacity: saving ? 0.7 : 1,
-//                 fontFamily: 'var(--font-body)', boxShadow: '0 2px 8px rgba(99,102,241,0.3)',
-//                 display: 'flex', alignItems: 'center', gap: '6px',
-//               }}>
-//                 {saving ? <Loader label="Saving..." size="sm" variant="button" /> : 'Save Changes'}
-//               </button>
-//             </div>
-//           </form>
-
-//           {/* Danger Zone */}
-//           <div style={{
-//             background: 'rgba(239,68,68,0.04)', border: '1.5px solid rgba(239,68,68,0.25)',
-//             borderRadius: '14px', padding: '20px',
-//           }}>
-//             <div style={{ marginBottom: '14px' }}>
-//               <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--danger)', marginBottom: '2px' }}>Danger Zone</div>
-//               <div style={{ fontSize: '12px', color: 'var(--text-3)' }}>Critical actions that affect your account.</div>
-//             </div>
-//             <div style={{ borderTop: '1px solid rgba(239,68,68,0.15)', paddingTop: '16px' }}>
-//               <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--danger)', marginBottom: '4px' }}>Delete Account</div>
-//               <div style={{ fontSize: '12px', color: 'var(--text-2)', marginBottom: '12px' }}>
-//                 This action is <strong>permanent</strong> and cannot be undone. All your data will be removed.
-//               </div>
-//               {!deleteConfirm ? (
-//                 <button onClick={() => setDeleteConfirm(true)} style={{
-//                   padding: '8px 18px', borderRadius: '8px', background: 'var(--danger)',
-//                   color: '#fff', border: 'none', fontSize: '13px', fontWeight: 600,
-//                   cursor: 'pointer', fontFamily: 'var(--font-body)',
-//                 }}>Delete Account</button>
-//               ) : (
-//                 <div style={{ background: 'rgba(239,68,68,0.08)', borderRadius: '10px', padding: '14px', border: '1px solid rgba(239,68,68,0.2)' }}>
-//                   <p style={{ fontSize: '13px', color: 'var(--text)', marginBottom: '12px', fontWeight: 500 }}>
-//                     Are you absolutely sure? This cannot be undone.
-//                   </p>
-//                   <div style={{ display: 'flex', gap: '10px' }}>
-//                     <button onClick={handleDeleteAccount} disabled={deleting} style={{
-//                       padding: '7px 16px', borderRadius: '7px', background: 'var(--danger)',
-//                       color: '#fff', border: 'none', fontSize: '12px', fontWeight: 600,
-//                       cursor: deleting ? 'not-allowed' : 'pointer', opacity: deleting ? 0.7 : 1,
-//                       fontFamily: 'var(--font-body)',
-//                     }}>{deleting ? 'Deleting...' : 'Yes, Delete'}</button>
-//                     <button onClick={() => setDeleteConfirm(false)} style={{
-//                       padding: '7px 16px', borderRadius: '7px', background: 'var(--bg-3)',
-//                       color: 'var(--text-2)', border: '1px solid var(--border)', fontSize: '12px',
-//                       fontWeight: 600, cursor: 'pointer', fontFamily: 'var(--font-body)',
-//                     }}>Cancel</button>
-//                   </div>
-//                 </div>
-//               )}
-//             </div>
-//           </div>
-
-//         </div>
-//       </div>
-
-//       {avatarExpanded && avatarPreview && (
-//         <AvatarLightbox
-//           src={avatarPreview}
-//           name={form.name || user?.name}
-//           onClose={() => setAvatarExpanded(false)}
-//         />
-//       )}
-//     </div>
-//   );
-// }
-
-
-
 import { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { useAuth } from '../context/AuthContext';
@@ -774,6 +5,75 @@ import api from '../api/client';
 import { updateCachedMember } from '../api/membersCache';
 import DatePicker from '../components/ui/DatePicker';
 import Loader from '../components/ui/Loader';
+
+// ── Tailwind class tokens ────────────────────────────────────
+// All colours come from the app's existing CSS variables, so light/dark
+// themes keep working. `color:` hints keep Tailwind from guessing the type.
+const CARD =
+  'rounded-2xl border border-[color:var(--border)] bg-[var(--bg-2)] [box-shadow:var(--shadow)]';
+
+const FOCUS_RING =
+  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[color:var(--bg-2)]';
+
+const inputClass = (invalid = false) =>
+  [
+    'w-full rounded-lg border bg-[var(--bg-3)] px-3 py-2.5 text-[13px] text-[color:var(--text)] outline-none',
+    'transition-[border-color,box-shadow] duration-200 placeholder:text-[color:var(--text-3)]',
+    invalid
+      ? 'border-[color:var(--danger)]'
+      : 'border-[color:var(--border)] focus:border-[color:var(--accent)]',
+    'focus:[box-shadow:0_0_0_3px_color-mix(in_srgb,var(--accent)_16%,transparent)]',
+  ].join(' ');
+
+const BTN_NEUTRAL =
+  'rounded-lg border border-[color:var(--border)] bg-[var(--bg-3)] px-4 py-2 text-xs font-semibold text-[color:var(--text-2)] transition duration-200 hover:text-[color:var(--text)] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-70';
+
+const BTN_DANGER =
+  'rounded-lg bg-[var(--danger)] px-4 py-2 text-xs font-semibold text-white transition duration-200 hover:brightness-110 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-70';
+
+// ── Icons (one stroke weight everywhere) ─────────────────────
+const ICON_PATHS = {
+  user: (<><circle cx="12" cy="8" r="4" /><path d="M4 21a8 8 0 0116 0" /></>),
+  mail: (<><rect x="3" y="5" width="18" height="14" rx="2" /><path d="M3 7l9 6 9-6" /></>),
+  phone: (<path d="M5 4h4l2 5-2.5 1.5a11 11 0 005 5L15 13l5 2v4a2 2 0 01-2 2A16 16 0 013 6a2 2 0 012-2z" />),
+  pin: (<><path d="M12 21s7-6.2 7-11a7 7 0 10-14 0c0 4.8 7 11 7 11z" /><circle cx="12" cy="10" r="2.5" /></>),
+  calendar: (<><rect x="3" y="5" width="18" height="16" rx="2" /><path d="M3 10h18M8 3v4M16 3v4" /></>),
+  lock: (<><rect x="5" y="11" width="14" height="9" rx="2" /><path d="M8 11V8a4 4 0 018 0v3" /></>),
+  alert: (<><path d="M12 4l9 16H3z" /><path d="M12 10v4M12 17h.01" /></>),
+  camera: (<><path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z" /><circle cx="12" cy="13" r="4" /></>),
+};
+
+function Icon({ name, className = 'h-4 w-4' }) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.75"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      {ICON_PATHS[name]}
+    </svg>
+  );
+}
+
+// Small eye / eye-off icon used for the password visibility toggle
+function EyeIcon({ open }) {
+  return open ? (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+      <circle cx="12" cy="12" r="3" />
+    </svg>
+  ) : (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M17.94 17.94A10.94 10.94 0 0112 20c-7 0-11-8-11-8a19.4 19.4 0 015.06-5.94M9.9 4.24A10.58 10.58 0 0112 4c7 0 11 8 11 8a19.5 19.5 0 01-2.16 3.19m-6.72-1.07a3 3 0 11-4.24-4.24" />
+      <line x1="1" y1="1" x2="23" y2="23" />
+    </svg>
+  );
+}
 
 // Full-size avatar preview shown in a modal overlay. Shared by the top-bar
 // avatar and the details-page avatar so both "click to expand" the same way.
@@ -787,39 +87,25 @@ function AvatarLightbox({ src, name, onClose }) {
   return createPortal(
     <div
       onClick={onClose}
-      style={{
-        position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        zIndex: 3000, padding: '24px', cursor: 'zoom-out',
-      }}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Profile photo"
+      className="fixed inset-0 z-[3000] flex cursor-zoom-out items-center justify-center bg-black/75 p-6"
     >
       <button
         type="button"
         onClick={onClose}
         aria-label="Close"
-        style={{
-          position: 'absolute', top: '20px', right: '24px',
-          width: '36px', height: '36px', borderRadius: '50%',
-          background: 'rgba(255,255,255,0.15)', border: 'none',
-          color: '#fff', fontSize: '18px', cursor: 'pointer',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-        }}
+        className="absolute right-6 top-5 flex h-9 w-9 items-center justify-center rounded-full bg-white/15 text-lg text-white transition duration-200 hover:bg-white/25 active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
       >
         ✕
       </button>
       <img
-  src={src}
-  alt={name || 'avatar'}
-  onClick={(e) => e.stopPropagation()}
-  style={{
-    width: 'min(80vw, 80vh, 480px)',
-    height: 'min(80vw, 80vh, 480px)',
-    borderRadius: '50%',
-    objectFit: 'cover',
-    boxShadow: '0 20px 60px rgba(0,0,0,0.5)',
-    cursor: 'default',
-  }}
-/>
+        src={src}
+        alt={name || 'avatar'}
+        onClick={(e) => e.stopPropagation()}
+        className="h-[min(80vw,80vh,480px)] w-[min(80vw,80vh,480px)] cursor-default rounded-full object-cover shadow-[0_20px_60px_rgba(0,0,0,0.5)]"
+      />
     </div>,
     document.body
   );
@@ -828,6 +114,8 @@ function AvatarLightbox({ src, name, onClose }) {
 // Reusable avatar renderer — shows image if url exists, else initial letter.
 // Clicking an image avatar opens it full-size in a lightbox (initials-only
 // avatars aren't clickable since there's nothing to expand).
+// `size` and `fontSize` are runtime props, so those two values are the only
+// inline styles left in this file.
 export function UserAvatar({ avatarUrl, name, size = 34, fontSize = 13 }) {
   const [expanded, setExpanded] = useState(false);
 
@@ -839,10 +127,8 @@ export function UserAvatar({ avatarUrl, name, size = 34, fontSize = 13 }) {
           alt={name || 'avatar'}
           onClick={() => setExpanded(true)}
           title="View photo"
-          style={{
-            width: size, height: size, borderRadius: '50%',
-            objectFit: 'cover', display: 'block', cursor: 'pointer',
-          }}
+          style={{ width: size, height: size }}
+          className="block cursor-pointer rounded-full object-cover"
         />
         {expanded && (
           <AvatarLightbox src={avatarUrl} name={name} onClose={() => setExpanded(false)} />
@@ -851,32 +137,78 @@ export function UserAvatar({ avatarUrl, name, size = 34, fontSize = 13 }) {
     );
   }
   return (
-    <div style={{
-      width: size, height: size, borderRadius: '50%',
-      background: 'linear-gradient(135deg, var(--accent), var(--accent-2))',
-      display: 'flex', alignItems: 'center', justifyContent: 'center',
-      fontSize, fontWeight: 700, color: 'white', fontFamily: 'var(--font-body)',
-      flexShrink: 0,
-    }}>
+    <div
+      style={{ width: size, height: size, fontSize }}
+      className="flex shrink-0 items-center justify-center rounded-full bg-[var(--accent)] font-bold text-white"
+    >
       {name?.[0]?.toUpperCase()}
     </div>
   );
 }
 
-// Small eye / eye-off icon used for the password visibility toggle
-function EyeIcon({ open }) {
-  return open ? (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-      <circle cx="12" cy="12" r="3" />
-    </svg>
-  ) : (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M17.94 17.94A10.94 10.94 0 0112 20c-7 0-11-8-11-8a19.4 19.4 0 015.06-5.94M9.9 4.24A10.58 10.58 0 0112 4c7 0 11 8 11 8a19.5 19.5 0 01-2.16 3.19m-6.72-1.07a3 3 0 11-4.24-4.24" />
-      <line x1="1" y1="1" x2="23" y2="23" />
-    </svg>
+// ── Small layout helpers ─────────────────────────────────────
+function Section({ id, icon, title, description, children }) {
+  return (
+    <section id={id} className={`${CARD} scroll-mt-6 p-5 sm:p-6`}>
+      <header className="mb-5 flex items-start gap-3">
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] bg-[var(--bg-3)] text-[color:var(--accent)]">
+          <Icon name={icon} />
+        </span>
+        <div>
+          <h2 className="text-[15px] font-semibold tracking-tight text-[color:var(--text)]">{title}</h2>
+          <p className="mt-0.5 text-xs text-[color:var(--text-3)]">{description}</p>
+        </div>
+      </header>
+      <div className="grid grid-cols-1 gap-x-4 gap-y-4 sm:grid-cols-2">{children}</div>
+    </section>
   );
 }
+
+function Field({ label, htmlFor, className = '', children }) {
+  return (
+    <div className={className}>
+      <label htmlFor={htmlFor} className="mb-1.5 block text-[11px] font-semibold tracking-wide text-[color:var(--text-2)]">
+        {label}
+      </label>
+      {children}
+    </div>
+  );
+}
+
+function PasswordInput({
+  id, value, onChange, placeholder, autoComplete,
+  visible, onToggle, invalid = false, describedBy,
+}) {
+  return (
+    <div className="relative">
+      <input
+        id={id}
+        type={visible ? 'text' : 'password'}
+        value={value}
+        onChange={onChange}
+        placeholder={placeholder}
+        autoComplete={autoComplete}
+        aria-invalid={invalid ? true : undefined}
+        aria-describedby={describedBy}
+        className={`${inputClass(invalid)} pr-10`}
+      />
+      <button
+        type="button"
+        onClick={onToggle}
+        title={visible ? 'Hide password' : 'Show password'}
+        aria-label={visible ? 'Hide password' : 'Show password'}
+        className="absolute right-2.5 top-1/2 flex -translate-y-1/2 items-center justify-center rounded p-1 leading-none text-[color:var(--text-3)] transition-colors duration-200 hover:text-[color:var(--text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent)]"
+      >
+        <EyeIcon open={visible} />
+      </button>
+    </div>
+  );
+}
+
+// ── Password rule ─────────────────────────────────────────────
+// Must match assertPasswordLength() in the backend's utils/accountRules.js.
+// The server stays the final check; this only gives the message sooner.
+const PASSWORD_MIN_LENGTH = 8;
 
 // ── Profile photo: shrink as soon as it is chosen ─────────────
 // Photos are stored inside the member record and sent with member lists, so
@@ -975,6 +307,14 @@ async function shrinkPhoto(file) {
   throw new Error('photo-too-large-or-unreadable');
 }
 
+// Sections shown in the quick-jump bar at the top of the page.
+const SECTION_LINKS = [
+  { id: 'personal', label: 'Personal' },
+  { id: 'contact', label: 'Contact' },
+  { id: 'security', label: 'Security' },
+  { id: 'danger', label: 'Danger zone', danger: true },
+];
+
 export default function AccountSettings() {
   const { user, logout, updateUser } = useAuth();
 
@@ -997,6 +337,8 @@ export default function AccountSettings() {
   const [currentPassword, setCurrentPassword] = useState('');
   const [showCurrentPassword, setShowCurrentPassword] = useState(false);
   const [currentPasswordError, setCurrentPasswordError] = useState('');
+  const [newPasswordError, setNewPasswordError] = useState('');
+  const [confirmPasswordError, setConfirmPasswordError] = useState('');
 
   // ── UI ─────────────────────────────────────────────────────
   const [saving, setSaving] = useState(false);
@@ -1073,14 +415,46 @@ export default function AccountSettings() {
     form.email.trim().toLowerCase() !== (user?.email || '').trim().toLowerCase();
   const needsCurrentPassword = Boolean(newPassword) || emailChanged;
 
+  // Live check while typing: shown under Confirm password once it has text.
+  const liveMismatch = confirmPassword.length > 0 && newPassword !== confirmPassword;
+  const liveMatch = confirmPassword.length > 0 && newPassword === confirmPassword;
+  const confirmMessage = confirmPasswordError || (liveMismatch ? 'Passwords do not match.' : '');
+
   // handleSave now also serves as the form's onSubmit handler
   const handleSave = async (e) => {
     if (e && e.preventDefault) e.preventDefault();
 
-    if (newPassword && newPassword !== confirmPassword) {
-      setSaveMsg({ type: 'error', text: 'Passwords do not match.' });
+    // Check everything first, so all problems show at once.
+    let currentErr = '';
+    let newErr = '';
+    let confirmErr = '';
+    if (needsCurrentPassword && !currentPassword) {
+      currentErr = 'Enter your current password to continue.';
+    }
+    if (newPassword) {
+      if (newPassword.length < PASSWORD_MIN_LENGTH) {
+        newErr = `New password must be at least ${PASSWORD_MIN_LENGTH} characters.`;
+      } else if (currentPassword && newPassword === currentPassword) {
+        newErr = 'New password must be different from your current password.';
+      }
+      if (!confirmPassword) confirmErr = 'Confirm your new password.';
+      else if (newPassword !== confirmPassword) confirmErr = 'Passwords do not match.';
+    } else if (confirmPassword) {
+      newErr = 'Enter the new password first.';
+    }
+    if (currentErr || newErr || confirmErr) {
+      setCurrentPasswordError(currentErr);
+      setNewPasswordError(newErr);
+      setConfirmPasswordError(confirmErr);
+      const firstId = currentErr
+        ? 'account-current-password'
+        : newErr ? 'account-new-password' : 'account-confirm-password';
+      document.getElementById(firstId)?.focus();
       return;
     }
+    setNewPasswordError('');
+    setConfirmPasswordError('');
+    const passwordChanged = Boolean(newPassword);
     setSaving(true);
     setSaveMsg(null);
     setCurrentPasswordError('');
@@ -1124,11 +498,21 @@ export default function AccountSettings() {
       setConfirmPassword('');
       setCurrentPassword('');
       setAvatarData(null);
+
+      // Changing the password ends every session on the server (this one
+      // included), so tell the member and sign out here instead of letting
+      // the next request fail. The button stays busy during the pause.
+      if (passwordChanged) {
+        setSaveMsg({ type: 'success', text: 'Password changed. Signing you out, please sign in again.' });
+        await new Promise((resolve) => setTimeout(resolve, 1800));
+        await logout();
+      }
     } catch (err) {
       const message = err.response?.data?.error || 'Failed to save changes.';
       // Current-password problems are shown under that field.
       if (err.response?.status === 400 && /current password/i.test(message)) {
         setCurrentPasswordError(message);
+        document.getElementById('account-current-password')?.focus();
       } else {
         setSaveMsg({ type: 'error', text: message });
       }
@@ -1173,24 +557,8 @@ export default function AccountSettings() {
     }
   };
 
-  // ── Shared styles ──────────────────────────────────────────
-  const inputStyle = {
-    width: '100%', padding: '9px 12px', borderRadius: '8px',
-    border: '1.5px solid var(--border)', background: 'var(--bg-3)',
-    fontSize: '13px', color: 'var(--text)', outline: 'none',
-    fontFamily: 'var(--font-body)', transition: 'border-color 0.15s',
-    boxSizing: 'border-box',
-  };
-  const labelStyle = {
-    display: 'block', fontSize: '11px', fontWeight: 600,
-    color: 'var(--text-2)', marginBottom: '6px', letterSpacing: '0.2px',
-  };
-  const eyeToggleStyle = {
-    position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)',
-    background: 'none', border: 'none', padding: 0, margin: 0,
-    display: 'flex', alignItems: 'center', justifyContent: 'center',
-    color: 'var(--text-3)', cursor: 'pointer', lineHeight: 0,
-  };
+  const scrollToSection = (id) =>
+    document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 
   // Format dob for display in left panel
   const formatDob = (val) => {
@@ -1200,197 +568,195 @@ export default function AccountSettings() {
     } catch { return val; }
   };
 
+  // Rows for the "At a glance" card — mirrors the form in real time
+  const glanceRows = [
+    { icon: 'mail', label: 'Email', value: form.email },
+    { icon: 'phone', label: 'Phone', value: form.phone },
+    { icon: 'calendar', label: 'Date of birth', value: formatDob(form.dob) },
+    { icon: 'pin', label: 'Location', value: form.location },
+  ];
+
   return (
-    <div className="account-settings-page" style={{ padding: '32px'}}>
-      {/* Page title */}
-      <div style={{ marginBottom: '28px' }}>
-        <h1 style={{ fontSize: '22px', fontWeight: 700, color: 'var(--text)', letterSpacing: '-0.4px' }}>
-          Account Settings
-        </h1>
-        <p style={{ fontSize: '13px', color: 'var(--text-2)', marginTop: '4px' }}>
-          Manage your profile and account preferences
-        </p>
-      </div>
+    <div className="mx-auto w-full max-w-[1200px] px-4 py-6 sm:px-8 sm:py-9">
+      {/* Page header + quick jump */}
+      <header className="mb-8 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold leading-tight tracking-tight text-[color:var(--text)] [text-wrap:balance] sm:text-[28px]">
+            Account settings
+          </h1>
+          <p className="mt-1.5 max-w-[60ch] text-[13px] leading-relaxed text-[color:var(--text-2)]">
+            Manage your profile, contact details and sign-in security.
+          </p>
+        </div>
+        <nav aria-label="Settings sections" className="-mx-1 flex gap-1 overflow-x-auto pb-1 lg:pb-0">
+          {SECTION_LINKS.map(({ id, label, danger }) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => scrollToSection(id)}
+              className={`whitespace-nowrap rounded-lg px-3 py-1.5 text-xs font-medium transition duration-200 hover:bg-[var(--bg-3)] active:scale-[0.98] ${FOCUS_RING} ${
+                danger
+                  ? 'text-[color:var(--danger)]'
+                  : 'text-[color:var(--text-2)] hover:text-[color:var(--text)]'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </nav>
+      </header>
 
-      <div className="account-settings-grid" style={{ display: 'grid', gridTemplateColumns: '350px 1fr', gap: '24px', alignItems: 'start' }}>
+      <div className="grid items-start gap-6 lg:grid-cols-[340px_1fr]">
 
-        {/* ══ LEFT PANEL ══════════════════════════════════════ */}
-        <div style={{
-          background: 'var(--bg-2)', border: '1px solid var(--border)',
-          borderRadius: '14px', overflow: 'hidden', boxShadow: 'var(--shadow)',
-        }}>
-          {/* Top: avatar + name + role */}
-          <div style={{ padding: '28px 20px 20px', textAlign: 'center', borderBottom: '1px solid var(--border)' }}>
+        {/* ══ LEFT: profile summary ═══════════════════════════ */}
+        <aside className="flex flex-col gap-5 lg:sticky lg:top-6">
 
-            {/* Avatar with camera button */}
-            <div style={{ position: 'relative', display: 'inline-block', marginBottom: '14px' }}>
-              <div style={{
-                width: '88px', height: '88px', borderRadius: '50%',
-                overflow: 'hidden', margin: '0 auto',
-                border: '3px solid var(--border)',
-                background: avatarPreview ? 'transparent' : 'linear-gradient(135deg, var(--accent), var(--accent-2))',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                fontSize: '30px', fontWeight: 700, color: 'white',
-              }}>
-                {avatarPreview
-                  ? <img
+          {/* Profile photo card */}
+          <div className={`${CARD} overflow-hidden`}>
+            <div
+              aria-hidden="true"
+              className="h-24 bg-[radial-gradient(120%_150%_at_15%_0%,color-mix(in_srgb,var(--accent)_30%,transparent),transparent_70%)]"
+            />
+            <div className="-mt-12 px-5 pb-5 text-center">
+
+              {/* Avatar with camera button */}
+              <div className="relative mx-auto h-24 w-24">
+                <div
+                  className={`flex h-full w-full items-center justify-center overflow-hidden rounded-full border-4 border-[color:var(--bg-2)] text-3xl font-semibold text-white [box-shadow:var(--shadow)] ${
+                    avatarPreview ? 'bg-[var(--bg-3)]' : 'bg-[var(--accent)]'
+                  }`}
+                >
+                  {avatarPreview ? (
+                    <img
                       src={avatarPreview}
                       alt="avatar"
                       onClick={() => setAvatarExpanded(true)}
                       title="View photo"
-                      style={{ width: '100%', height: '100%', objectFit: 'cover', cursor: 'pointer' }}
+                      className="h-full w-full cursor-zoom-in object-cover"
                     />
-                  : form.name?.[0]?.toUpperCase() || user?.name?.[0]?.toUpperCase()
-                }
+                  ) : (
+                    form.name?.[0]?.toUpperCase() || user?.name?.[0]?.toUpperCase()
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={processingPhoto}
+                  title="Change profile photo"
+                  aria-label="Change profile photo"
+                  className={`absolute bottom-0 right-0 flex h-8 w-8 items-center justify-center rounded-full border-2 border-[color:var(--bg-2)] bg-[var(--accent)] text-white transition duration-200 hover:brightness-110 active:scale-95 disabled:cursor-not-allowed disabled:opacity-70 ${FOCUS_RING}`}
+                >
+                  <Icon name="camera" className="h-3.5 w-3.5" />
+                </button>
+                <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleAvatarChange} />
               </div>
+
+              <div className="mt-3 text-base font-semibold tracking-tight text-[color:var(--text)]">
+                {form.name || user?.name || '—'}
+              </div>
+              {(form.role || user?.role) && (
+                <span className="mt-1.5 inline-block rounded-md bg-[var(--bg-3)] px-2 py-0.5 text-[11px] font-medium capitalize text-[color:var(--text-2)]">
+                  {form.role || user?.role}
+                </span>
+              )}
+
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
                 disabled={processingPhoto}
-                title="Change profile photo"
-                style={{
-                  position: 'absolute', bottom: '2px', right: '2px',
-                  width: '26px', height: '26px', borderRadius: '50%',
-                  background: 'var(--accent)', border: '2px solid var(--bg-2)',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  cursor: processingPhoto ? 'not-allowed' : 'pointer', color: 'white',
-                  opacity: processingPhoto ? 0.7 : 1,
-                }}
+                className={`mt-4 w-full rounded-lg border border-dashed border-[color:var(--border)] bg-[var(--bg-3)] py-2 text-xs font-medium text-[color:var(--text-2)] transition duration-200 hover:border-[color:var(--accent)] hover:text-[color:var(--accent)] active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-70 ${FOCUS_RING}`}
               >
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z" />
-                  <circle cx="12" cy="13" r="4" />
-                </svg>
+                {processingPhoto ? 'Preparing photo…' : avatarData ? '✓ Image selected' : 'Upload photo'}
               </button>
-              <input ref={fileInputRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={handleAvatarChange} />
-            </div>
+              <p className="mt-2 text-[11px] text-[color:var(--text-3)]">
+                JPG, PNG or GIF · Resized automatically
+              </p>
 
-            <div style={{ fontSize: '16px', fontWeight: 700, color: 'var(--text)', marginBottom: '3px' }}>
-              {form.name || user?.name || '—'}
-            </div>
-            <div style={{ fontSize: '12px', color: 'var(--text-3)', textTransform: 'capitalize', marginBottom: '14px' }}>
-              {form.role || user?.role}
-            </div>
-
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={processingPhoto}
-              style={{
-                width: '100%', padding: '7px', borderRadius: '8px',
-                border: '1.5px dashed var(--border)', background: 'var(--bg-3)',
-                color: 'var(--text-2)', fontSize: '12px',
-                cursor: processingPhoto ? 'not-allowed' : 'pointer',
-                fontFamily: 'var(--font-body)', transition: 'all 0.15s',
-                opacity: processingPhoto ? 0.7 : 1,
-              }}
-              onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--accent)'; e.currentTarget.style.color = 'var(--accent)'; }}
-              onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--text-2)'; }}
-            >
-              {processingPhoto ? 'Preparing photo…' : avatarData ? '✓ Image selected' : 'Upload photo'}
-            </button>
-            <p style={{ fontSize: '11px', color: 'var(--text-3)', marginTop: '7px' }}>
-              JPG, PNG or GIF · Resized automatically
-            </p>
-
-            {/* Remove photo: only when a photo is saved, with an inline confirm step */}
-            {user?.avatar_url && (
-              !removePhotoConfirm ? (
-                <button
-                  type="button"
-                  onClick={() => { setRemovePhotoConfirm(true); setPhotoMsg(null); }}
-                  style={{
-                    marginTop: '8px', padding: '4px 8px', borderRadius: '6px',
-                    background: 'none', border: 'none', color: 'var(--danger)',
-                    fontSize: '12px', fontWeight: 600, cursor: 'pointer',
-                    fontFamily: 'var(--font-body)',
-                  }}
+              {/* Remove photo: only when a photo is saved, with an inline confirm step */}
+              {user?.avatar_url && (
+                !removePhotoConfirm ? (
+                  <button
+                    type="button"
+                    onClick={() => { setRemovePhotoConfirm(true); setPhotoMsg(null); }}
+                    className={`mt-2 rounded-md px-2 py-1 text-xs font-semibold text-[color:var(--danger)] transition duration-200 hover:bg-red-500/10 ${FOCUS_RING}`}
+                  >
+                    Remove photo
+                  </button>
+                ) : (
+                  <div className="mt-3 rounded-xl border border-red-500/20 bg-red-500/[0.08] p-3 text-left">
+                    <p className="mb-2.5 text-xs font-medium text-[color:var(--text)]">
+                      Remove your profile photo? Your initials will show instead.
+                    </p>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={handleRemovePhoto}
+                        disabled={removingPhoto}
+                        className={`${BTN_DANGER} flex items-center gap-1.5`}
+                      >
+                        {removingPhoto ? <Loader label="Removing..." size="sm" variant="button" /> : 'Yes, remove'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setRemovePhotoConfirm(false)}
+                        disabled={removingPhoto}
+                        className={BTN_NEUTRAL}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                )
+              )}
+              {photoMsg && (
+                <div
+                  role={photoMsg.type === 'error' ? 'alert' : 'status'}
+                  className={`mt-2 flex items-center justify-center gap-1.5 text-xs font-medium ${
+                    photoMsg.type === 'success'
+                      ? 'text-[color:var(--success)]'
+                      : 'text-[color:var(--danger)]'
+                  }`}
                 >
-                  Remove photo
-                </button>
-              ) : (
-                <div style={{
-                  marginTop: '10px', background: 'rgba(239,68,68,0.08)', borderRadius: '10px',
-                  padding: '12px', border: '1px solid rgba(239,68,68,0.2)', textAlign: 'left',
-                }}>
-                  <p style={{ fontSize: '12px', color: 'var(--text)', marginBottom: '10px', fontWeight: 500 }}>
-                    Remove your profile photo? Your initials will show instead.
-                  </p>
-                  <div style={{ display: 'flex', gap: '8px' }}>
-                    <button type="button" onClick={handleRemovePhoto} disabled={removingPhoto} style={{
-                      padding: '6px 14px', borderRadius: '7px', background: 'var(--danger)',
-                      color: '#fff', border: 'none', fontSize: '12px', fontWeight: 600,
-                      cursor: removingPhoto ? 'not-allowed' : 'pointer', opacity: removingPhoto ? 0.7 : 1,
-                      fontFamily: 'var(--font-body)', display: 'flex', alignItems: 'center', gap: '6px',
-                    }}>
-                      {removingPhoto ? <Loader label="Removing..." size="sm" variant="button" /> : 'Yes, remove'}
-                    </button>
-                    <button type="button" onClick={() => setRemovePhotoConfirm(false)} disabled={removingPhoto} style={{
-                      padding: '6px 14px', borderRadius: '7px', background: 'var(--bg-3)',
-                      color: 'var(--text-2)', border: '1px solid var(--border)', fontSize: '12px',
-                      fontWeight: 600, cursor: removingPhoto ? 'not-allowed' : 'pointer', fontFamily: 'var(--font-body)',
-                    }}>Cancel</button>
+                  {photoMsg.type === 'success' ? '✓' : '✕'} {photoMsg.text}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* At a glance — mirrors the form in real time */}
+          <div className={`${CARD} p-5`}>
+            <h2 className="mb-4 text-[13px] font-semibold tracking-tight text-[color:var(--text)]">
+              At a glance
+            </h2>
+            <dl className="flex flex-col gap-3.5">
+              {glanceRows.map(({ icon, label, value }) => (
+                <div key={label} className="flex items-start gap-3">
+                  <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[var(--bg-3)] text-[color:var(--text-3)]">
+                    <Icon name={icon} className="h-[15px] w-[15px]" />
+                  </span>
+                  <div className="min-w-0">
+                    <dt className="text-[11px] font-medium text-[color:var(--text-3)]">{label}</dt>
+                    <dd
+                      className={`break-words text-[13px] font-medium ${
+                        value && value !== '—' ? 'text-[color:var(--text)]' : 'text-[color:var(--text-3)]'
+                      }`}
+                    >
+                      {value || '—'}
+                    </dd>
                   </div>
                 </div>
-              )
-            )}
-            {photoMsg && (
-              <div role={photoMsg.type === 'error' ? 'alert' : 'status'} style={{
-                marginTop: '8px', fontSize: '12px', fontWeight: 500,
-                color: photoMsg.type === 'success' ? 'var(--success)' : 'var(--danger)',
-                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px',
-              }}>
-                {photoMsg.type === 'success' ? '✓' : '✕'} {photoMsg.text}
-              </div>
-            )}
+              ))}
+            </dl>
           </div>
+        </aside>
 
-          {/* Bottom: Basic Information — mirrors form in real-time */}
-          <div style={{ padding: '20px' }}>
-            <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text)', marginBottom: '16px' }}>
-              Basic Information
-            </div>
+        {/* ══ RIGHT: categorised settings ═════════════════════ */}
+        <div className="flex min-w-0 flex-col gap-5">
 
-            {[
-              { label: 'Full Name',     value: form.name },
-              { label: 'Email',         value: form.email },
-              { label: 'Phone',         value: form.phone },
-              { label: 'Date of Birth', value: formatDob(form.dob) },
-              { label: 'Location',      value: form.location },
-            ].map(({ label, value }) => (
-              <div key={label} style={{ marginBottom: '14px' }}>
-                <div style={{ fontSize: '11px', color: 'var(--text-3)', marginBottom: '2px', fontWeight: 500 }}>
-                  {label}
-                </div>
-                <div style={{
-                  fontSize: '13px', fontWeight: 600, color: value ? 'var(--text)' : 'var(--text-3)',
-                  wordBreak: 'break-word',
-                }}>
-                  {value || '—'}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* ══ RIGHT PANEL ═════════════════════════════════════ */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-
-          {/* Account Settings card — wrapped in a <form> so the password
-              fields are properly associated with a form (fixes the Chrome
-              DevTools "Password field is not contained in a form" warning
-              and lets browser password managers work correctly). */}
-          <form
-            onSubmit={handleSave}
-            style={{
-              background: 'var(--bg-2)', border: '1px solid var(--border)',
-              borderRadius: '14px', padding: '24px', boxShadow: 'var(--shadow)',
-            }}
-          >
-            <h2 style={{ fontSize: '15px', fontWeight: 700, color: 'var(--text)', marginBottom: '20px' }}>
-              Account Settings
-            </h2>
-
+          {/* One <form> around all three sections, so the password fields sit
+              inside a form (browser password managers need that) and a single
+              Save button covers everything. */}
+          <form onSubmit={handleSave} className="flex flex-col gap-5">
             {/* Hidden username field helps password managers associate the
                 credentials with the right account (accessibility best practice) */}
             <input
@@ -1399,203 +765,227 @@ export default function AccountSettings() {
               autoComplete="username"
               value={form.email}
               readOnly
-              style={{ display: 'none' }}
+              className="hidden"
               tabIndex={-1}
               aria-hidden="true"
             />
 
-            {/* Name + Email */}
-            <div className="account-settings-form-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '16px' }}>
-              <div>
-                <label style={labelStyle}>Full Name</label>
-                <input style={inputStyle} value={form.name} onChange={handleChange('name')} placeholder="Your full name"
-                  onFocus={e => e.target.style.borderColor = 'var(--accent)'}
-                  onBlur={e => e.target.style.borderColor = 'var(--border)'} />
-              </div>
-              <div>
-                <label style={labelStyle}>Email</label>
-                <input style={inputStyle} value={form.email} type="email" autoComplete="email" onChange={handleChange('email')} placeholder="your@email.com"
-                  onFocus={e => e.target.style.borderColor = 'var(--accent)'}
-                  onBlur={e => e.target.style.borderColor = 'var(--border)'} />
-              </div>
-            </div>
-
-            {/* Phone + Role */}
-            <div className="account-settings-form-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '16px' }}>
-              <div>
-                <label style={labelStyle}>Phone</label>
-                <input style={inputStyle} value={form.phone} onChange={handleChange('phone')} placeholder="+91 00000 00000"
-                  onFocus={e => e.target.style.borderColor = 'var(--accent)'}
-                  onBlur={e => e.target.style.borderColor = 'var(--border)'} />
-              </div>
-              <div>
-                <label style={labelStyle}>Role</label>
-                <input style={{ ...inputStyle, background: 'var(--bg-4)', color: 'var(--text-3)', cursor: 'not-allowed' }}
-                  value={form.role} readOnly title="Role can only be changed by a manager" />
-              </div>
-            </div>
-
-            {/* Location + DOB */}
-            <div className="account-settings-form-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '16px' }}>
-              <div>
-                <label style={labelStyle}>Location</label>
-                <input style={inputStyle} value={form.location} onChange={handleChange('location')} placeholder="City, Country"
-                  onFocus={e => e.target.style.borderColor = 'var(--accent)'}
-                  onBlur={e => e.target.style.borderColor = 'var(--border)'} />
-              </div>
-              <div>
-                <label style={labelStyle}>Date of Birth</label>
+            {/* ── Personal ── */}
+            <Section
+              id="personal"
+              icon="user"
+              title="Personal details"
+              description="How you appear to your team."
+            >
+              <Field label="Full name" htmlFor="account-name">
+                <input id="account-name" className={inputClass()} value={form.name}
+                  onChange={handleChange('name')} placeholder="Your full name" />
+              </Field>
+              <Field label="Role">
+                <div className="relative">
+                  <input
+                    className={`${inputClass()} cursor-not-allowed bg-[var(--bg-4)] pr-9 text-[color:var(--text-3)]`}
+                    value={form.role} readOnly aria-readonly="true"
+                    title="Role can only be changed by a manager"
+                  />
+                  <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[color:var(--text-3)]">
+                    <Icon name="lock" className="h-3.5 w-3.5" />
+                  </span>
+                </div>
+              </Field>
+              <Field label="Date of birth">
                 <DatePicker value={form.dob} onChange={val => setForm(prev => ({ ...prev, dob: val }))} placeholder="dd-mm-yyyy" />
-              </div>
-            </div>
+              </Field>
+              <Field label="Location" htmlFor="account-location">
+                <input id="account-location" className={inputClass()} value={form.location}
+                  onChange={handleChange('location')} placeholder="City, Country" />
+              </Field>
+              <Field label="Bio" htmlFor="account-bio" className="sm:col-span-2">
+                <textarea id="account-bio" className={`${inputClass()} min-h-[96px] resize-y leading-relaxed`}
+                  value={form.bio} onChange={handleChange('bio')}
+                  placeholder="Tell your team a bit about yourself..." />
+              </Field>
+            </Section>
 
-            {/* New Password + Confirm */}
-            <div className="account-settings-form-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '16px' }}>
-              <div>
-                <label style={labelStyle}>New Password</label>
-                <div style={{ position: 'relative' }}>
-                  <input style={{ ...inputStyle, paddingRight: '38px' }} value={newPassword}
-                    type={showNewPassword ? 'text' : 'password'} autoComplete="new-password"
-                    onChange={e => setNewPassword(e.target.value)} placeholder="Leave blank to keep current"
-                    onFocus={e => e.target.style.borderColor = 'var(--accent)'}
-                    onBlur={e => e.target.style.borderColor = 'var(--border)'} />
-                  <button type="button" style={eyeToggleStyle}
-                    onClick={() => setShowNewPassword(v => !v)}
-                    title={showNewPassword ? 'Hide password' : 'Show password'}
-                    aria-label={showNewPassword ? 'Hide password' : 'Show password'}>
-                    <EyeIcon open={showNewPassword} />
-                  </button>
-                </div>
-              </div>
-              <div>
-                <label style={labelStyle}>Confirm Password</label>
-                <div style={{ position: 'relative' }}>
-                  <input style={{ ...inputStyle, paddingRight: '38px' }} value={confirmPassword}
-                    type={showConfirmPassword ? 'text' : 'password'} autoComplete="new-password"
-                    onChange={e => setConfirmPassword(e.target.value)} placeholder="Confirm new password"
-                    onFocus={e => e.target.style.borderColor = 'var(--accent)'}
-                    onBlur={e => e.target.style.borderColor = 'var(--border)'} />
-                  <button type="button" style={eyeToggleStyle}
-                    onClick={() => setShowConfirmPassword(v => !v)}
-                    title={showConfirmPassword ? 'Hide password' : 'Show password'}
-                    aria-label={showConfirmPassword ? 'Hide password' : 'Show password'}>
-                    <EyeIcon open={showConfirmPassword} />
-                  </button>
-                </div>
-              </div>
-            </div>
+            {/* ── Contact ── */}
+            <Section
+              id="contact"
+              icon="mail"
+              title="Contact"
+              description="Where we reach you. Changing your email asks for your current password."
+            >
+              <Field label="Email" htmlFor="account-email">
+                <input id="account-email" className={inputClass()} value={form.email} type="email"
+                  autoComplete="email" onChange={handleChange('email')} placeholder="your@email.com" />
+              </Field>
+              <Field label="Phone" htmlFor="account-phone">
+                <input id="account-phone" className={inputClass()} value={form.phone}
+                  onChange={handleChange('phone')} placeholder="+91 00000 00000" />
+              </Field>
+            </Section>
 
-            {/* Current Password — only when changing the password or email */}
-            {needsCurrentPassword && (
-              <div className="account-settings-form-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '16px' }}>
-                <div>
-                  <label style={labelStyle} htmlFor="account-current-password">Current Password</label>
-                  <div style={{ position: 'relative' }}>
-                    <input id="account-current-password"
-                      style={{ ...inputStyle, paddingRight: '38px', ...(currentPasswordError ? { borderColor: 'var(--danger)' } : null) }}
-                      value={currentPassword}
-                      type={showCurrentPassword ? 'text' : 'password'} autoComplete="current-password"
-                      onChange={e => { setCurrentPassword(e.target.value); setCurrentPasswordError(''); }}
-                      placeholder="Enter your current password"
-                      aria-invalid={currentPasswordError ? true : undefined}
-                      aria-describedby={currentPasswordError ? 'account-current-password-error' : undefined}
-                      onFocus={e => e.target.style.borderColor = 'var(--accent)'}
-                      onBlur={e => e.target.style.borderColor = currentPasswordError ? 'var(--danger)' : 'var(--border)'} />
-                    <button type="button" style={eyeToggleStyle}
-                      onClick={() => setShowCurrentPassword(v => !v)}
-                      title={showCurrentPassword ? 'Hide password' : 'Show password'}
-                      aria-label={showCurrentPassword ? 'Hide password' : 'Show password'}>
-                      <EyeIcon open={showCurrentPassword} />
-                    </button>
+            {/* ── Security ── */}
+            <Section
+              id="security"
+              icon="lock"
+              title="Security"
+              description="Enter your current password first to set a new one. Leave the fields empty to keep it."
+            >
+              <Field
+                label="Current password"
+                htmlFor="account-current-password"
+                className="sm:col-span-2 sm:max-w-[calc(50%_-_0.5rem)]"
+              >
+                <PasswordInput
+                  id="account-current-password"
+                  value={currentPassword}
+                  onChange={e => { setCurrentPassword(e.target.value); setCurrentPasswordError(''); }}
+                  placeholder="Enter your current password"
+                  autoComplete="current-password"
+                  visible={showCurrentPassword}
+                  onToggle={() => setShowCurrentPassword(v => !v)}
+                  invalid={Boolean(currentPasswordError)}
+                  describedBy={currentPasswordError ? 'account-current-password-error' : undefined}
+                />
+                {currentPasswordError ? (
+                  <div
+                    id="account-current-password-error"
+                    role="alert"
+                    className="mt-1.5 flex items-center gap-1.5 text-xs font-medium text-[color:var(--danger)]"
+                  >
+                    ✕ {currentPasswordError}
                   </div>
-                  {currentPasswordError && (
-                    <div id="account-current-password-error" role="alert" style={{
-                      fontSize: '12px', fontWeight: 500, color: 'var(--danger)',
-                      display: 'flex', alignItems: 'center', gap: '6px', marginTop: '6px',
-                    }}>
-                      ✕ {currentPasswordError}
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
+                ) : (
+                  <p className="mt-1.5 text-[11px] text-[color:var(--text-3)]">
+                    Required to set a new password or change your email.
+                  </p>
+                )}
+              </Field>
+              <Field label="New password" htmlFor="account-new-password">
+                <PasswordInput
+                  id="account-new-password"
+                  value={newPassword}
+                  onChange={e => { setNewPassword(e.target.value); setNewPasswordError(''); }}
+                  placeholder="Leave blank to keep current"
+                  autoComplete="new-password"
+                  visible={showNewPassword}
+                  onToggle={() => setShowNewPassword(v => !v)}
+                  invalid={Boolean(newPasswordError)}
+                  describedBy={newPasswordError ? 'account-new-password-error' : undefined}
+                />
+                {newPasswordError ? (
+                  <div id="account-new-password-error" role="alert"
+                    className="mt-1.5 flex items-center gap-1.5 text-xs font-medium text-[color:var(--danger)]">
+                    ✕ {newPasswordError}
+                  </div>
+                ) : (
+                  <p className="mt-1.5 text-[11px] text-[color:var(--text-3)]">
+                    At least {PASSWORD_MIN_LENGTH} characters. You will be signed out on every device after changing it.
+                  </p>
+                )}
+              </Field>
+              <Field label="Confirm password" htmlFor="account-confirm-password">
+                <PasswordInput
+                  id="account-confirm-password"
+                  value={confirmPassword}
+                  onChange={e => { setConfirmPassword(e.target.value); setConfirmPasswordError(''); }}
+                  placeholder="Confirm new password"
+                  autoComplete="new-password"
+                  visible={showConfirmPassword}
+                  onToggle={() => setShowConfirmPassword(v => !v)}
+                  invalid={Boolean(confirmMessage)}
+                  describedBy={confirmMessage ? 'account-confirm-password-error' : undefined}
+                />
+                {confirmMessage && (
+                  <div id="account-confirm-password-error" role="alert"
+                    className="mt-1.5 flex items-center gap-1.5 text-xs font-medium text-[color:var(--danger)]">
+                    ✕ {confirmMessage}
+                  </div>
+                )}
+                {!confirmMessage && liveMatch && (
+                  <div role="status"
+                    className="mt-1.5 flex items-center gap-1.5 text-xs font-medium text-[color:var(--success)]">
+                    ✓ Passwords match
+                  </div>
+                )}
+              </Field>
+            </Section>
 
-            {/* Bio */}
-            <div style={{ marginBottom: '20px' }}>
-              <label style={labelStyle}>Bio</label>
-              <textarea style={{ ...inputStyle, minHeight: '90px', resize: 'vertical' }}
-                value={form.bio} onChange={handleChange('bio')} placeholder="Tell your team a bit about yourself..."
-                onFocus={e => e.target.style.borderColor = 'var(--accent)'}
-                onBlur={e => e.target.style.borderColor = 'var(--border)'} />
-            </div>
-
-            {/* Save row */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            {/* Save bar — stays in view while scrolling the long form */}
+            <div className={`${CARD} sticky bottom-4 z-10 flex items-center gap-3 px-4 py-3`}>
               {saveMsg && (
-                <div style={{
-                  fontSize: '12px', fontWeight: 500,
-                  color: saveMsg.type === 'success' ? 'var(--success)' : 'var(--danger)',
-                  display: 'flex', alignItems: 'center', gap: '6px',
-                }}>
+                <div
+                  role={saveMsg.type === 'error' ? 'alert' : 'status'}
+                  className={`flex items-center gap-1.5 text-xs font-medium ${
+                    saveMsg.type === 'success'
+                      ? 'text-[color:var(--success)]'
+                      : 'text-[color:var(--danger)]'
+                  }`}
+                >
                   {saveMsg.type === 'success' ? '✓' : '✕'} {saveMsg.text}
                 </div>
               )}
-              <button type="submit" disabled={saving || processingPhoto} style={{
-                marginLeft: 'auto', padding: '9px 22px', borderRadius: '8px',
-                background: 'linear-gradient(135deg, var(--accent), var(--accent-2))',
-                color: '#fff', border: 'none', fontSize: '13px', fontWeight: 600,
-                cursor: (saving || processingPhoto) ? 'not-allowed' : 'pointer',
-                opacity: (saving || processingPhoto) ? 0.7 : 1,
-                fontFamily: 'var(--font-body)', boxShadow: '0 2px 8px rgba(99,102,241,0.3)',
-                display: 'flex', alignItems: 'center', gap: '6px',
-              }}>
-                {saving ? <Loader label="Saving..." size="sm" variant="button" /> : 'Save Changes'}
+              <button
+                type="submit"
+                disabled={saving || processingPhoto}
+                className={`ml-auto flex items-center gap-1.5 rounded-lg bg-[var(--accent)] px-5 py-2.5 text-[13px] font-semibold text-white transition duration-200 hover:brightness-110 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-70 ${FOCUS_RING}`}
+              >
+                {saving ? <Loader label="Saving..." size="sm" variant="button" /> : 'Save changes'}
               </button>
             </div>
           </form>
 
-          {/* Danger Zone */}
-          <div style={{
-            background: 'rgba(239,68,68,0.04)', border: '1.5px solid rgba(239,68,68,0.25)',
-            borderRadius: '14px', padding: '20px',
-          }}>
-            <div style={{ marginBottom: '14px' }}>
-              <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--danger)', marginBottom: '2px' }}>Danger Zone</div>
-              <div style={{ fontSize: '12px', color: 'var(--text-3)' }}>Critical actions that affect your account.</div>
-            </div>
-            <div style={{ borderTop: '1px solid rgba(239,68,68,0.15)', paddingTop: '16px' }}>
-              <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--danger)', marginBottom: '4px' }}>Delete Account</div>
-              <div style={{ fontSize: '12px', color: 'var(--text-2)', marginBottom: '12px' }}>
-                This action is <strong>permanent</strong> and cannot be undone. All your data will be removed.
+          {/* ── Danger zone ── */}
+          <section
+            id="danger"
+            className="scroll-mt-6 rounded-2xl border border-red-500/25 bg-red-500/[0.04] p-5 sm:p-6"
+          >
+            <header className="mb-4 flex items-start gap-3">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] bg-red-500/10 text-[color:var(--danger)]">
+                <Icon name="alert" />
+              </span>
+              <div>
+                <h2 className="text-[15px] font-semibold tracking-tight text-[color:var(--danger)]">Danger zone</h2>
+                <p className="mt-0.5 text-xs text-[color:var(--text-3)]">Critical actions that affect your account.</p>
               </div>
-              {!deleteConfirm ? (
-                <button onClick={() => setDeleteConfirm(true)} style={{
-                  padding: '8px 18px', borderRadius: '8px', background: 'var(--danger)',
-                  color: '#fff', border: 'none', fontSize: '13px', fontWeight: 600,
-                  cursor: 'pointer', fontFamily: 'var(--font-body)',
-                }}>Delete Account</button>
-              ) : (
-                <div style={{ background: 'rgba(239,68,68,0.08)', borderRadius: '10px', padding: '14px', border: '1px solid rgba(239,68,68,0.2)' }}>
-                  <p style={{ fontSize: '13px', color: 'var(--text)', marginBottom: '12px', fontWeight: 500 }}>
+            </header>
+
+            <div className="border-t border-red-500/15 pt-4">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <div className="text-[13px] font-semibold text-[color:var(--text)]">Delete account</div>
+                  <p className="mt-0.5 max-w-[52ch] text-xs leading-relaxed text-[color:var(--text-2)]">
+                    This action is <strong className="font-semibold">permanent</strong> and cannot be undone. All your data will be removed.
+                  </p>
+                </div>
+                {!deleteConfirm && (
+                  <button
+                    type="button"
+                    onClick={() => setDeleteConfirm(true)}
+                    className={`${BTN_DANGER} shrink-0 py-2.5 text-[13px] ${FOCUS_RING}`}
+                  >
+                    Delete account
+                  </button>
+                )}
+              </div>
+
+              {deleteConfirm && (
+                <div className="mt-4 rounded-xl border border-red-500/20 bg-red-500/[0.08] p-4">
+                  <p className="mb-3 text-[13px] font-medium text-[color:var(--text)]">
                     Are you absolutely sure? This cannot be undone.
                   </p>
-                  <div style={{ display: 'flex', gap: '10px' }}>
-                    <button onClick={handleDeleteAccount} disabled={deleting} style={{
-                      padding: '7px 16px', borderRadius: '7px', background: 'var(--danger)',
-                      color: '#fff', border: 'none', fontSize: '12px', fontWeight: 600,
-                      cursor: deleting ? 'not-allowed' : 'pointer', opacity: deleting ? 0.7 : 1,
-                      fontFamily: 'var(--font-body)',
-                    }}>{deleting ? 'Deleting...' : 'Yes, Delete'}</button>
-                    <button onClick={() => setDeleteConfirm(false)} style={{
-                      padding: '7px 16px', borderRadius: '7px', background: 'var(--bg-3)',
-                      color: 'var(--text-2)', border: '1px solid var(--border)', fontSize: '12px',
-                      fontWeight: 600, cursor: 'pointer', fontFamily: 'var(--font-body)',
-                    }}>Cancel</button>
+                  <div className="flex gap-2.5">
+                    <button type="button" onClick={handleDeleteAccount} disabled={deleting} className={BTN_DANGER}>
+                      {deleting ? 'Deleting...' : 'Yes, delete'}
+                    </button>
+                    <button type="button" onClick={() => setDeleteConfirm(false)} className={BTN_NEUTRAL}>
+                      Cancel
+                    </button>
                   </div>
                 </div>
               )}
             </div>
-          </div>
+          </section>
 
         </div>
       </div>

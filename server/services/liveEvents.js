@@ -11,7 +11,6 @@
 const db = require("../db");
 const eventBus = require("./eventBus");
 const authCache = require("./authCache");
-
 function shouldSkip() {
   return !eventBus.isEnabled() || !eventBus.hasConnections();
 }

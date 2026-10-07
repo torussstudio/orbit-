@@ -16,7 +16,6 @@ router.get(
   auth,
   notificationController.getNotifications,
 );
-
 router.get(
   '/unread-count',
   auth,

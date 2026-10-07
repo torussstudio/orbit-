@@ -7,7 +7,7 @@ const { createNotification } = require('./pushNotify');
  * Daily deadline reminders for task assignees.
  *
  * Env (see server/.env.example):
- *   DEADLINE_REMINDERS_ENABLED=true   turn it on (default OFF, so deploying
+ *   DEADLINE_REMINDERS_ENABLED=true   turn it on (default OFF, so deployinga
  *                                     this does not start sending anything)
  *   DEADLINE_REMINDER_HOUR=9          hour of day, Asia/Kolkata (0-23)
  *   DEADLINE_REMINDERS_DRY_RUN=true   only log who would be notified

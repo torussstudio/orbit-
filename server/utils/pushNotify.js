@@ -82,7 +82,6 @@ async function createNotification(userId, title, body, data = {}) {
     const metadata = { ...data };
     const dedupeKey = metadata.eventKey || null;
     delete metadata.eventKey;
-
     const { rows } = await db.query(
       `INSERT INTO notifications
          (member_id, message, type, title, body, related_entity_id,

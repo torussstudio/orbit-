@@ -7,6 +7,7 @@ import api from '../../api/client';
 import { animateEntrance, preloadMotion } from '../../utils/motion';
 import Loader from '../ui/Loader';
 import ErrorBoundary from '../ui/ErrorBoundary';
+import { useTheme, useThemeForUser } from '../../utils/theme';
 
 /* ------------------------------------------------------------------ */
 /* Shared bits                                                         */
@@ -45,7 +46,85 @@ const ICONS = {
   settings:
     'M15 12a3 3 0 11-6 0 3 3 0 016 0zM19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z',
   logout: 'M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9',
+  // Appearance options
+  sun: 'M12 17a5 5 0 100-10 5 5 0 000 10zM12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42',
+  moon: 'M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z',
+  monitor: 'M3 4h18v12H3zM8 20h8M12 16v4',
 };
+
+const THEME_OPTIONS = [
+  { value: 'light', label: 'Light', icon: 'sun' },
+  { value: 'dark', label: 'Dark', icon: 'moon' },
+  { value: 'system', label: 'System', icon: 'monitor' },
+];
+
+// Header button: one click flips light <-> dark for the whole app.
+// (The profile menu still has Light / Dark / System.)
+function ThemeToggleButton() {
+  const { theme, setChoice } = useTheme();
+  const dark = theme === 'dark';
+  const label = dark ? 'Switch to light mode' : 'Switch to dark mode';
+  return (
+    <button
+      type="button"
+      onClick={() => setChoice(dark ? 'light' : 'dark')}
+      aria-label={label}
+      title={label}
+      className={`relative flex min-h-10 min-w-10 shrink-0 cursor-pointer items-center justify-center overflow-hidden rounded-lg border-none bg-transparent p-1.5 text-[var(--text-2)] transition-colors duration-150 hover:bg-[var(--bg-3)] hover:text-[var(--text)] active:scale-95 motion-reduce:transition-none ${focusRing}`}
+    >
+      {/* Icons swap with a small rotate + fade */}
+      <span
+        aria-hidden="true"
+        className={`absolute transition-[transform,opacity] duration-300 motion-reduce:transition-none ${dark ? 'rotate-90 scale-50 opacity-0' : 'rotate-0 scale-100 opacity-100'}`}
+      >
+        <Icon d={ICONS.moon} className="h-[18px] w-[18px]" />
+      </span>
+      <span
+        aria-hidden="true"
+        className={`absolute transition-[transform,opacity] duration-300 motion-reduce:transition-none ${dark ? 'rotate-0 scale-100 opacity-100' : '-rotate-90 scale-50 opacity-0'}`}
+      >
+        <Icon d={ICONS.sun} className="h-[18px] w-[18px]" />
+      </span>
+    </button>
+  );
+}
+
+// Light / Dark / System, inside the profile menu.
+function ThemeSwitch() {
+  const { choice, setChoice } = useTheme();
+  return (
+    <div className="px-2.5 pb-1 pt-1.5">
+      <div className="mb-1.5 text-[11px] font-medium text-[var(--text-3)]" id="theme-switch-label">
+        Appearance
+      </div>
+      <div role="group" aria-labelledby="theme-switch-label" className="grid grid-cols-3 gap-1 rounded-lg bg-[var(--bg-3)] p-1">
+        {THEME_OPTIONS.map((o) => {
+          const on = choice === o.value;
+          return (
+            <button
+              key={o.value}
+              type="button"
+              role="menuitemradio"
+              aria-checked={on}
+              onClick={() => setChoice(o.value)}
+              className={[
+                'flex cursor-pointer flex-col items-center gap-1 rounded-md border-none px-1 py-1.5 text-[11px] font-medium',
+                'transition-[background-color,color,box-shadow] duration-150 motion-reduce:transition-none',
+                focusRing,
+                on
+                  ? 'bg-[var(--bg-2)] text-[var(--text)] shadow-[0_1px_3px_rgba(0,0,0,0.12)]'
+                  : 'bg-transparent text-[var(--text-3)] hover:text-[var(--text)]',
+              ].join(' ')}
+            >
+              <Icon d={ICONS[o.icon]} className="h-[15px] w-[15px] shrink-0" />
+              {o.label}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 
 // Brand mark: hexagon with a solid core, replaces the "⬡" text glyph.
 function LogoMark() {
@@ -499,6 +578,9 @@ export default function Layout() {
   const totalNew = newRequests + newReviews + newAssigned;
   const mainRef = useRef(null);
 
+  // Each user has their own theme, saved on their account.
+  useThemeForUser(user?.id);
+
   const onRequestsPage = location.pathname.startsWith(REQUESTS_PATH);
   const onReviewPage = location.pathname.startsWith(REVIEW_PATH);
   const onTaskViewPage = location.pathname.startsWith(TASKS_PATH);
@@ -736,17 +818,51 @@ export default function Layout() {
     };
   }, [profileDropdownOpen]);
 
-  const navItems = [
-    { to: '/', end: true, icon: ICONS.home, label: 'Dashboard' },
-    ...(!isManager ? [{ to: TASKS_PATH, icon: ICONS.tasks, label: 'Task View', badge: newAssigned }] : []),
-    ...(!isManager ? [{ to: '/task-request', icon: ICONS.inbox, label: 'Task Request' }] : []),
-    ...(isManager ? [{ to: '/projects', icon: ICONS.projects, label: 'Projects' }] : []),
-    { to: '/calendar', icon: ICONS.calendar, label: 'Calendar' },
-    ...(isManager ? [{ to: '/members', icon: ICONS.members, label: 'Members' }] : []),
-    ...(isManager ? [{ to: REVIEW_PATH, icon: ICONS.review, label: 'In Review', badge: newReviews }] : []),
-    ...(isManager ? [{ to: REQUESTS_PATH, icon: ICONS.sheet, label: 'Requested Tasks', badge: newRequests }] : []),
-    ...(isManager ? [{ to: '/time-log', icon: ICONS.clock, label: 'Time Log' }] : []),
-  ];
+  // Grouped by how often each page is used and what kind of work it is:
+  //   Overview: what you look at first every day
+  //   Work:     things that need action (badges live here)
+  //   Team:     people and reports (managers only)
+  const navSections = isManager
+    ? [
+        {
+          label: 'Overview',
+          items: [
+            { to: '/', end: true, icon: ICONS.home, label: 'Dashboard' },
+            { to: '/calendar', icon: ICONS.calendar, label: 'Calendar' },
+          ],
+        },
+        {
+          label: 'Work',
+          items: [
+            { to: '/projects', icon: ICONS.projects, label: 'Projects' },
+            { to: REVIEW_PATH, icon: ICONS.review, label: 'In Review', badge: newReviews },
+            { to: REQUESTS_PATH, icon: ICONS.sheet, label: 'Requested Tasks', badge: newRequests },
+          ],
+        },
+        {
+          label: 'Team',
+          items: [
+            { to: '/members', icon: ICONS.members, label: 'Members' },
+            { to: '/time-log', icon: ICONS.clock, label: 'Time Log' },
+          ],
+        },
+      ]
+    : [
+        {
+          label: 'Overview',
+          items: [
+            { to: '/', end: true, icon: ICONS.home, label: 'Dashboard' },
+            { to: '/calendar', icon: ICONS.calendar, label: 'Calendar' },
+          ],
+        },
+        {
+          label: 'Work',
+          items: [
+            { to: TASKS_PATH, icon: ICONS.tasks, label: 'Task View', badge: newAssigned },
+            { to: '/task-request', icon: ICONS.inbox, label: 'Task Request' },
+          ],
+        },
+      ];
 
   // Collapse only applies from md up. The mobile drawer always shows full labels.
   const labelClass = sidebarCollapsed ? 'md:hidden' : '';
@@ -816,10 +932,21 @@ export default function Layout() {
           </div>
 
           {/* Nav */}
-          <nav aria-label="Main" className="px-3 py-1">
-            <div className={`mb-1 px-2 text-[11px] font-medium text-[var(--text-3)] ${labelClass}`}>Main</div>
+          <nav aria-label="Main" className="flex flex-col gap-4 px-3 py-1">
+            {navSections.map((section, sectionIndex) => (
+            <div key={section.label} role="group" aria-labelledby={`nav-section-${section.label}`}>
+            <div
+              id={`nav-section-${section.label}`}
+              className={`mb-1 px-2 text-[11px] font-medium text-[var(--text-3)] ${labelClass}`}
+            >
+              {section.label}
+            </div>
+            {/* Collapsed sidebar: no labels, so a thin line separates the groups */}
+            {sidebarCollapsed && sectionIndex > 0 && (
+              <div aria-hidden="true" className="mx-3 mb-2 hidden h-px bg-[var(--border)] md:block" />
+            )}
             <ul className="m-0 flex list-none flex-col gap-0.5 p-0">
-              {navItems.map((item) => (
+              {section.items.map((item) => (
                 <li key={item.to}>
                   <NavLink
                     to={item.to}
@@ -859,6 +986,8 @@ export default function Layout() {
                 </li>
               ))}
             </ul>
+            </div>
+            ))}
           </nav>
         </div>
       </aside>
@@ -896,6 +1025,7 @@ export default function Layout() {
               <Icon d={ICONS.search} className="h-[19px] w-[19px]" />
             </button>
 
+            <ThemeToggleButton />
             <NotificationBell />
             <div className="hidden h-6 w-px bg-[var(--border)] sm:block" aria-hidden="true" />
 
@@ -925,7 +1055,7 @@ export default function Layout() {
                 <div
                   role="menu"
                   aria-label="Account"
-                  className="absolute right-0 top-[calc(100%+8px)] z-[2000] w-[220px] max-w-[calc(100vw-24px)] overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--bg-2)] shadow-lg"
+                  className="absolute right-0 top-[calc(100%+8px)] z-[2000] w-[240px] max-w-[calc(100vw-24px)] overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--bg-2)] shadow-[var(--shadow-pop)]"
                 >
                   <div className="flex items-center gap-2.5 border-b border-[var(--border)] px-4 py-3.5">
                     <Avatar user={user} size="lg" />
@@ -936,6 +1066,8 @@ export default function Layout() {
                   </div>
                   <div className="p-1.5">
                     {/* "View Profile" and "Account Settings" pointed to the same page, so they are one item now. */}
+                    <ThemeSwitch />
+                    <div className="mx-0 my-1.5 h-px bg-[var(--border)]" role="separator" />
                     <MenuButton icon={ICONS.settings} onClick={() => navigate('/account-settings')}>
                       Account settings
                     </MenuButton>

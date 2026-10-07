@@ -58,6 +58,9 @@ const eventRoutes =
 const timeLogRoutes =
   require("./routes/timeLog");
 
+const preferenceRoutes =
+  require("./routes/preferences");
+
 const app = express();
 
 /*
@@ -262,6 +265,15 @@ app.use(
 app.use(
   "/api/time-log",
   timeLogRoutes,
+);
+
+/*
+ * Per-user preferences (theme). Any logged-in user,
+ * only ever their own row.
+ */
+app.use(
+  "/api/preferences",
+  preferenceRoutes,
 );
 
 /*

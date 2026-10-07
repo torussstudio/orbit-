@@ -607,17 +607,22 @@ const SubTaskItem = memo(function SubTaskItem({
               <div className={MENU} role="menu">
                 {menuStages.map((s) => {
                   const current = s === st.stage;
+                  // Done is only reachable from In Review.
+                  const needsReview = s === "Done" && !current && st.stage !== "In Review";
                   return (
                     <button
                       key={s}
                       type="button"
                       role="menuitem"
                       aria-current={current}
+                      disabled={needsReview}
+                      title={needsReview ? "Move to In Review first" : undefined}
                       className={cx(
                         MENU_ITEM,
+                        "disabled:cursor-not-allowed disabled:opacity-40",
                         current
                           ? "font-bold !text-[color:var(--accent)] bg-[color:var(--bg-3)] !cursor-default"
-                          : "hover:bg-[color:var(--bg-3)]",
+                          : "enabled:hover:bg-[color:var(--bg-3)]",
                       )}
                       style={stageVars(s)}
                       onClick={() => onPickStage(st, s)}
@@ -759,7 +764,11 @@ const MoveStagePanel = memo(function MoveStagePanel({
               key={s}
               type="button"
               onClick={() => onChange(s)}
-              disabled={changingStage !== null || (!isManager && currentStage === "Done")}
+              disabled={
+                changingStage !== null ||
+                (!isManager && currentStage === "Done") ||
+                (s === "Done" && currentStage !== "In Review" && currentStage !== "Done")
+              }
               aria-pressed={pressed}
               className={cx(
                 STAGEBAR_BTN,
@@ -1328,24 +1337,31 @@ export default function TaskDetail() {
   );
 
   const handleSubTaskStageSelect = useCallback(
-  async (st, chosen) => {
-    setStageDropdown(null);
-    if (!chosen || chosen === st.stage) return;
-    // Members can't reopen a Done sub task.
-    if (!isManager && st.stage === "Done") return;
+    async (st, chosen) => {
+      setStageDropdown(null);
+      if (!chosen || chosen === st.stage) return;
+      // Members can't reopen a Done sub task.
+      if (!isManager && st.stage === "Done") return;
 
-    if (!isManager) {
-      if (chosen === "Done") return;
+      if (!isManager) {
+        if (chosen === "Done") return;
+        if (chosen === "In Review") return openTimeTaken(st, chosen);
+        return moveSubTask(st, chosen, { time_taken: null }, loadTaskOnly);
+      }
+
       if (chosen === "In Review") return openTimeTaken(st, chosen);
-      return moveSubTask(st, chosen, { time_taken: null }, loadTaskOnly);
-    }
-
-    if (chosen === "In Review") return openTimeTaken(st, chosen); // ← new line
-    if (chosen === "Done") return openReview(st);
-    return moveSubTask(st, chosen, null, () => refreshFor(st));
-  },
-  [isManager, openTimeTaken, openReview, moveSubTask, loadTaskOnly, refreshFor],
-);
+      if (chosen === "Done") {
+        // Done is only reachable from In Review.
+        if (st.stage !== "In Review") {
+          setNotice("Move this sub task to In Review (with time taken) before marking it Done.");
+          return;
+        }
+        return openReview(st);
+      }
+      return moveSubTask(st, chosen, null, () => refreshFor(st));
+    },
+    [isManager, openTimeTaken, openReview, moveSubTask, loadTaskOnly, refreshFor],
+  );
 
   // Stage buttons on a leaf task (main task stage is derived, never edited).
   const handleStageChange = useCallback(
@@ -1355,15 +1371,19 @@ export default function TaskDetail() {
       if (!isManager && task.stage === "Done") return;
 
       if (view.isLeaf) {
-  // Anyone moving into In Review must enter time taken.
-  if (stage === "In Review" && task.stage !== "In Review") {
-    return openTimeTaken(task, stage);
-  }
-  // Managers moving to Done go through the review decision.
-  if (isManager && stage === "Done" && task.stage !== "Done") {
-    return openReview(task);
-  }
-}
+        // Anyone moving into In Review must enter time taken.
+        if (stage === "In Review" && task.stage !== "In Review") {
+          return openTimeTaken(task, stage);
+        }
+        // Managers moving to Done go through the review decision, and only from In Review.
+        if (isManager && stage === "Done" && task.stage !== "Done") {
+          if (task.stage !== "In Review") {
+            setNotice("Move this task to In Review (with time taken) before marking it Done.");
+            return;
+          }
+          return openReview(task);
+        }
+      }
 
       setChangingStage(stage);
       try {
@@ -1381,6 +1401,12 @@ export default function TaskDetail() {
   const handleSaveSubTask = useCallback(
     async (data) => {
       const editing = subModal?.task ?? null;
+
+      // The edit form must not bypass the In Review → Done rule.
+      if (data.stage === "Done" && editing?.stage !== "In Review" && editing?.stage !== "Done") {
+        setNotice("A sub task has to be In Review before it can be marked Done.");
+        return;
+      }
 
       // Manager moving In Review → Done via the edit popup gets the review modal instead.
       if (isManager && editing?.stage === "In Review" && data.stage === "Done") {

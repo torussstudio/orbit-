@@ -346,13 +346,24 @@ export default function Projects() {
     return { active: activeList, archived: archivedList };
   }, [projects]);
 
-  const { visibleActive, visibleArchived } = useMemo(() => {
+   const { visibleActive, visibleArchived } = useMemo(() => {
     const q = deferredQuery.trim().toLowerCase();
-    if (!q) return { visibleActive: active, visibleArchived: archived };
     const matches = (p) =>
       p.name?.toLowerCase().includes(q) || (p.client_name || '').toLowerCase().includes(q);
-    return { visibleActive: active.filter(matches), visibleArchived: archived.filter(matches) };
-  }, [active, archived, deferredQuery]);
+
+    // Most tasks first, fewest last; ties fall back to name.
+    const byTaskCount = (a, b) =>
+      (taskStats[b.id]?.total ?? 0) - (taskStats[a.id]?.total ?? 0) ||
+      (a.name || '').localeCompare(b.name || '');
+
+    const activeList = q ? active.filter(matches) : active;
+    const archivedList = q ? archived.filter(matches) : archived;
+
+    return {
+      visibleActive: [...activeList].sort(byTaskCount),
+      visibleArchived: [...archivedList].sort(byTaskCount),
+    };
+  }, [active, archived, deferredQuery, taskStats]);
 
   /* ---------- modals ---------- */
 

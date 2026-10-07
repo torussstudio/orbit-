@@ -6,7 +6,12 @@
 @tailwind utilities;
 
 @layer base {
+  /* ---------------------------------------------------------------- */
+  /* Light theme (default)                                             */
+  /* ---------------------------------------------------------------- */
   :root {
+    color-scheme: light;
+
     --bg: #f4f6fb;
     --bg-2: #ffffff;
     --bg-3: #f0f2f9;
@@ -30,6 +35,58 @@
     --radius-sm: 8px;
     --shadow: 0 1px 4px rgba(99,102,241,0.07), 0 4px 24px rgba(99,102,241,0.06);
     --shadow-glow: 0 0 0 3px rgba(99,102,241,0.1);
+
+    /* Overlays and popover shadows */
+    --overlay: rgba(30,32,71,0.35);
+    --shadow-pop: 0 12px 40px rgba(30,32,71,0.16), 0 2px 8px rgba(30,32,71,0.06);
+    --shadow-modal: 0 20px 60px rgba(99,102,241,0.15);
+
+    /* Lightness for per-name colors (avatars, project marks) */
+    --hue-text-l: 38%;
+    --hue-fill-l: 56%;
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* Dark theme: <html data-theme="dark"> (set by utils/theme.js)      */
+  /* Charcoal surfaces with neutral actions and semantic status colors. */
+  /* ---------------------------------------------------------------- */
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+
+    --bg: #17191c;
+    --bg-2: #202327;
+    --bg-3: #292d32;
+    --bg-4: #34393f;
+    --border: #3b4046;
+    --border-bright: #4b5158;
+    --accent: #b7bdc4;
+    --accent-2: #d0d4d8;
+    --accent-light: rgba(183,189,196,0.14);
+    --accent-glow: rgba(183,189,196,0.1);
+    --text: #f1f2f3;
+    --text-2: #c2c6ca;
+    --text-3: #969ca2;
+    --success: #34d399;
+    --warning: #fbbf24;
+    --danger: #f87171;
+    --critical: #fb7185;
+    --shadow: 0 1px 2px rgba(0,0,0,0.28), 0 8px 28px rgba(0,0,0,0.2);
+    --shadow-glow: 0 0 0 3px rgba(183,189,196,0.2);
+
+    --overlay: rgba(8,9,10,0.62);
+    --shadow-pop: 0 16px 48px rgba(0,0,0,0.42), 0 2px 8px rgba(0,0,0,0.24);
+    --shadow-modal: 0 24px 64px rgba(0,0,0,0.48);
+
+    --hue-text-l: 74%;
+    --hue-fill-l: 62%;
+  }
+
+  /* Theme switch happens instantly instead of animating every color. */
+  .theme-switching,
+  .theme-switching *,
+  .theme-switching *::before,
+  .theme-switching *::after {
+    transition: none !important;
   }
 
   * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -51,6 +108,9 @@
   ::-webkit-scrollbar { width: 6px; height: 6px; }
   ::-webkit-scrollbar-track { background: var(--bg-3); }
   ::-webkit-scrollbar-thumb { background: var(--border-bright); border-radius: 3px; }
+
+  /* Dark: images and avatars a touch softer so they don't glare. */
+  :root[data-theme="dark"] img { filter: brightness(0.94); }
 }
 
 @layer components {
@@ -81,7 +141,7 @@
   .toast {
     display: flex; align-items: center; gap: 9px; padding: 11px 13px;
     border: 1px solid var(--border); border-left: 3px solid var(--success);
-    border-radius: 9px; background: var(--bg-2); box-shadow: var(--shadow);
+    border-radius: 9px; background: var(--bg-2); box-shadow: var(--shadow-pop);
     color: var(--text); font-size: 13px; animation: toastIn 0.2s ease both;
   }
   .toast-error { border-left-color: var(--danger); }
@@ -99,28 +159,29 @@
     .orbit-loader-spinner, .orbit-skeleton-line { animation: none; }
   }
 
-  /* Badges — kept as Tailwind component utilities for reuse across components */
+  /* Badges — kept as Tailwind component utilities for reuse across components.
+     Backgrounds mix the theme color with transparent, so they work in both themes. */
   .badge {
     @apply inline-flex items-center px-2.5 py-[3px] rounded-full text-[11px] font-semibold tracking-[0.3px];
   }
-  .badge-todo { background: rgba(99,102,241,0.1); color: var(--accent); }
-  .badge-inprogress { background: rgba(245,158,11,0.12); color: var(--warning); }
-  .badge-inreview { background: rgba(139,92,246,0.12); color: var(--accent-2); }
-  .badge-done { background: rgba(16,185,129,0.12); color: var(--success); }
-  .badge-blocked { background: rgba(239,68,68,0.12); color: var(--danger); }
-  .badge-low { background: rgba(99,102,241,0.08); color: var(--accent); }
-  .badge-medium { background: rgba(245,158,11,0.12); color: var(--warning); }
-  .badge-high { background: rgba(239,68,68,0.12); color: var(--danger); }
-  .badge-critical { background: rgba(225,29,72,0.12); color: var(--critical); }
-  .badge-active { background: rgba(16,185,129,0.12); color: var(--success); }
-  .badge-on_hold { background: rgba(245,158,11,0.12); color: var(--warning); }
+  .badge-todo { background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent); }
+  .badge-inprogress { background: color-mix(in srgb, var(--warning) 14%, transparent); color: var(--warning); }
+  .badge-inreview { background: color-mix(in srgb, var(--accent-2) 14%, transparent); color: var(--accent-2); }
+  .badge-done { background: color-mix(in srgb, var(--success) 14%, transparent); color: var(--success); }
+  .badge-blocked { background: color-mix(in srgb, var(--danger) 14%, transparent); color: var(--danger); }
+  .badge-low { background: color-mix(in srgb, var(--accent) 10%, transparent); color: var(--accent); }
+  .badge-medium { background: color-mix(in srgb, var(--warning) 14%, transparent); color: var(--warning); }
+  .badge-high { background: color-mix(in srgb, var(--danger) 14%, transparent); color: var(--danger); }
+  .badge-critical { background: color-mix(in srgb, var(--critical) 14%, transparent); color: var(--critical); }
+  .badge-active { background: color-mix(in srgb, var(--success) 14%, transparent); color: var(--success); }
+  .badge-on_hold { background: color-mix(in srgb, var(--warning) 14%, transparent); color: var(--warning); }
   .badge-archived { background: var(--bg-4); color: var(--text-3); }
   .badge-draft { background: var(--bg-4); color: var(--text-3); }
-  .badge-in_review { background: rgba(139,92,246,0.12); color: var(--accent-2); }
-  .badge-approved { background: rgba(16,185,129,0.12); color: var(--success); }
-  .badge-needs_rework { background: rgba(239,68,68,0.12); color: var(--danger); }
-  .badge-completed { background: rgba(16,185,129,0.2); color: var(--success); }
-  .badge-rework { background: rgba(248,113,113,0.12); color: var(--danger); border: 1px solid rgba(248,113,113,0.3); }
+  .badge-in_review { background: color-mix(in srgb, var(--accent-2) 14%, transparent); color: var(--accent-2); }
+  .badge-approved { background: color-mix(in srgb, var(--success) 14%, transparent); color: var(--success); }
+  .badge-needs_rework { background: color-mix(in srgb, var(--danger) 14%, transparent); color: var(--danger); }
+  .badge-completed { background: color-mix(in srgb, var(--success) 22%, transparent); color: var(--success); }
+  .badge-rework { background: color-mix(in srgb, var(--danger) 12%, transparent); color: var(--danger); border: 1px solid color-mix(in srgb, var(--danger) 30%, transparent); }
 
   /* Card */
   .card {
@@ -131,7 +192,7 @@
     box-shadow: var(--shadow);
     transition: box-shadow 0.2s, border-color 0.2s;
   }
-  .card:hover { border-color: var(--border-bright); box-shadow: 0 4px 32px rgba(99,102,241,0.1); }
+  .card:hover { border-color: var(--border-bright); box-shadow: 0 4px 32px var(--accent-glow); }
 
   /* Buttons */
   .btn {
@@ -144,10 +205,10 @@
   .btn-primary {
     background: linear-gradient(135deg, var(--accent), var(--accent-2));
     color: #fff;
-    box-shadow: 0 2px 8px rgba(99,102,241,0.3);
+    box-shadow: 0 2px 8px color-mix(in srgb, var(--accent) 30%, transparent);
   }
   .btn-primary:hover {
-    box-shadow: 0 4px 16px rgba(99,102,241,0.4);
+    box-shadow: 0 4px 16px color-mix(in srgb, var(--accent) 40%, transparent);
     transform: translateY(-1px);
   }
   .btn-ghost {
@@ -155,8 +216,8 @@
     border-color: var(--border);
   }
   .btn-ghost:hover { background: var(--bg-3); color: var(--text); border-color: var(--border-bright); }
-  .btn-danger { background: rgba(239,68,68,0.08); color: var(--danger); border-color: rgba(239,68,68,0.2); }
-  .btn-danger:hover { background: rgba(239,68,68,0.15); }
+  .btn-danger { background: color-mix(in srgb, var(--danger) 9%, transparent); color: var(--danger); border-color: color-mix(in srgb, var(--danger) 22%, transparent); }
+  .btn-danger:hover { background: color-mix(in srgb, var(--danger) 16%, transparent); }
   .btn-sm { padding: 5px 12px; font-size: 12px; }
   /* Phones: small buttons still get a 40px tap target. */
   @media (max-width: 640px) {
@@ -176,6 +237,7 @@
     color: var(--text); font-family: var(--font-body); font-size: 14px;
     transition: border-color 0.15s, box-shadow 0.15s; outline: none;
   }
+  .form-input::placeholder, .form-textarea::placeholder { color: var(--text-3); }
   .form-input:focus, .form-select:focus, .form-textarea:focus {
     border-color: var(--accent);
     box-shadow: var(--shadow-glow);
@@ -184,6 +246,10 @@
   .form-select option { background: var(--bg-2); color: var(--text); }
   .form-textarea { resize: vertical; min-height: 80px; }
   .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+
+  /* Native date / time picker icon readable in dark mode */
+  :root[data-theme="dark"] input[type="date"]::-webkit-calendar-picker-indicator,
+  :root[data-theme="dark"] input[type="time"]::-webkit-calendar-picker-indicator { filter: invert(0.8); }
 
   /* Date Picker */
   .date-picker-trigger {
@@ -196,7 +262,7 @@
     position: fixed; z-index: 2000; width: 300px;
     background: var(--bg-2); border: 1px solid var(--border);
     border-radius: 16px;
-    box-shadow: 0 12px 40px rgba(30,32,71,0.16), 0 2px 8px rgba(30,32,71,0.06);
+    box-shadow: var(--shadow-pop);
     padding: 16px; animation: datePickerIn 0.15s ease;
     /* Landscape phones / short screens: scroll instead of running off-screen */
     max-height: calc(100vh - 16px); max-height: calc(100dvh - 16px); overflow-y: auto;
@@ -253,7 +319,7 @@
   .select-panel {
     position: fixed; z-index: 2000; background: var(--bg-2);
     border: 1px solid var(--border); border-radius: 12px;
-    box-shadow: 0 12px 40px rgba(30,32,71,0.16), 0 2px 8px rgba(30,32,71,0.06);
+    box-shadow: var(--shadow-pop);
     padding: 6px; animation: datePickerIn 0.15s ease;
   }
   .select-options { max-height: 260px; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
@@ -274,7 +340,7 @@
   /* Modal */
   .modal-overlay {
     position: fixed; inset: 0;
-    background: rgba(30,32,71,0.35);
+    background: var(--overlay);
     display: flex; align-items: center; justify-content: center;
     z-index: 1000; backdrop-filter: blur(6px);
     animation: fadeIn 0.15s ease;
@@ -283,7 +349,7 @@
     background: var(--bg-2); border: 1px solid var(--border);
     border-radius: 16px; width: min(520px, calc(100vw - 32px)); max-width: 520px; max-height: 85vh; max-height: 85dvh;
     overflow: hidden; display: flex; flex-direction: column;
-    animation: slideUp 0.2s ease; box-shadow: 0 20px 60px rgba(99,102,241,0.15);
+    animation: slideUp 0.2s ease; box-shadow: var(--shadow-modal);
   }
   .modal-header { display: flex; align-items: center; justify-content: space-between; padding: 28px 28px 0; margin-bottom: 24px; flex-shrink: 0; }
   .modal-body { padding: 0 28px 28px; overflow-y: auto; }
@@ -355,7 +421,7 @@
 
   /* Misc */
   .rework-counter { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; }
-  .rework-count { background: rgba(239,68,68,0.1); color: var(--danger); padding: 2px 8px; border-radius: 12px; font-weight: 700; font-family: var(--font-mono); }
+  .rework-count { background: color-mix(in srgb, var(--danger) 10%, transparent); color: var(--danger); padding: 2px 8px; border-radius: 12px; font-weight: 700; font-family: var(--font-mono); }
   .cred-value { font-family: var(--font-mono); font-size: 13px; letter-spacing: 2px; }
   .cred-value.masked { color: var(--text-3); }
   .empty-state { text-align: center; padding: 60px 20px; color: var(--text-3); }
@@ -371,7 +437,7 @@
   }
   .breadcrumb-sep { color: var(--text-3); }
   .overdue td { color: var(--danger) !important; }
-  tr.overdue:hover td { background: rgba(239,68,68,0.04) !important; }
+  tr.overdue:hover td { background: color-mix(in srgb, var(--danger) 5%, transparent) !important; }
   .comment { padding: 12px 0; border-bottom: 1px solid var(--border); }
   .comment:last-child { border-bottom: none; }
   .comment-meta { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
@@ -396,6 +462,86 @@
 
   .page-header > *, .page-body > *, .card, .stat-card, .modal-body,
   .main-content, .td-main-grid > *, [class*="grid"] > * { min-width: 0; }
+}
+
+/* ------------------------------------------------------------------ */
+/* Dark mode safety net                                                */
+/* Pages that still use fixed light-theme Tailwind colors get mapped  */
+/* to the theme tokens, so nothing turns into dark-on-dark text or a  */
+/* white box. Fix the source when you touch a page; this only covers  */
+/* what has not been converted yet.                                   */
+/* ------------------------------------------------------------------ */
+:root[data-theme="dark"] :is(.text-black, .text-gray-950, .text-gray-900, .text-gray-800, .text-slate-950, .text-slate-900, .text-slate-800, .text-zinc-900, .text-zinc-800, .text-neutral-900, .text-neutral-800) { color: var(--text) !important; }
+:root[data-theme="dark"] :is(.text-gray-700, .text-gray-600, .text-slate-700, .text-slate-600, .text-zinc-700, .text-zinc-600, .text-neutral-700, .text-neutral-600) { color: var(--text-2) !important; }
+:root[data-theme="dark"] :is(.text-gray-500, .text-gray-400, .text-slate-500, .text-slate-400, .text-zinc-500, .text-zinc-400, .text-neutral-500, .text-neutral-400) { color: var(--text-3) !important; }
+:root[data-theme="dark"] :is(.bg-white, .bg-gray-50, .bg-slate-50, .bg-zinc-50, .bg-neutral-50) { background-color: var(--bg-2) !important; }
+:root[data-theme="dark"] :is(.bg-gray-100, .bg-slate-100, .bg-zinc-100, .bg-neutral-100) { background-color: var(--bg-3) !important; }
+:root[data-theme="dark"] :is(.bg-gray-200, .bg-slate-200, .bg-zinc-200, .bg-neutral-200) { background-color: var(--bg-4) !important; }
+:root[data-theme="dark"] :is(.border-gray-100, .border-gray-200, .border-gray-300, .border-slate-100, .border-slate-200, .border-slate-300) { border-color: var(--border) !important; }
+:root[data-theme="dark"] [class~="text-[#000000]"] { color: var(--text) !important; }
+:root[data-theme="dark"] [class~="text-[hsl(32_80%_36%)]"] { color: #e7b85c !important; }
+:root[data-theme="dark"] :is(.badge-todo, .badge-in_review) { color: #c5b3ed; }
+:root[data-theme="dark"] :is(.badge-todo, .badge-in_review) { background: rgba(172,145,224,0.16); }
+:root[data-theme="dark"] [class~="bg-[rgba(30,27,75,0.45)]"] { background-color: var(--overlay) !important; }
+:root[data-theme="dark"] [class~="bg-[color:color-mix(in_srgb,var(--text)_45%,transparent)]"] { background-color: var(--overlay) !important; }
+
+/* Dark-mode action hierarchy: raised neutral primaries, quiet outlined
+   secondaries, and deeper semantic fills for solid success/danger actions. */
+:root[data-theme="dark"] .btn-primary,
+:root[data-theme="dark"] :is(button, a, [role="button"])[class~="bg-[var(--accent)]"][class~="text-white"] {
+  background: linear-gradient(135deg, #b7bdc4, #a7adb4);
+  border-color: #a7adb4;
+  color: #25282b;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.22);
+}
+:root[data-theme="dark"] .btn-primary:hover,
+:root[data-theme="dark"] :is(button, a, [role="button"])[class~="bg-[var(--accent)]"][class~="text-white"]:hover {
+  background: linear-gradient(135deg, #c3c8cd, #b2b8be);
+  border-color: #b2b8be;
+  color: #202327;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.28);
+  filter: none;
+}
+:root[data-theme="dark"] .btn-primary:active,
+:root[data-theme="dark"] :is(button, a, [role="button"])[class~="bg-[var(--accent)]"][class~="text-white"]:active {
+  background: #9da4ab;
+}
+:root[data-theme="dark"] .btn-primary:disabled,
+:root[data-theme="dark"] :is(button, a, [role="button"])[class~="bg-[var(--accent)]"][class~="text-white"]:disabled {
+  background: #454a50;
+  border-color: #454a50;
+  color: #c1c5c9;
+  box-shadow: none;
+  cursor: not-allowed;
+  filter: none;
+  opacity: 1;
+  transform: none;
+}
+:root[data-theme="dark"] :is(button, a, [role="button"])[class~="bg-[var(--success)]"][class~="text-white"] {
+  background: #187653;
+  border-color: #187653;
+  color: #f4f7f5;
+}
+:root[data-theme="dark"] :is(button, a, [role="button"])[class~="bg-[var(--success)]"][class~="text-white"]:hover {
+  background: #1d825d;
+  border-color: #1d825d;
+  filter: none;
+}
+:root[data-theme="dark"] :is(button, a, [role="button"])[class~="bg-[var(--danger)]"][class~="text-white"] {
+  background: #a63f45;
+  border-color: #a63f45;
+  color: #fff4f4;
+}
+:root[data-theme="dark"] :is(button, a, [role="button"])[class~="bg-[var(--danger)]"][class~="text-white"]:hover,
+:root[data-theme="dark"] :is(button, a, [role="button"])[class~="hover:bg-[var(--danger)]"]:hover {
+  background: #b54a50;
+  border-color: #b54a50;
+  color: #fff4f4;
+  filter: none;
+}
+:root[data-theme="dark"] .date-picker-day.is-selected {
+  background: linear-gradient(135deg, #aeb4ba, #9da4ab);
+  color: #25282b;
 }
 
 @media (max-width: 767px) {
