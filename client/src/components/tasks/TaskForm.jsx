@@ -131,6 +131,7 @@ export default function TaskForm({ initial, members, allMembers, clusters, stage
     description: `${uid}-description`,
     assigneeError: `${uid}-assignee-error`,
      dueDateError: `${uid}-due-date-error`,
+    stageError: `${uid}-stage-error`,
     timeTaken: `${uid}-time-taken`,
     timeTakenError: `${uid}-time-taken-error`,
   };
@@ -154,6 +155,7 @@ export default function TaskForm({ initial, members, allMembers, clusters, stage
   const [timeTakenError, setTimeTakenError] = useState('');
   const [assigneeError, setAssigneeError] = useState('');
   const [dueDateError, setDueDateError] = useState(''); 
+  const [stageError, setStageError] = useState('');
   // Toggle only shown for a brand-new main task (not subtasks, not
   // editing an existing task). On = normal flow (subtasks handle their
   // own assignee/due date). Off = this task is standalone, so it needs
@@ -200,9 +202,18 @@ export default function TaskForm({ initial, members, allMembers, clusters, stage
 
   const isMovingToReview = form.stage === 'In Review' && initial?.stage === 'In Progress';
 
+  // Done is only reachable from In Review (an already Done task can stay Done).
+  const isInvalidDone =
+    form.stage === 'Done' && initial?.stage !== 'In Review' && initial?.stage !== 'Done';
+
   const handleSave = () => {
     if (!form.title.trim()) {
       setTitleError('Enter a task title.');
+      return;
+    }
+
+    if (isInvalidDone) {
+      setStageError('Move this task to In Review first. It can only be marked Done from In Review.');
       return;
     }
 
@@ -379,10 +390,11 @@ export default function TaskForm({ initial, members, allMembers, clusters, stage
         <Field label="Stage">
           <Select
             value={form.stage}
-            onChange={val => { setForm(f => ({ ...f, stage: val })); setTimeTakenError(''); }}
+            onChange={val => { setForm(f => ({ ...f, stage: val })); setTimeTakenError(''); setStageError(''); }}
           >
             {allowedStages.map(s => <option key={s} value={s}>{s}</option>)}
           </Select>
+          <FieldError id={ids.stageError}>{stageError}</FieldError>
         </Field>
       </div>
 
