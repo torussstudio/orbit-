@@ -174,10 +174,10 @@ function notificationCreated(userId) {
 
 /*
  * The member's access changed (deactivated, deleted, role changed, password
- * changed, logged out everywhere): forget their cached auth lookup, so their
- * next request reads the database again, and end their live streams now.
- * Call it after the database change is committed. Never throws, so it can
- * never fail the request.
+ * set by a manager, logged out everywhere): forget their cached auth lookup,
+ * so their next request reads the database again, and end their live streams
+ * now. Call it after the database change is committed. Never throws, so it
+ * can never fail the request.
  */
 function accessChanged(userId, reason) {
   try {
@@ -193,8 +193,41 @@ function accessChanged(userId, reason) {
   }
 }
 
+/*
+ * Some sessions of a member were revoked (signed out from another device,
+ * "sign out all other devices"), but the member keeps their access on the
+ * session that asked for it. Ends only the live streams opened with the
+ * revoked sessions. accessChanged() is not used for this: it closes every
+ * stream of the member, the caller's own included.
+ * Call it after the database change is committed. Never throws.
+ */
+function sessionsRevoked(sessionIds, reason) {
+  try {
+    eventBus.closeSessions(sessionIds, reason);
+  } catch (err) {
+    console.error("[liveEvents] closing session streams failed:", err?.message);
+  }
+}
+
+/*
+ * The member changed their own password: every OTHER session was revoked and
+ * the one that made the change stays signed in. Forget the cached auth
+ * lookup and end only the other sessions' streams. Never throws.
+ */
+function passwordChanged(userId, revokedSessionIds) {
+  try {
+    authCache.clear(userId);
+  } catch (err) {
+    console.error("[liveEvents] clearing auth cache failed:", err?.message);
+  }
+
+  sessionsRevoked(revokedSessionIds, "password changed");
+}
+
 module.exports = {
   accessChanged,
+  sessionsRevoked,
+  passwordChanged,
   taskChanged,
   taskAudience,
   projectChanged,

@@ -17,7 +17,11 @@
  *   - it closes itself when the access token it was opened with expires
  *     ("stream.expired"; the browser reconnects with a fresh token), and
  *   - closeUser() ends every stream of a user whose access changed
- *     ("stream.revoked"; the browser does not reconnect).
+ *     ("stream.revoked"; the browser does not reconnect), and
+ *   - closeSession() / closeSessions() end only the streams opened with
+ *     the given sessions (signed out from another device, password
+ *     changed elsewhere), also with "stream.revoked". The user's other
+ *     streams stay open.
  */
 
 const MAX_CONNECTIONS_PER_USER = 5;
@@ -39,6 +43,10 @@ const heartbeats = new Map();
 // res -> timer that closes the stream when its access token expires
 const expiryTimers = new Map();
 
+// res -> { userId, sessionId }: the session (sid of the access token) each
+// stream was opened with, so one session's streams can be closed on their own.
+const streamSessions = new Map();
+
 function isEnabled() {
   return process.env.LIVE_EVENTS_ENABLED === "true";
 }
@@ -57,6 +65,8 @@ function removeConnection(userId, res) {
     clearTimeout(expiryTimer);
     expiryTimers.delete(res);
   }
+
+  streamSessions.delete(res);
 
   const set = connections.get(key);
   if (!set) return;
@@ -108,8 +118,11 @@ function controlMessage(type) {
  * tokenExp: expiry of the access token the stream was opened with, in
  * seconds since 1970 (the `exp` of the token the auth middleware already
  * verified). At that moment the stream gets "stream.expired" and is closed.
+ *
+ * sessionId: the `sid` of that same access token. Kept so closeSession()
+ * can end this stream when that one session is revoked.
  */
-function addConnection(userId, res, { tokenExp } = {}) {
+function addConnection(userId, res, { tokenExp, sessionId } = {}) {
   const key = String(userId);
 
   let set = connections.get(key);
@@ -133,6 +146,13 @@ function addConnection(userId, res, { tokenExp } = {}) {
   }
 
   set.add(res);
+
+  if (sessionId) {
+    streamSessions.set(res, {
+      userId: key,
+      sessionId: String(sessionId).toLowerCase(),
+    });
+  }
 
   // SSE comment line: ignored by clients, keeps proxies from closing an
   // idle connection and lets us notice dead sockets.
@@ -191,6 +211,55 @@ function closeUser(userId, reason) {
     console.error("[eventBus] closeUser failed:", err?.message);
     return 0;
   }
+}
+
+/*
+ * Ends only the streams that were opened with one of these sessions, after
+ * sending "stream.revoked". Call it after the sessions are revoked in the
+ * database (signed out from another device, "sign out all other devices",
+ * own password change). Streams of the same user on other sessions, such as
+ * the one that asked for the revoke, are left open. `reason` is only for the
+ * server log.
+ * Never throws. Returns how many streams were closed.
+ */
+function closeSessions(sessionIds, reason) {
+  try {
+    if (!Array.isArray(sessionIds) || sessionIds.length === 0) return 0;
+    if (streamSessions.size === 0) return 0;
+
+    const wanted = new Set(
+      sessionIds
+        .filter((id) => id !== undefined && id !== null)
+        .map((id) => String(id).toLowerCase()),
+    );
+    if (wanted.size === 0) return 0;
+
+    let closed = 0;
+    // Copy: closing a stream removes its entry from the Map while we loop.
+    for (const [res, stream] of [...streamSessions]) {
+      if (!wanted.has(stream.sessionId)) continue;
+
+      safeWrite(stream.userId, res, controlMessage("stream.revoked"));
+      closeConnection(stream.userId, res);
+      closed += 1;
+    }
+
+    if (closed > 0) {
+      console.log(
+        `[eventBus] closed ${closed} stream(s) of ${wanted.size} revoked session(s): ${reason || "session revoked"}`,
+      );
+    }
+
+    return closed;
+  } catch (err) {
+    console.error("[eventBus] closeSessions failed:", err?.message);
+    return 0;
+  }
+}
+
+// One session. See closeSessions().
+function closeSession(sessionId, reason) {
+  return closeSessions([sessionId], reason);
 }
 
 // Ids taken from a URL arrive as text ("42"), ids read from the database as
@@ -264,6 +333,8 @@ module.exports = {
   removeConnection,
   closeConnection,
   closeUser,
+  closeSession,
+  closeSessions,
   publish,
   hasConnections,
   stats,

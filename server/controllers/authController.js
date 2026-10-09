@@ -173,8 +173,22 @@ async function refresh(req, res, next) {
   } catch (err) {
     logRefreshEvent(req, "failed", {
       status: err.status || 500,
-      reason: err.message,
+      reason: err.code || err.message,
     });
+
+    /*
+     * The session was ended from another device.
+     * Same status and error text as any refused
+     * refresh, plus a code the client uses to tell
+     * the member why they were signed out. Old
+     * clients ignore the extra field.
+     */
+    if (err.code === "SESSION_REVOKED") {
+      return res.status(401).json({
+        error: err.message,
+        code: "SESSION_REVOKED",
+      });
+    }
 
     return next(err);
   }
@@ -237,6 +251,115 @@ async function logoutAll(
 }
 
 /*
+ * ACTIVE SESSIONS
+ *
+ * The "current" session in the four handlers below is
+ * req.user.sessionId: the `sid` of the access token the auth
+ * middleware verified. It is the same value the client sends
+ * as X-Orbit-Session-Id, but it cannot be forged.
+ *
+ * Every query is limited to req.user.id, so a member can only
+ * ever see or end their own sessions.
+ */
+async function listSessions(
+  req,
+  res,
+  next,
+) {
+  try {
+    const result =
+      await authService.listSessions(
+        req.user.id,
+        req.user.sessionId,
+      );
+
+    return res.json(result);
+  } catch (err) {
+    return next(err);
+  }
+}
+
+/*
+ * SIGN OUT ONE SESSION
+ *
+ * 404 for a session that is not the member's own.
+ * 400 for the current session (use logout).
+ */
+async function revokeSession(
+  req,
+  res,
+  next,
+) {
+  try {
+    await authService.revokeSession(
+      req.user.id,
+      req.params.sessionId,
+      req.user.sessionId,
+    );
+
+    return res.json({
+      success: true,
+    });
+  } catch (err) {
+    return next(err);
+  }
+}
+
+/*
+ * SIGN OUT ONE GROUPED ENTRY
+ *
+ * body: { sessionIds: [...] }
+ */
+async function revokeSessionGroup(
+  req,
+  res,
+  next,
+) {
+  try {
+    const result =
+      await authService.revokeSessionGroup(
+        req.user.id,
+        req.body?.sessionIds,
+        req.user.sessionId,
+      );
+
+    return res.json({
+      success: true,
+      revoked: result.revoked,
+      skippedCurrent: result.skippedCurrent,
+    });
+  } catch (err) {
+    return next(err);
+  }
+}
+
+/*
+ * SIGN OUT ALL OTHER DEVICES
+ *
+ * Every session of the member except the current one.
+ */
+async function logoutOthers(
+  req,
+  res,
+  next,
+) {
+  try {
+    const result =
+      await authService.logoutOtherSessions(
+        req.user.id,
+        req.user.sessionId,
+      );
+
+    return res.json({
+      success: true,
+      revoked: result.revoked.length,
+    });
+  } catch (err) {
+    return next(err);
+  }
+}
+
+/*
  * CURRENT USER
  */
 async function me(req, res, next) {
@@ -267,10 +390,18 @@ async function updateProfile(
   next,
 ) {
   try {
+    /*
+     * A password change signs out every session
+     * except this one.
+     */
     const user =
       await authService.updateProfile(
         req.user.id,
         req.body || {},
+        {
+          currentSessionId:
+            req.user.sessionId,
+        },
       );
 
     return res.json({
@@ -311,6 +442,10 @@ module.exports = {
   refresh,
   logout,
   logoutAll,
+  listSessions,
+  revokeSession,
+  revokeSessionGroup,
+  logoutOthers,
   me,
   updateProfile,
   deleteAccount,

@@ -1,10 +1,11 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
+import { formatDistanceToNow } from 'date-fns';
 import { useAuth } from '../context/AuthContext';
 import api from '../api/client';
 import { updateCachedMember } from '../api/membersCache';
 import DatePicker from '../components/ui/DatePicker';
-import Loader from '../components/ui/Loader';
+import Loader, { LoadingSkeleton } from '../components/ui/Loader';
 
 // ── Tailwind class tokens ────────────────────────────────────
 // All colours come from the app's existing CSS variables, so light/dark
@@ -41,6 +42,8 @@ const ICON_PATHS = {
   lock: (<><rect x="5" y="11" width="14" height="9" rx="2" /><path d="M8 11V8a4 4 0 018 0v3" /></>),
   alert: (<><path d="M12 4l9 16H3z" /><path d="M12 10v4M12 17h.01" /></>),
   camera: (<><path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z" /><circle cx="12" cy="13" r="4" /></>),
+  monitor: (<><rect x="3" y="4" width="18" height="12" rx="2" /><path d="M8 20h8M12 16v4" /></>),
+  mobile: (<><rect x="7" y="3" width="10" height="18" rx="2" /><path d="M11 18h2" /></>),
 };
 
 function Icon({ name, className = 'h-4 w-4' }) {
@@ -312,8 +315,334 @@ const SECTION_LINKS = [
   { id: 'personal', label: 'Personal' },
   { id: 'contact', label: 'Contact' },
   { id: 'security', label: 'Security' },
+  { id: 'sessions', label: 'Sessions' },
   { id: 'danger', label: 'Danger zone', danger: true },
 ];
+
+// ── Active sessions ──────────────────────────────────────────
+// Where the member is signed in. The server groups browser tabs of the same
+// device (same browser + IP) into one entry. Its own card outside the main
+// form, with its own messages: nothing here is part of "Save changes".
+// `reloadKey` changes when the list should be fetched again from outside
+// (after a password change, which signs the other devices out).
+
+// "5 minutes ago". Empty when the server sent no usable time.
+function lastActiveText(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return `Last active ${formatDistanceToNow(date, { addSuffix: true })}`;
+}
+
+// Stands for "all other devices" in the `confirming` / `busy` state below
+// (the listed entries use their own key).
+const OTHERS = 'others';
+
+// A browser has ONE push subscription, shared by all its tabs, and the server
+// links it to the tab that saved it last. If that was a tab that has just
+// been signed out, the server removed the subscription with that session and
+// this browser would stop getting notifications until its next page load.
+// Saving it again from this tab links it to this session. Best effort: it
+// never changes the outcome of the sign-out.
+async function keepPushForThisTab() {
+  try {
+    if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+    const registration = await navigator.serviceWorker.getRegistration('/');
+    const subscription = await registration?.pushManager.getSubscription();
+    if (!subscription) return;
+    await api.post('/notifications/push-subscribe', subscription.toJSON());
+  } catch {
+    // The bell saves the subscription again on the next page load.
+  }
+}
+
+function SessionsCard({ reloadKey }) {
+  const [sessions, setSessions] = useState([]);
+  const [idleDays, setIdleDays] = useState(7);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
+  // Which inline confirm is open: an entry's key, OTHERS, or null.
+  const [confirming, setConfirming] = useState(null);
+  // Which action is running: an entry's key, OTHERS, or null.
+  const [busy, setBusy] = useState(null);
+  const [msg, setMsg] = useState(null);
+
+  // `silent` (after an action): keep the list on screen while it reloads.
+  const load = useCallback(async ({ silent = false } = {}) => {
+    if (!silent) {
+      setLoading(true);
+      setLoadError('');
+    }
+    try {
+      const { data } = await api.get('/auth/sessions');
+      setSessions(Array.isArray(data?.sessions) ? data.sessions : []);
+      if (Number.isInteger(data?.idleDays)) setIdleDays(data.idleDays);
+      setLoadError('');
+    } catch (err) {
+      if (!silent) {
+        setLoadError(err.response?.data?.error || "We couldn't load your sessions.");
+      }
+    } finally {
+      if (!silent) setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    load();
+  }, [load, reloadKey]);
+
+  const showMsg = (type, text) => {
+    setMsg({ type, text });
+    setTimeout(() => setMsg(null), 5000);
+  };
+
+  // One listed entry: all its tabs. A single tab uses the one-session
+  // endpoint, several tabs the group endpoint.
+  const signOutEntry = async (entry, key) => {
+    setBusy(key);
+    setMsg(null);
+    try {
+      if (entry.sessionIds.length === 1) {
+        await api.delete(`/auth/sessions/${entry.sessionIds[0]}`);
+      } else {
+        await api.post('/auth/sessions/revoke-group', { sessionIds: entry.sessionIds });
+      }
+      showMsg('success', `Signed out of ${entry.deviceLabel}.`);
+    } catch (err) {
+      // Already gone (it logged out, or was signed out a moment ago).
+      if (err.response?.status === 404) {
+        showMsg('success', `${entry.deviceLabel} was already signed out.`);
+      } else {
+        showMsg('error', err.response?.data?.error || "We couldn't sign that device out. Please try again.");
+      }
+    } finally {
+      setBusy(null);
+      setConfirming(null);
+      load({ silent: true });
+    }
+  };
+
+  // The current entry only: the other tabs of this browser. The whole group
+  // is sent; the server skips the session that makes the request, so this tab
+  // stays signed in.
+  const signOutOtherTabs = async (entry, key) => {
+    setBusy(key);
+    setMsg(null);
+    try {
+      const { data } = await api.post('/auth/sessions/revoke-group', { sessionIds: entry.sessionIds });
+      const count = Array.isArray(data?.revoked) ? data.revoked.length : 0;
+      await keepPushForThisTab();
+      showMsg(
+        'success',
+        count > 0
+          ? `Signed out ${count} other tab${count === 1 ? '' : 's'}.`
+          : 'The other tabs were already signed out.',
+      );
+    } catch (err) {
+      showMsg('error', err.response?.data?.error || "We couldn't sign the other tabs out. Please try again.");
+    } finally {
+      setBusy(null);
+      setConfirming(null);
+      load({ silent: true });
+    }
+  };
+
+  const signOutOthers = async () => {
+    setBusy(OTHERS);
+    setMsg(null);
+    try {
+      await api.post('/auth/logout-others');
+      // "Other devices" includes other tabs of this browser.
+      await keepPushForThisTab();
+      showMsg('success', 'All other devices were signed out.');
+    } catch (err) {
+      showMsg('error', err.response?.data?.error || "We couldn't sign the other devices out. Please try again.");
+    } finally {
+      setBusy(null);
+      setConfirming(null);
+      load({ silent: true });
+    }
+  };
+
+  return (
+    <Section
+      id="sessions"
+      icon="monitor"
+      title="Active sessions"
+      description="Devices and browsers where you are signed in to Orbit."
+    >
+      <div className="sm:col-span-2">
+        {loading ? (
+          <div aria-label="Loading sessions">
+            <LoadingSkeleton lines={3} />
+          </div>
+        ) : loadError ? (
+          <div role="alert" className="flex flex-col items-start gap-3 text-xs font-medium text-[color:var(--danger)]">
+            <span>✕ {loadError}</span>
+            <button type="button" onClick={() => load()} className={`${BTN_NEUTRAL} ${FOCUS_RING}`}>
+              Try again
+            </button>
+          </div>
+        ) : (
+          <>
+            {sessions.length === 0 ? (
+              <p className="text-xs text-[color:var(--text-3)]">
+                No active sessions to show.
+              </p>
+            ) : (
+              <ul className="flex flex-col gap-3">
+                {sessions.map((entry) => {
+                  const key = entry.sessionIds[0];
+                  // Tabs of this browser other than the one being used.
+                  const otherTabs = entry.current ? entry.tabCount - 1 : 0;
+                  const details = [
+                    entry.ip,
+                    lastActiveText(entry.lastActiveAt),
+                    entry.tabCount > 1 ? `${entry.tabCount} tabs` : '',
+                  ].filter(Boolean).join(' · ');
+
+                  return (
+                    <li key={key} className="rounded-xl border border-[color:var(--border)] bg-[var(--bg-3)] p-3.5">
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="flex min-w-0 items-start gap-3">
+                          <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[var(--bg-2)] text-[color:var(--text-3)]">
+                            <Icon name={entry.deviceType === 'mobile' ? 'mobile' : 'monitor'} className="h-[15px] w-[15px]" />
+                          </span>
+                          <div className="min-w-0">
+                            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                              <span className="break-words text-[13px] font-semibold text-[color:var(--text)]">
+                                {entry.deviceLabel}
+                              </span>
+                              {entry.current && (
+                                <span className="rounded-md bg-[color:color-mix(in_srgb,var(--success)_15%,transparent)] px-2 py-0.5 text-[11px] font-semibold text-[color:var(--success)]">
+                                  This device
+                                </span>
+                              )}
+                            </div>
+                            <p className="mt-0.5 break-words text-xs text-[color:var(--text-3)]">{details}</p>
+                          </div>
+                        </div>
+
+                        {!entry.current && confirming !== key && (
+                          <button
+                            type="button"
+                            onClick={() => { setConfirming(key); setMsg(null); }}
+                            disabled={busy !== null}
+                            className={`shrink-0 self-start rounded-md px-2 py-1 text-xs font-semibold text-[color:var(--danger)] transition duration-200 hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-70 sm:self-center ${FOCUS_RING}`}
+                          >
+                            Sign out
+                          </button>
+                        )}
+
+                        {/* This device: only its other tabs can be signed out here */}
+                        {otherTabs > 0 && confirming !== key && (
+                          <button
+                            type="button"
+                            onClick={() => { setConfirming(key); setMsg(null); }}
+                            disabled={busy !== null}
+                            className={`shrink-0 self-start rounded-md px-2 py-1 text-xs font-semibold text-[color:var(--danger)] transition duration-200 hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-70 sm:self-center ${FOCUS_RING}`}
+                          >
+                            Sign out other tabs ({otherTabs})
+                          </button>
+                        )}
+                      </div>
+
+                      {/* Inline confirm step, like Remove photo */}
+                      {confirming === key && (
+                        <div className="mt-3 rounded-xl border border-red-500/20 bg-red-500/[0.08] p-3">
+                          <p className="mb-2.5 text-xs font-medium text-[color:var(--text)]">
+                            {entry.current
+                              ? `Sign out ${otherTabs} other tab${otherTabs === 1 ? '' : 's'} in this browser? This tab stays signed in.`
+                              : `Sign out of ${entry.deviceLabel}? It will have to sign in again.`}
+                          </p>
+                          <div className="flex gap-2">
+                            <button
+                              type="button"
+                              onClick={() => (entry.current ? signOutOtherTabs(entry, key) : signOutEntry(entry, key))}
+                              disabled={busy !== null}
+                              className={`${BTN_DANGER} flex items-center gap-1.5`}
+                            >
+                              {busy === key ? <Loader label="Signing out..." size="sm" variant="button" /> : 'Yes, sign out'}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setConfirming(null)}
+                              disabled={busy !== null}
+                              className={BTN_NEUTRAL}
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+
+            {/* Everything except this tab, listed above or not */}
+            <div className="mt-4 border-t border-[color:var(--border)] pt-4">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <p className="max-w-[52ch] text-xs leading-relaxed text-[color:var(--text-3)]">
+                  Sessions not used for {idleDays} day{idleDays === 1 ? '' : 's'} are not listed. Signing out all other devices ends those too.
+                </p>
+                {confirming !== OTHERS && (
+                  <button
+                    type="button"
+                    onClick={() => { setConfirming(OTHERS); setMsg(null); }}
+                    disabled={busy !== null}
+                    className={`${BTN_NEUTRAL} shrink-0 self-start sm:self-center ${FOCUS_RING}`}
+                  >
+                    Sign out all other devices
+                  </button>
+                )}
+              </div>
+
+              {confirming === OTHERS && (
+                <div className="mt-3 rounded-xl border border-red-500/20 bg-red-500/[0.08] p-3">
+                  <p className="mb-2.5 text-xs font-medium text-[color:var(--text)]">
+                    Sign out everywhere except here? Every other device and browser tab will have to sign in again.
+                  </p>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={signOutOthers}
+                      disabled={busy !== null}
+                      className={`${BTN_DANGER} flex items-center gap-1.5`}
+                    >
+                      {busy === OTHERS ? <Loader label="Signing out..." size="sm" variant="button" /> : 'Yes, sign out'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setConfirming(null)}
+                      disabled={busy !== null}
+                      className={BTN_NEUTRAL}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {msg && (
+                <div
+                  role={msg.type === 'error' ? 'alert' : 'status'}
+                  className={`mt-3 flex items-center gap-1.5 text-xs font-medium ${
+                    msg.type === 'success'
+                      ? 'text-[color:var(--success)]'
+                      : 'text-[color:var(--danger)]'
+                  }`}
+                >
+                  {msg.type === 'success' ? '✓' : '✕'} {msg.text}
+                </div>
+              )}
+            </div>
+          </>
+        )}
+      </div>
+    </Section>
+  );
+}
 
 export default function AccountSettings() {
   const { user, logout, updateUser } = useAuth();
@@ -348,6 +677,8 @@ export default function AccountSettings() {
   const [removePhotoConfirm, setRemovePhotoConfirm] = useState(false);
   const [removingPhoto, setRemovingPhoto] = useState(false);
   const [photoMsg, setPhotoMsg] = useState(null);
+  // Bumped after a password change so the Active sessions card reloads.
+  const [sessionsReloadKey, setSessionsReloadKey] = useState(0);
 
   // Filled from the saved profile. Keyed on the profile fields rather than the
   // user object, so removing the photo does not undo edits not saved yet.
@@ -499,13 +830,14 @@ export default function AccountSettings() {
       setCurrentPassword('');
       setAvatarData(null);
 
-      // Changing the password ends every session on the server (this one
-      // included), so tell the member and sign out here instead of letting
-      // the next request fail. The button stays busy during the pause.
+      // Changing the password signs out every other device on the server and
+      // keeps this one signed in, so there is no sign-out here. The sessions
+      // card is loaded again, because the other devices are gone from it.
       if (passwordChanged) {
-        setSaveMsg({ type: 'success', text: 'Password changed. Signing you out, please sign in again.' });
-        await new Promise((resolve) => setTimeout(resolve, 1800));
-        await logout();
+        setSaveMsg({ type: 'success', text: 'Password changed. Other devices were signed out.' });
+        // Other tabs of this browser were signed out too (see the helper).
+        keepPushForThisTab();
+        setSessionsReloadKey((n) => n + 1);
       }
     } catch (err) {
       const message = err.response?.data?.error || 'Failed to save changes.';
@@ -880,7 +1212,7 @@ export default function AccountSettings() {
                   </div>
                 ) : (
                   <p className="mt-1.5 text-[11px] text-[color:var(--text-3)]">
-                    At least {PASSWORD_MIN_LENGTH} characters. You will be signed out on every device after changing it.
+                    At least {PASSWORD_MIN_LENGTH} characters. Changing it signs out your other devices; this one stays signed in.
                   </p>
                 )}
               </Field>
@@ -934,6 +1266,9 @@ export default function AccountSettings() {
               </button>
             </div>
           </form>
+
+          {/* ── Active sessions ── outside the form: it has its own actions */}
+          <SessionsCard reloadKey={sessionsReloadKey} />
 
           {/* ── Danger zone ── */}
           <section

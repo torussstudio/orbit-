@@ -1,6 +1,7 @@
 'use strict';
 
 const db = require('../db');
+const { isUuid } = require('../utils/sessionInfo');
 
 // ============================================================
 // HELPERS
@@ -179,11 +180,15 @@ async function deleteNotification(id, userId) {
 // PUSH SUBSCRIPTION
 // ============================================================
 
+// sessionId: the session (browser tab) that saved the subscription, so the
+// subscription can be removed when that session is revoked. Optional; rows
+// saved before this existed have none.
 async function savePushSubscription(
   userId,
   endpoint,
   p256dh,
   auth,
+  sessionId = null,
 ) {
   if (!userId) {
     const error = new Error('User id is required');
@@ -240,14 +245,16 @@ async function savePushSubscription(
       member_id,
       endpoint,
       p256dh,
-      auth
+      auth,
+      session_id
     )
-    VALUES ($1, $2, $3, $4)
+    VALUES ($1, $2, $3, $4, $5)
     ON CONFLICT (endpoint)
     DO UPDATE SET
       member_id = EXCLUDED.member_id,
       p256dh = EXCLUDED.p256dh,
       auth = EXCLUDED.auth,
+      session_id = EXCLUDED.session_id,
       created_at = NOW()
     `,
     [
@@ -255,6 +262,7 @@ async function savePushSubscription(
       endpoint,
       p256dh,
       auth,
+      isUuid(sessionId) ? sessionId : null,
     ],
   );
 }
@@ -281,6 +289,78 @@ async function removePushSubscription(
   );
 }
 
+// ============================================================
+// REMOVE PUSH SUBSCRIPTIONS OF REVOKED SESSIONS
+// ============================================================
+//
+// A device that was signed out must stop getting push notifications, so
+// each of these runs right after the matching sessions are revoked
+// (services/authService.js). member_id is always part of the WHERE.
+
+// The subscriptions saved by these sessions (logout, "Sign out" next to a
+// device).
+async function removePushSubscriptionsForSessions(
+  userId,
+  sessionIds,
+) {
+  const ids = (sessionIds || []).filter(isUuid);
+
+  if (!userId || ids.length === 0) {
+    return;
+  }
+
+  await db.query(
+    `
+    DELETE FROM push_subscriptions
+    WHERE member_id = $1
+      AND session_id = ANY($2::uuid[])
+    `,
+    [userId, ids],
+  );
+}
+
+// The subscriptions of every session except one ("Sign out all other
+// devices", own password change).
+// includeLegacy: also remove rows that have no session (saved before
+// subscriptions were linked to a session). Only a password change does that.
+async function removePushSubscriptionsOfOtherSessions(
+  userId,
+  keepSessionId,
+  { includeLegacy = false } = {},
+) {
+  if (!userId || !isUuid(keepSessionId)) {
+    return;
+  }
+
+  await db.query(
+    `
+    DELETE FROM push_subscriptions
+    WHERE member_id = $1
+      AND (
+        session_id <> $2::uuid
+        OR ($3::boolean AND session_id IS NULL)
+      )
+    `,
+    [userId, keepSessionId, includeLegacy === true],
+  );
+}
+
+// Every subscription of the member, with or without a session (log out
+// everywhere, account deleted).
+async function removeAllPushSubscriptionsForMember(userId) {
+  if (!userId) {
+    return;
+  }
+
+  await db.query(
+    `
+    DELETE FROM push_subscriptions
+    WHERE member_id = $1
+    `,
+    [userId],
+  );
+}
+
 module.exports = {
   getNotifications,
   getUnreadCount,
@@ -289,4 +369,7 @@ module.exports = {
   deleteNotification,
   savePushSubscription,
   removePushSubscription,
+  removePushSubscriptionsForSessions,
+  removePushSubscriptionsOfOtherSessions,
+  removeAllPushSubscriptionsForMember,
 };

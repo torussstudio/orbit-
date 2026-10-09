@@ -17,7 +17,8 @@ const eventBus = require("../services/eventBus");
  *
  * The stream is closed by the server when the access token it was opened
  * with expires ("stream.expired"), or as soon as the member's access
- * changes ("stream.revoked", see eventBus.closeUser).
+ * changes or this session is revoked ("stream.revoked", see
+ * eventBus.closeUser and eventBus.closeSession).
  */
 router.get(
   "/stream",
@@ -52,8 +53,11 @@ router.get(
 
     // Registers the connection, starts its 25 s heartbeat, and sets it to
     // close when this access token expires (exp of the verified token).
+    // The session id lets the server close just this stream if this one
+    // session is revoked (eventBus.closeSession).
     const cleanup = eventBus.addConnection(userId, res, {
       tokenExp: req.user.tokenExp,
+      sessionId: req.user.sessionId,
     });
 
     req.on("close", cleanup);

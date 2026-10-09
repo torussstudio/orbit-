@@ -783,6 +783,7 @@ import {
   setRefreshToken,
   getSessionId,
   clearSession,
+  setLogoutNotice,
 } from "./tokenStore";
 
 const api = axios.create({
@@ -853,10 +854,12 @@ function mutationMessage(config) {
 
   /*
    * No toast for background saves: auth, notifications,
-   * and user preferences (theme switch).
+   * and user preferences (theme switch). The Active sessions
+   * card (auth/sessions, auth/logout-others) shows its own
+   * messages.
    */
   if (
-    /auth\/(login|refresh|logout|logout-all)|notifications|preferences/.test(
+    /auth\/(login|refresh|logout|logout-all|sessions)|notifications|preferences/.test(
       path,
     )
   ) {
@@ -1069,6 +1072,29 @@ export function refreshAccessToken() {
 
         return newAccessToken;
       })
+      .catch((refreshError) => {
+        /*
+         * The server ended this session from
+         * another device (signed out there, or
+         * the password was changed there).
+         *
+         * Remember why, so the login screen can
+         * say so. Normal expiry has no code and
+         * leaves no notice. The error itself is
+         * passed on unchanged: every caller
+         * handles the 401 as before.
+         */
+        if (
+          refreshError.response?.status ===
+            401 &&
+          refreshError.response?.data
+            ?.code === "SESSION_REVOKED"
+        ) {
+          setLogoutNotice("revoked");
+        }
+
+        throw refreshError;
+      })
       .finally(() => {
         refreshPromise = null;
       });
@@ -1190,9 +1216,18 @@ api.interceptors.response.use(
           "/auth/refresh",
         );
 
+      /*
+       * /auth/logout-others keeps this tab
+       * signed in, so it is a normal request:
+       * an expired access token is refreshed
+       * and the call is tried again.
+       */
       const isLogoutRequest =
         requestUrl.includes(
           "/auth/logout",
+        ) &&
+        !requestUrl.includes(
+          "/auth/logout-others",
         );
 
       const isLoginRequest =

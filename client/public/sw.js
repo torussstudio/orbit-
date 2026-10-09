@@ -4,8 +4,20 @@
    Web Push + Notification Click Handling
    ========================================================= */
 
+/*
+ * Change this text whenever this file should be installed again in
+ * members' browsers. A browser installs a new service worker when any
+ * byte of sw.js differs, and this worker takes over at once
+ * (skipWaiting + clients.claim below).
+ *
+ * It does not cache pages or scripts, so it has no say in which version
+ * of the app a member gets: index.html is served "no-cache" and brings
+ * the new build on the next page load.
+ */
+const SW_VERSION = "2026-10-09-sessions";
+
 self.addEventListener("install", (event) => {
-  console.log("[SW] Installing...");
+  console.log(`[SW] Installing ${SW_VERSION}...`);
   self.skipWaiting();
 });
 

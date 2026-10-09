@@ -10,6 +10,7 @@ const {
 } = require("../utils/accountRules");
 const liveEvents = require("./liveEvents");
 const { revokeAllRefreshTokensForMember } = require("../models/refreshTokens");
+const { removeAllPushSubscriptionsForMember } = require("./notificationService");
 const { keepStoredDate } = require("../utils/dateInput");
 
 async function getAllMembers() {
@@ -96,6 +97,12 @@ async function updateMember(id, { name, email: rawEmail, role, birthday, skills,
           ? "role changed and password reset by a manager"
           : "password reset by a manager",
       );
+
+      // No device of this member stays signed in, so none keeps getting
+      // pushes: remove every push subscription of the member (also the ones
+      // saved before subscriptions were linked to a session). A device
+      // subscribes again when the member logs in on it.
+      await removeAllPushSubscriptionsForMember(id);
       return rows[0];
     }
     const { rows } = await db.query(

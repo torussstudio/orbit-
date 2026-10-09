@@ -25,9 +25,10 @@ import { useAuth } from "../context/AuthContext";
  *   Not an error. Reconnect straight away with a fresh token (normal
  *   refresh flow), with no backoff and no polling.
  * - "stream.revoked": the user's access changed (deactivated, deleted, role
- *   or password changed, logged out everywhere). Do not reconnect. The rest
- *   of the app carries on as usual: if the session is gone, the next API
- *   call gets 401 and the existing logout flow takes over.
+ *   changed, logged out everywhere), or this tab's session was ended from
+ *   another device (signed out there, password changed there). Do not
+ *   reconnect. One API call is made straight away: if the session is gone
+ *   it gets 401 and the existing logout flow takes over.
  */
 
 /* -------------------------------------------------------------------------- */
@@ -342,10 +343,16 @@ async function connect() {
     return;
   }
 
-  // The user's access changed: stay closed. No polling and no retries.
+  // The user's access changed, or this tab's session was ended from another
+  // device: stay closed. No polling and no retries.
   if (state.revoked) {
     revoked = true;
     clearTimers();
+    // One normal API call. If this session is gone it gets 401 and the API
+    // client's existing handling signs this tab out now, instead of at its
+    // next request. If the session is still fine (e.g. a role change), the
+    // call succeeds and nothing happens.
+    api.get("/auth/me").catch(() => {});
     return;
   }
 

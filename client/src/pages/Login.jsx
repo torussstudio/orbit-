@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { getLogoutNotice, clearLogoutNotice } from '../api/tokenStore';
 import Loader from '../components/ui/Loader';
 
 export default function Login() {
@@ -12,11 +13,19 @@ export default function Login() {
   const { login } = useAuth();
   const navigate = useNavigate();
 
+  // Set by the API client when this tab's session was ended from another
+  // device (never for normal expiry or the member's own logout). It is
+  // cleared on the next successful sign-in, not when this screen opens: the
+  // sign-out reloads the page on its way here, and clearing on open could
+  // lose the message before the member sees it.
+  const [signedOutElsewhere] = useState(() => getLogoutNotice() === 'revoked');
+
   const handleSubmit = async e => {
     e.preventDefault();
     setError(''); setLoading(true);
     try {
       await login(email, password);
+      clearLogoutNotice();
       navigate('/');
     } catch (err) {
       setError(err.response?.data?.error || 'Login failed');
@@ -55,6 +64,17 @@ export default function Login() {
               <h1 className="text-[19px] font-semibold mb-1 text-[var(--text)]">Welcome back</h1>
               <p className="text-[13px] text-[var(--text-2)]">Sign in to your workspace</p>
             </div>
+
+            {signedOutElsewhere && (
+              <div role="status" className="flex items-start gap-2 text-[13px] text-[var(--text)] mb-4 px-3 py-2 border-l-2 border-[var(--accent)] bg-[var(--accent)]/10 rounded-r-md">
+                <svg className="mt-[1px] flex-shrink-0 text-[var(--accent)]" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="12" r="10" />
+                  <line x1="12" y1="11" x2="12" y2="16" />
+                  <line x1="12.01" y1="8" x2="12.01" y2="8" />
+                </svg>
+                <span>You were signed out from another device.</span>
+              </div>
+            )}
 
             <form onSubmit={handleSubmit}>
               {/* Email */}

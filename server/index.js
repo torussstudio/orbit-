@@ -66,8 +66,50 @@ const app = express();
 /*
  * Required when running behind Nginx,
  * Cloudflare, load balancer, etc.
+ *
+ * TRUST_PROXY_HOPS = how many reverse proxies
+ * sit between the browser and this process.
+ * Each proxy adds the address it received the
+ * request from to the end of X-Forwarded-For,
+ * and req.ip is read that many entries from
+ * the end. Whatever a browser puts in that
+ * header itself sits further left and is
+ * ignored, so it cannot be used to fake an
+ * address or to get around the rate limiters
+ * (they count per req.ip).
+ *
+ * Default 1 (unchanged): the nginx inside this
+ * container. With a second nginx in front of
+ * the container (the VPS one) it must be 2,
+ * otherwise req.ip is that nginx's address,
+ * the same for every member.
+ *
+ * Never larger than the real number of
+ * proxies: the extra entry would be one the
+ * browser controls.
+ *
+ * req.ip is only shown and logged (sessions
+ * list, sign-in alert) and used as the rate
+ * limit key. It is never used for auth.
  */
-app.set("trust proxy", 1);
+function trustProxyHops() {
+  const value = Number.parseInt(
+    process.env.TRUST_PROXY_HOPS,
+    10,
+  );
+
+  return Number.isInteger(value) &&
+    value >= 0 &&
+    value <= 5
+    ? value
+    : 1;
+}
+
+app.set("trust proxy", trustProxyHops());
+
+console.log(
+  `[proxy] trust proxy: ${trustProxyHops()} hop(s) (TRUST_PROXY_HOPS).`,
+);
 
 app.use(requestLogger);
 
@@ -345,6 +387,16 @@ const {
 } = require("./utils/deadlineReminder");
 
 scheduleDeadlineReminders();
+
+/*
+ * Cleanup of old refresh-token rows is OFF
+ * unless REFRESH_TOKEN_CLEANUP_ENABLED=true.
+ */
+const {
+  scheduleRefreshTokenCleanup,
+} = require("./utils/refreshTokenCleanup");
+
+scheduleRefreshTokenCleanup();
 
 /*
  * Local development server.

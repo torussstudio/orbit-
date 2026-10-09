@@ -16,9 +16,30 @@ const {
   revokeRefreshToken,
   revokeRefreshSession,
   revokeAllRefreshTokensForMember,
+  revokeSessionsForMember,
+  revokeOtherSessionsForMember,
+  listActiveSessions,
+  findOwnedSessionIds,
+  listKnownDevices,
   rotateRefreshToken,
   findRefreshTokenByJti,
 } = require("../models/refreshTokens");
+
+const {
+  removePushSubscriptionsForSessions,
+  removePushSubscriptionsOfOtherSessions,
+  removeAllPushSubscriptionsForMember,
+} = require("./notificationService");
+
+const {
+  isUuid,
+  sameSession,
+  parseDevice,
+  normalizeIp,
+  isPrivateIp,
+} = require("../utils/sessionInfo");
+
+const { createNotification } = require("../utils/pushNotify");
 
 const {
   normalizeEmail,
@@ -94,6 +115,117 @@ function isValidAvatarDataUrl(value) {
 
 function isAvatarTooLarge(value) {
   return value.length > AVATAR_MAX_LENGTH;
+}
+
+/*
+ * ============================================================
+ * SESSIONS (Account settings -> Active sessions)
+ * ============================================================
+ */
+
+/*
+ * Revoke reasons that mean "ended from somewhere else". A tab
+ * whose session ended this way is told so when its refresh is
+ * refused (code SESSION_REVOKED), and shows "You were signed
+ * out from another device". Normal expiry and the member's
+ * own logout get no code.
+ */
+const REVOKED_ELSEWHERE_REASONS = new Set([
+  "revoked_by_user",
+  "logout_others",
+  "password_changed",
+  "logout_all",
+]);
+
+// Most session ids accepted by one "revoke group" request.
+const MAX_SESSIONS_PER_REQUEST = 50;
+
+const DEFAULT_SESSION_IDLE_DAYS = 7;
+
+/*
+ * A session that has not refreshed for this many days is left
+ * out of the Active sessions list (it is not revoked).
+ * REFRESH_SESSION_IDLE_DAYS, default 7.
+ */
+function sessionIdleDays() {
+  const value = Number.parseInt(
+    process.env.REFRESH_SESSION_IDLE_DAYS,
+    10,
+  );
+
+  return Number.isInteger(value) && value > 0
+    ? value
+    : DEFAULT_SESSION_IDLE_DAYS;
+}
+
+/*
+ * A "New sign-in" alert is sent when the member has no session
+ * in this many days with the same device label and IP.
+ */
+const NEW_SIGN_IN_LOOKBACK_DAYS = 30;
+
+/*
+ * Two addresses count as the same place when they are equal.
+ * A private address (see isPrivateIp) is the reverse proxy's
+ * own address, recorded while `trust proxy` was not yet right
+ * for the deployment; it says nothing about the member, so it
+ * matches anything. Without this, every member would get one
+ * false alert the first time they log in after the proxy
+ * setting is corrected.
+ */
+function sameIp(a, b) {
+  return a === b || isPrivateIp(a) || isPrivateIp(b);
+}
+
+/*
+ * NEW SIGN-IN ALERT
+ *
+ * Runs after a login, in the background. The caller does not
+ * wait for it and ignores its failures, so it can never slow
+ * down or fail a login.
+ */
+async function notifyNewSignIn({
+  memberId,
+  sessionId,
+  userAgent,
+  ipAddress,
+}) {
+  const devices = await listKnownDevices(
+    memberId,
+    sessionId,
+    NEW_SIGN_IN_LOOKBACK_DAYS,
+  );
+
+  // The very first login of an account: nothing to compare with.
+  if (devices.length === 0) {
+    return null;
+  }
+
+  const { label } = parseDevice(userAgent);
+  const ip = normalizeIp(ipAddress);
+
+  const known = devices.some(
+    (device) =>
+      device.recent &&
+      parseDevice(device.user_agent).label === label &&
+      sameIp(normalizeIp(device.ip_address), ip),
+  );
+
+  if (known) {
+    return null;
+  }
+
+  // One alert per session: the dedupe key is the session id.
+  return createNotification(
+    memberId,
+    "🔐 New sign-in",
+    ip ? `${label} · ${ip}` : label,
+    {
+      type: "new_sign_in",
+      eventKey: `new-sign-in:${sessionId}`,
+      url: "/account-settings",
+    },
+  );
 }
 
 /**
@@ -183,6 +315,23 @@ async function loginWithPassword({
     expiresAt: refreshExpiresAt,
     userAgent,
     ipAddress,
+  });
+
+  /*
+   * "New sign-in" alert for a device / IP the member has not
+   * used lately. Not awaited: it must never slow down or fail
+   * the login.
+   */
+  notifyNewSignIn({
+    memberId: user.id,
+    sessionId,
+    userAgent,
+    ipAddress,
+  }).catch((err) => {
+    console.error(
+      "[auth] new sign-in alert failed:",
+      err?.message,
+    );
   });
 
   return {
@@ -282,6 +431,28 @@ async function refreshSession({
         stale.session_id,
         "refresh_token_reuse",
       );
+    }
+
+    /*
+     * This session was ended from another device (signed
+     * out there, or the password was changed there). Same
+     * 401 and message as any other refused refresh, plus a
+     * code, so this tab can tell the member why it was
+     * signed out. Old clients ignore the code.
+     */
+    if (
+      stale &&
+      REVOKED_ELSEWHERE_REASONS.has(
+        stale.revoke_reason,
+      )
+    ) {
+      const revokedError = authError(
+        "Refresh token revoked or expired",
+      );
+
+      revokedError.code = "SESSION_REVOKED";
+
+      throw revokedError;
     }
 
     throw authError(
@@ -420,6 +591,39 @@ async function refreshSession({
   };
 }
 
+/*
+ * After a logout: remove the push subscriptions saved by that
+ * session, so the signed-out browser stops getting pushes.
+ *
+ * The logout route has no logged-in user, so the member comes
+ * from the rows the logout just revoked. Nothing revoked (an
+ * unknown or already revoked session) means nothing to remove.
+ *
+ * Never throws: the session is already revoked, and a failed
+ * clean-up must not turn the logout into an error.
+ */
+async function removePushAfterLogout(revokedRows) {
+  try {
+    const row = revokedRows.find(
+      (revoked) => revoked.session_id,
+    );
+
+    if (!row) {
+      return;
+    }
+
+    await removePushSubscriptionsForSessions(
+      row.member_id,
+      [String(row.session_id)],
+    );
+  } catch (err) {
+    console.error(
+      "[auth] push clean-up after logout failed:",
+      err?.message,
+    );
+  }
+}
+
 /**
  * LOGOUT CURRENT SESSION ONLY
  */
@@ -434,10 +638,12 @@ async function logoutSession({
    * current browser tab.
    */
   if (sessionId) {
-    await revokeRefreshSession(
+    const revoked = await revokeRefreshSession(
       sessionId,
       "logout",
     );
+
+    await removePushAfterLogout(revoked);
 
     return;
   }
@@ -457,10 +663,12 @@ async function logoutSession({
         payload?.type === "refresh" &&
         payload?.sid
       ) {
-        await revokeRefreshSession(
+        const revoked = await revokeRefreshSession(
           payload.sid,
           "logout",
         );
+
+        await removePushAfterLogout(revoked);
 
         return;
       }
@@ -517,6 +725,16 @@ async function logoutAllSessions(
   );
 
   /*
+   * No device stays signed in, so none keeps
+   * getting pushes. This also removes
+   * subscriptions that have no session (saved
+   * before they were linked to one).
+   */
+  await removeAllPushSubscriptionsForMember(
+    memberId,
+  );
+
+  /*
    * Sessions are revoked: end the
    * member's live streams too.
    */
@@ -524,6 +742,266 @@ async function logoutAllSessions(
     memberId,
     "logged out everywhere",
   );
+}
+
+/**
+ * ACTIVE SESSIONS of one member, for Account settings.
+ *
+ * A session is one browser tab (the client keeps it in
+ * sessionStorage), so several tabs of one browser would show
+ * as several entries. Sessions with the same device label and
+ * IP are shown as one entry with a tab count.
+ *
+ * currentSessionId: the session of the request (the `sid` of
+ * its verified access token). The entry that contains it gets
+ * current: true and is listed first.
+ */
+async function listSessions(
+  memberId,
+  currentSessionId,
+) {
+  const idleDays = sessionIdleDays();
+
+  const rows = await listActiveSessions(
+    memberId,
+    idleDays,
+  );
+
+  const groups = new Map();
+
+  for (const row of rows) {
+    const device = parseDevice(row.user_agent);
+    const ip = normalizeIp(row.ip_address);
+    const key = `${device.label}|${ip || ""}`;
+
+    let group = groups.get(key);
+
+    if (!group) {
+      group = {
+        deviceLabel: device.label,
+        deviceType: device.type,
+        ip,
+        firstSeenAt: row.first_seen_at,
+        lastActiveAt: row.last_active_at,
+        tabCount: 0,
+        sessionIds: [],
+        current: false,
+      };
+
+      groups.set(key, group);
+    }
+
+    group.tabCount += 1;
+
+    group.sessionIds.push(
+      String(row.session_id).toLowerCase(),
+    );
+
+    if (
+      row.first_seen_at &&
+      new Date(row.first_seen_at) <
+        new Date(group.firstSeenAt)
+    ) {
+      group.firstSeenAt = row.first_seen_at;
+    }
+
+    if (
+      new Date(row.last_active_at) >
+      new Date(group.lastActiveAt)
+    ) {
+      group.lastActiveAt = row.last_active_at;
+    }
+
+    if (
+      sameSession(row.session_id, currentSessionId)
+    ) {
+      group.current = true;
+    }
+  }
+
+  const sessions = [...groups.values()].sort(
+    (a, b) =>
+      Number(b.current) - Number(a.current) ||
+      new Date(b.lastActiveAt) -
+        new Date(a.lastActiveAt),
+  );
+
+  return {
+    sessions,
+    idleDays,
+  };
+}
+
+/*
+ * Revokes these sessions of the member, removes the push
+ * subscriptions they saved, and ends their live streams.
+ *
+ * The push clean-up also runs when nothing was revoked just
+ * now, so repeating a request that failed half-way still
+ * finishes the job.
+ *
+ * Returns the session ids revoked just now.
+ */
+async function revokeOwnSessions(
+  memberId,
+  sessionIds,
+  reason,
+) {
+  const revoked = await revokeSessionsForMember(
+    memberId,
+    sessionIds,
+    reason,
+  );
+
+  await removePushSubscriptionsForSessions(
+    memberId,
+    sessionIds,
+  );
+
+  liveEvents.sessionsRevoked(revoked, reason);
+
+  return revoked;
+}
+
+/**
+ * SIGN OUT ONE SESSION (another device or tab).
+ *
+ * 404 unless it is an unrevoked session of this member, so
+ * another member's session id tells the caller nothing. The
+ * current session is refused: that is what logout is for.
+ */
+async function revokeSession(
+  memberId,
+  sessionId,
+  currentSessionId,
+) {
+  if (!isUuid(sessionId)) {
+    throw authError(
+      "Session not found",
+      404,
+    );
+  }
+
+  if (sameSession(sessionId, currentSessionId)) {
+    throw authError(
+      "This is your current session. Use log out to end it.",
+      400,
+    );
+  }
+
+  const revoked = await revokeOwnSessions(
+    memberId,
+    [sessionId],
+    "revoked_by_user",
+  );
+
+  if (revoked.length === 0) {
+    throw authError(
+      "Session not found",
+      404,
+    );
+  }
+}
+
+/**
+ * SIGN OUT ONE GROUPED ENTRY (all tabs of one device).
+ *
+ * Every id must belong to the member, otherwise 404 and
+ * nothing is revoked. The current session is skipped if it is
+ * in the list, and the response says so.
+ */
+async function revokeSessionGroup(
+  memberId,
+  sessionIds,
+  currentSessionId,
+) {
+  if (
+    !Array.isArray(sessionIds) ||
+    sessionIds.length === 0 ||
+    sessionIds.length > MAX_SESSIONS_PER_REQUEST ||
+    !sessionIds.every(isUuid)
+  ) {
+    throw authError(
+      "sessionIds must be a list of session ids",
+      400,
+    );
+  }
+
+  const ids = [
+    ...new Set(
+      sessionIds.map((id) => id.toLowerCase()),
+    ),
+  ];
+
+  const owned = new Set(
+    await findOwnedSessionIds(memberId, ids),
+  );
+
+  if (ids.some((id) => !owned.has(id))) {
+    throw authError(
+      "Session not found",
+      404,
+    );
+  }
+
+  const targets = ids.filter(
+    (id) => !sameSession(id, currentSessionId),
+  );
+
+  const revoked =
+    targets.length > 0
+      ? await revokeOwnSessions(
+          memberId,
+          targets,
+          "revoked_by_user",
+        )
+      : [];
+
+  return {
+    revoked,
+    skippedCurrent: targets.length < ids.length,
+  };
+}
+
+/**
+ * SIGN OUT ALL OTHER DEVICES: every session of the member
+ * except the current one, listed or not.
+ */
+async function logoutOtherSessions(
+  memberId,
+  currentSessionId,
+) {
+  if (!isUuid(currentSessionId)) {
+    throw authError(
+      "No current session",
+      400,
+    );
+  }
+
+  const revoked =
+    await revokeOtherSessionsForMember(
+      memberId,
+      currentSessionId,
+      "logout_others",
+    );
+
+  /*
+   * Subscriptions without a session are kept here; only
+   * "log out everywhere" and a password change remove those.
+   */
+  await removePushSubscriptionsOfOtherSessions(
+    memberId,
+    currentSessionId,
+  );
+
+  liveEvents.sessionsRevoked(
+    revoked,
+    "signed out from another device",
+  );
+
+  return {
+    revoked,
+  };
 }
 
 async function getProfile(
@@ -552,9 +1030,15 @@ async function getProfile(
   return rows[0] || null;
 }
 
+/*
+ * currentSessionId: the session of the request (the `sid` of
+ * its verified access token). A password change keeps that one
+ * session signed in and ends all the others.
+ */
 async function updateProfile(
   memberId,
   body,
+  { currentSessionId = null } = {},
 ) {
   const {
     name,
@@ -812,21 +1296,59 @@ async function updateProfile(
   }
 
   /*
-   * Password change intentionally logs
-   * the user out from every session.
+   * Password change: every OTHER session is
+   * signed out (its refresh tokens, its push
+   * subscriptions and its live streams). The
+   * session that made the change stays signed
+   * in, so the member is not thrown out of the
+   * device they are using.
    *
-   * This is different from normal logout.
+   * accessChanged() is not used here: it would
+   * close this session's own stream too.
    */
-  if (passwordChanged) {
+  if (passwordChanged && isUuid(currentSessionId)) {
+    const revoked =
+      await revokeOtherSessionsForMember(
+        memberId,
+        currentSessionId,
+        "password_changed",
+      );
+
+    /*
+     * Also removes subscriptions that have no
+     * session (saved before they were linked
+     * to one).
+     */
+    await removePushSubscriptionsOfOtherSessions(
+      memberId,
+      currentSessionId,
+      { includeLegacy: true },
+    );
+
+    /*
+     * Clears the member's cached auth lookup
+     * and ends the other sessions' streams.
+     */
+    liveEvents.passwordChanged(
+      memberId,
+      revoked,
+    );
+  } else if (passwordChanged) {
+    /*
+     * No session to keep (the auth middleware
+     * always supplies one, so this is only a
+     * fallback): sign out everywhere, as
+     * before.
+     */
     await revokeAllRefreshTokensForMember(
       memberId,
       "password_changed",
     );
 
-    /*
-     * Sessions are revoked: end the
-     * member's live streams too.
-     */
+    await removeAllPushSubscriptionsForMember(
+      memberId,
+    );
+
     liveEvents.accessChanged(
       memberId,
       "password changed",
@@ -880,6 +1402,14 @@ async function deleteAccount(
     memberId,
     "account_deleted",
   );
+
+  /*
+   * Same for the push subscriptions: they go
+   * with the member, this is the safety net.
+   */
+  await removeAllPushSubscriptionsForMember(
+    memberId,
+  );
 }
 
 module.exports = {
@@ -887,6 +1417,10 @@ module.exports = {
   refreshSession,
   logoutSession,
   logoutAllSessions,
+  listSessions,
+  revokeSession,
+  revokeSessionGroup,
+  logoutOtherSessions,
   getProfile,
   updateProfile,
   deleteAccount,

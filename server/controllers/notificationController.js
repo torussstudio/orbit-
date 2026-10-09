@@ -162,11 +162,14 @@ async function pushSubscribe(req, res, next) {
       });
     }
 
+    // The session comes from the verified access token. It is the same
+    // value the client sends as X-Orbit-Session-Id, but cannot be forged.
     await notificationService.savePushSubscription(
       req.user.id,
       endpoint,
       keys.p256dh,
       keys.auth,
+      req.user.sessionId,
     );
 
     return res.json({

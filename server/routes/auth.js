@@ -76,6 +76,49 @@ router.post(
 );
 
 /*
+ * ACTIVE SESSIONS (Account settings)
+ *
+ * The member's own sessions only. Same
+ * middleware as /logout-all.
+ *
+ * GET    /sessions               list, grouped by device + IP
+ * DELETE /sessions/:sessionId    sign out one session
+ *                                (404 if not the member's,
+ *                                 400 for the current one)
+ * POST   /sessions/revoke-group  sign out a grouped entry,
+ *                                body { sessionIds }
+ * POST   /logout-others          sign out every session
+ *                                except the current one
+ */
+router.get(
+  "/sessions",
+  auth,
+  requireClientHeader,
+  authController.listSessions,
+);
+
+router.post(
+  "/sessions/revoke-group",
+  auth,
+  requireClientHeader,
+  authController.revokeSessionGroup,
+);
+
+router.delete(
+  "/sessions/:sessionId",
+  auth,
+  requireClientHeader,
+  authController.revokeSession,
+);
+
+router.post(
+  "/logout-others",
+  auth,
+  requireClientHeader,
+  authController.logoutOthers,
+);
+
+/*
  * CURRENT USER
  */
 router.get(

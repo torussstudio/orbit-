@@ -261,6 +261,79 @@ export function clearSession() {
 
 /*
  * ============================================================
+ * LOGOUT NOTICE
+ * ============================================================
+ *
+ * Why this tab was signed out, when it was not the member's
+ * own doing. Today the only reason is "revoked": the session
+ * was ended from another device.
+ *
+ * Kept in this tab's sessionStorage because the sign-out
+ * reloads the page on its way to the login screen. The login
+ * screen shows it once and clears it. clearSession() leaves
+ * it alone on purpose.
+ * ============================================================
+ */
+
+const LOGOUT_NOTICE_KEY =
+  "orbit_logout_notice";
+
+export function setLogoutNotice(reason) {
+  const storage =
+    getSessionStorage();
+
+  if (!storage) {
+    return;
+  }
+
+  try {
+    storage.setItem(
+      LOGOUT_NOTICE_KEY,
+      String(reason),
+    );
+  } catch {
+    // Ignore storage failures.
+  }
+}
+
+export function getLogoutNotice() {
+  const storage =
+    getSessionStorage();
+
+  if (!storage) {
+    return null;
+  }
+
+  try {
+    return (
+      storage.getItem(
+        LOGOUT_NOTICE_KEY,
+      ) || null
+    );
+  } catch {
+    return null;
+  }
+}
+
+export function clearLogoutNotice() {
+  const storage =
+    getSessionStorage();
+
+  if (!storage) {
+    return;
+  }
+
+  try {
+    storage.removeItem(
+      LOGOUT_NOTICE_KEY,
+    );
+  } catch {
+    // Ignore storage failures.
+  }
+}
+
+/*
+ * ============================================================
  * AUTH SESSION CHECK
  * ============================================================
  */
