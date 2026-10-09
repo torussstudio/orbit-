@@ -34,4 +34,23 @@ const streamLimiter = rateLimit({
   legacyHeaders: false,
 });
 
-module.exports = { authLimiter, refreshLimiter, apiLimiter, streamLimiter };
+// "Send me a test notification" (POST /api/notifications/test). Each click
+// saves a notification and sends a push, so it gets a small budget of its own.
+// Counted per member, not per IP: the route runs after `auth`, and members
+// who share an office address must not use up each other's tests.
+const testNotificationLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => `member:${req.user?.id}`,
+  message: { error: "Too many test notifications. Try again later." },
+});
+
+module.exports = {
+  authLimiter,
+  refreshLimiter,
+  apiLimiter,
+  streamLimiter,
+  testNotificationLimiter,
+};

@@ -3,6 +3,7 @@
 const router = require('express').Router();
 
 const { auth } = require('../middleware/auth');
+const { testNotificationLimiter } = require('../middleware/rateLimit');
 
 const notificationController =
   require('../controllers/notificationController');
@@ -20,6 +21,30 @@ router.get(
   '/unread-count',
   auth,
   notificationController.getUnreadCount,
+);
+
+// ============================================================
+// PREFERENCES (per member, per type) + TEST
+// ============================================================
+
+router.get(
+  '/preferences',
+  auth,
+  notificationController.getPreferences,
+);
+
+router.put(
+  '/preferences',
+  auth,
+  notificationController.savePreferences,
+);
+
+// `auth` first: the limiter counts per member.
+router.post(
+  '/test',
+  auth,
+  testNotificationLimiter,
+  notificationController.sendTest,
 );
 
 // ============================================================

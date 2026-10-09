@@ -501,6 +501,10 @@ const initDB = async () => {
   await ensureColumn("notifications", "related_entity_type VARCHAR(50)");
   await ensureColumn("notifications", "metadata JSONB DEFAULT '{}'::jsonb");
   await ensureColumn("notifications", "dedupe_key TEXT");
+  // false = sent as a push only: the row is kept (it carries the dedupe key)
+  // but is not shown in the bell list or counted as unread. Every row saved
+  // before this column existed reads true, so nothing changes for them.
+  await ensureColumn("notifications", "in_app BOOLEAN NOT NULL DEFAULT true");
 
   await pool.query(`
   CREATE TABLE IF NOT EXISTS push_subscriptions (
@@ -517,6 +521,40 @@ const initDB = async () => {
   // removed when that session is revoked. Nullable: rows saved before this
   // column existed have none.
   await ensureColumn("push_subscriptions", "session_id UUID");
+
+  // -------------------------------------------------------------------
+  // Notification preferences (Account settings -> Notifications).
+  //
+  // A member with no row in either table gets exactly the behaviour from
+  // before these tables existed: every type on, push + in-app, reminders at
+  // DEADLINE_REMINDER_HOUR, weekends included. A row is only written when
+  // the member saves the card.
+  //
+  // member_notification_prefs: one row per member.
+  //   reminder_hour NULL = use DEADLINE_REMINDER_HOUR.
+  // member_notification_type_prefs: one row per member and type key
+  //   (server/utils/notificationTypes.js).
+  //   delivery: 'both' | 'push' | 'in_app'.
+  // -------------------------------------------------------------------
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS member_notification_prefs (
+      member_id ${refType(memberIdType)} PRIMARY KEY REFERENCES members(id) ON DELETE CASCADE,
+      pause_all BOOLEAN NOT NULL DEFAULT false,
+      reminder_hour SMALLINT CHECK (reminder_hour BETWEEN 0 AND 23),
+      skip_weekends BOOLEAN NOT NULL DEFAULT false,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS member_notification_type_prefs (
+      member_id ${refType(memberIdType)} NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+      type TEXT NOT NULL,
+      enabled BOOLEAN NOT NULL DEFAULT true,
+      delivery TEXT NOT NULL DEFAULT 'both' CHECK (delivery IN ('both', 'push', 'in_app')),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (member_id, type)
+    )
+  `);
 
   await pool.query(`
     CREATE UNIQUE INDEX IF NOT EXISTS idx_notifications_member_dedupe

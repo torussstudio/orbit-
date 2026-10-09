@@ -44,6 +44,7 @@ const ICON_PATHS = {
   camera: (<><path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z" /><circle cx="12" cy="13" r="4" /></>),
   monitor: (<><rect x="3" y="4" width="18" height="12" rx="2" /><path d="M8 20h8M12 16v4" /></>),
   mobile: (<><rect x="7" y="3" width="10" height="18" rx="2" /><path d="M11 18h2" /></>),
+  bell: (<><path d="M18 8a6 6 0 10-12 0c0 7-3 9-3 9h18s-3-2-3-9" /><path d="M13.7 21a2 2 0 01-3.4 0" /></>),
 };
 
 function Icon({ name, className = 'h-4 w-4' }) {
@@ -315,9 +316,456 @@ const SECTION_LINKS = [
   { id: 'personal', label: 'Personal' },
   { id: 'contact', label: 'Contact' },
   { id: 'security', label: 'Security' },
-  { id: 'sessions', label: 'Sessions' },
+  { id: 'notifications', label: 'Notifications' },
+  { id: 'sessions', label: 'Active sessions' },
   { id: 'danger', label: 'Danger zone', danger: true },
 ];
+
+// ── Notifications ────────────────────────────────────────────
+// What Orbit tells the member about, and how. Its own card outside the main
+// form, with its own Save button: saving here never sends the profile form
+// and never asks for the current password. The list of types, their groups
+// and labels come from the server (GET /notifications/preferences), so the
+// card shows exactly the types this member can receive.
+
+const DELIVERY_OPTIONS = [
+  { value: 'both', label: 'Push + in-app' },
+  { value: 'push', label: 'Push only' },
+  { value: 'in_app', label: 'In-app only' },
+];
+
+const HOURS = Array.from({ length: 24 }, (_, hour) => hour);
+
+const DAY_SHORT = { mon: 'Mon', tue: 'Tue', wed: 'Wed', thu: 'Thu', fri: 'Fri', sat: 'Sat', sun: 'Sun' };
+
+// The label and hint of the "skip days off" switch. Which days are off is a
+// server setting (REMINDER_OFF_DAYS), sent as off_days in week order, e.g.
+// ["sun"] or ["sat", "sun"].
+function offDaysText(offDays) {
+  const days = Array.isArray(offDays) && offDays.length > 0 ? offDays : ['sun'];
+  const key = days.join(',');
+
+  if (key === 'sun') {
+    return {
+      label: 'Skip Sundays',
+      hint: 'Nothing on Sunday. Those reminders move to Saturday and Monday.',
+    };
+  }
+
+  if (key === 'sat,sun') {
+    return {
+      label: 'Skip weekends',
+      hint: 'Nothing on Saturday or Sunday. Those reminders move to Friday and Monday.',
+    };
+  }
+
+  const list = days.map((day) => DAY_SHORT[day] || day).join(', ');
+  return {
+    label: `Skip days off (${list})`,
+    hint: `Nothing on days off (${list}). Those reminders move to the working days before and after.`,
+  };
+}
+
+// What the Save button sends, and what "anything changed?" compares.
+function preferencesPayload(prefs) {
+  return {
+    pause_all: prefs.pause_all,
+    reminder_hour: prefs.reminder_hour,
+    skip_weekends: prefs.skip_weekends,
+    types: prefs.types.map(({ type, enabled, delivery }) => ({ type, enabled, delivery })),
+  };
+}
+
+// Whether THIS browser can get push notifications right now.
+async function readPushStatus() {
+  if (
+    typeof window === 'undefined' ||
+    !('serviceWorker' in navigator) ||
+    !('PushManager' in window) ||
+    !('Notification' in window)
+  ) {
+    return { supported: false, permission: 'default', subscribed: false };
+  }
+
+  let subscribed = false;
+  try {
+    const registration = await navigator.serviceWorker.getRegistration('/');
+    subscribed = Boolean(await registration?.pushManager.getSubscription());
+  } catch {
+    subscribed = false;
+  }
+
+  return { supported: true, permission: Notification.permission, subscribed };
+}
+
+function Toggle({ checked, onChange, disabled = false, label }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={label}
+      disabled={disabled}
+      onClick={() => onChange(!checked)}
+      className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full border transition-colors duration-200 disabled:cursor-not-allowed disabled:opacity-60 ${
+        checked
+          ? 'border-[color:var(--accent)] bg-[var(--accent)]'
+          : 'border-[color:var(--border)] bg-[var(--bg-4)]'
+      } ${FOCUS_RING}`}
+    >
+      {/* On: the knob takes the card's background colour, so it stands out
+          on the accent track in both themes (white on indigo in the light
+          theme, dark on the light grey accent of the dark theme). Off keeps
+          the white knob. */}
+      <span
+        aria-hidden="true"
+        className={`inline-block h-[18px] w-[18px] rounded-full shadow transition-[transform,background-color] duration-200 ${
+          checked ? 'translate-x-[22px] bg-[var(--bg-2)]' : 'translate-x-[2px] bg-white'
+        }`}
+      />
+    </button>
+  );
+}
+
+// Three-way choice of how one type is delivered.
+function DeliveryControl({ value, onChange, disabled = false, label }) {
+  return (
+    <div
+      role="radiogroup"
+      aria-label={`How to get: ${label}`}
+      className={`grid w-full grid-cols-3 gap-1 rounded-lg border border-[color:var(--border)] bg-[var(--bg-3)] p-1 sm:w-[300px] sm:shrink-0 ${
+        disabled ? 'opacity-60' : ''
+      }`}
+    >
+      {DELIVERY_OPTIONS.map((option) => {
+        const selected = value === option.value;
+        return (
+          <button
+            key={option.value}
+            type="button"
+            role="radio"
+            aria-checked={selected}
+            disabled={disabled}
+            onClick={() => onChange(option.value)}
+            className={`rounded-md px-1.5 py-1.5 text-center text-[11px] font-semibold leading-tight transition duration-200 disabled:cursor-not-allowed ${
+              selected
+                ? 'bg-[var(--accent)] text-white'
+                : 'text-[color:var(--text-2)] hover:text-[color:var(--text)]'
+            } ${FOCUS_RING}`}
+          >
+            {option.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function NotificationsCard() {
+  const [prefs, setPrefs] = useState(null);
+  // The last saved state, to know whether there is anything to save.
+  const [savedSnapshot, setSavedSnapshot] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [saveMsg, setSaveMsg] = useState(null);
+  const [testing, setTesting] = useState(false);
+  const [testMsg, setTestMsg] = useState(null);
+  const [push, setPush] = useState(null);
+  const [pushBusy, setPushBusy] = useState(false);
+
+  const accept = (data) => {
+    setPrefs(data);
+    setSavedSnapshot(JSON.stringify(preferencesPayload(data)));
+  };
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setLoadError('');
+    try {
+      const { data } = await api.get('/notifications/preferences');
+      accept(data);
+    } catch (err) {
+      setLoadError(err.response?.data?.error || "We couldn't load your notification settings.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    load();
+    readPushStatus().then(setPush);
+  }, [load]);
+
+  const setGeneral = (patch) => {
+    setSaveMsg(null);
+    setPrefs((current) => ({ ...current, ...patch }));
+  };
+
+  const setType = (key, patch) => {
+    setSaveMsg(null);
+    setPrefs((current) => ({
+      ...current,
+      types: current.types.map((row) => (row.type === key ? { ...row, ...patch } : row)),
+    }));
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    setSaveMsg(null);
+    try {
+      const { data } = await api.put('/notifications/preferences', preferencesPayload(prefs));
+      accept(data);
+      setSaveMsg({ type: 'success', text: 'Notification settings saved.' });
+      setTimeout(() => setSaveMsg(null), 4000);
+    } catch (err) {
+      setSaveMsg({ type: 'error', text: err.response?.data?.error || "We couldn't save your notification settings." });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleTest = async () => {
+    setTesting(true);
+    setTestMsg(null);
+    try {
+      const { data } = await api.post('/notifications/test');
+      const devices = Number(data?.push_devices) || 0;
+      setTestMsg({
+        type: 'success',
+        text: devices > 0
+          ? `Test sent to the bell and, by push, to ${devices} device${devices === 1 ? '' : 's'}.`
+          : 'Test sent to the bell. No browser is subscribed to push for your account yet.',
+      });
+      // The bell reloads on this event.
+      window.dispatchEvent(new Event('orbit:notifications-updated'));
+    } catch (err) {
+      setTestMsg({ type: 'error', text: err.response?.data?.error || "We couldn't send the test notification. Please try again." });
+    } finally {
+      setTesting(false);
+      setTimeout(() => setTestMsg(null), 6000);
+    }
+  };
+
+  const enablePush = async () => {
+    setPushBusy(true);
+    try {
+      // Asked right here, inside the click: browsers only show the permission
+      // prompt as a direct answer to something the member did.
+      if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
+        await Notification.requestPermission();
+      }
+      // The rest (service worker, subscribe, save) is the app's one subscribe
+      // flow, which lives in the notification bell.
+      await new Promise((resolve) => {
+        const timer = setTimeout(resolve, 15000);
+        window.dispatchEvent(
+          new CustomEvent('orbit:enable-push', {
+            detail: { done: () => { clearTimeout(timer); resolve(); } },
+          }),
+        );
+      });
+    } catch {
+      // The status line below shows what the browser ended up with.
+    } finally {
+      setPush(await readPushStatus());
+      setPushBusy(false);
+    }
+  };
+
+  const paused = Boolean(prefs?.pause_all);
+  const dirty = prefs ? JSON.stringify(preferencesPayload(prefs)) !== savedSnapshot : false;
+  const pushReady = Boolean(push?.supported && push.permission === 'granted' && push.subscribed);
+  const hasPushOnly = Boolean(prefs?.types.some((row) => row.enabled && row.delivery === 'push'));
+  const offDays = offDaysText(prefs?.off_days);
+
+  let pushText = 'Checking…';
+  if (push) {
+    if (!push.supported) pushText = 'This browser does not support push notifications.';
+    else if (push.permission === 'denied') pushText = "Blocked in this browser's settings. Allow notifications for Orbit there to turn push on.";
+    else if (pushReady) pushText = 'On. This browser gets push notifications.';
+    else pushText = 'Not enabled in this browser.';
+  }
+
+  return (
+    <Section
+      id="notifications"
+      icon="bell"
+      title="Notifications"
+      description="Choose what Orbit tells you about, and how."
+    >
+      <div className="sm:col-span-2">
+        {loading ? (
+          <div aria-label="Loading notification settings">
+            <LoadingSkeleton lines={4} />
+          </div>
+        ) : loadError || !prefs ? (
+          <div role="alert" className="flex flex-col items-start gap-3 text-xs font-medium text-[color:var(--danger)]">
+            <span>✕ {loadError || "We couldn't load your notification settings."}</span>
+            <button type="button" onClick={load} className={`${BTN_NEUTRAL} ${FOCUS_RING}`}>
+              Try again
+            </button>
+          </div>
+        ) : (
+          <div className="flex flex-col gap-5">
+
+            {/* Pause all */}
+            <div className="flex items-center justify-between gap-4 rounded-xl border border-[color:var(--border)] bg-[var(--bg-3)] p-3.5">
+              <div className="min-w-0">
+                <div className="text-[13px] font-semibold text-[color:var(--text)]">Pause all notifications</div>
+                <p className="mt-0.5 text-xs text-[color:var(--text-3)]">Security alerts are always sent.</p>
+              </div>
+              <Toggle
+                checked={paused}
+                onChange={(value) => setGeneral({ pause_all: value })}
+                label="Pause all notifications"
+              />
+            </div>
+
+            {/* Types, grouped as the server sends them */}
+            {prefs.groups.map((group) => {
+              const rows = prefs.types.filter((row) => row.group === group.id);
+              if (rows.length === 0) return null;
+              // Paused: everything is dimmed and locked except the security
+              // alerts, which are still sent.
+              const locked = paused && group.id !== 'security';
+
+              return (
+                <div key={group.id} className={locked ? 'opacity-50' : ''}>
+                  <h3 className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-[color:var(--text-3)]">
+                    {group.label}
+                  </h3>
+                  <ul className="divide-y divide-[color:var(--border)]">
+                    {rows.map((row) => (
+                      <li key={row.type} className="flex flex-col gap-2.5 py-3 sm:flex-row sm:items-center sm:gap-4">
+                        <div className="flex min-w-0 flex-1 items-center justify-between gap-3">
+                          <span className="break-words text-[13px] font-medium text-[color:var(--text)]">{row.label}</span>
+                          {row.can_disable ? (
+                            <Toggle
+                              checked={row.enabled}
+                              onChange={(value) => setType(row.type, { enabled: value })}
+                              disabled={locked}
+                              label={row.label}
+                            />
+                          ) : (
+                            <span className="shrink-0 rounded-md bg-[var(--bg-3)] px-2 py-0.5 text-[11px] font-medium text-[color:var(--text-2)]">
+                              Always on
+                            </span>
+                          )}
+                        </div>
+                        <DeliveryControl
+                          value={row.delivery}
+                          onChange={(value) => setType(row.type, { delivery: value })}
+                          disabled={locked || !row.enabled}
+                          label={row.label}
+                        />
+                      </li>
+                    ))}
+                  </ul>
+
+                  {group.id === 'reminders' && (
+                    <div className="mt-2 grid grid-cols-1 gap-x-4 gap-y-3 sm:grid-cols-2">
+                      <Field label="Reminder time (IST)" htmlFor="notifications-reminder-hour">
+                        <select
+                          id="notifications-reminder-hour"
+                          className={inputClass()}
+                          disabled={locked}
+                          value={prefs.reminder_hour === null ? '' : String(prefs.reminder_hour)}
+                          onChange={(e) => setGeneral({ reminder_hour: e.target.value === '' ? null : Number(e.target.value) })}
+                        >
+                          <option value="">Default ({prefs.default_reminder_hour}:00)</option>
+                          {HOURS.map((hour) => (
+                            <option key={hour} value={hour}>{String(hour).padStart(2, '0')}:00</option>
+                          ))}
+                        </select>
+                      </Field>
+                      <div className="flex items-center justify-between gap-3 sm:items-end sm:pb-2">
+                        <div className="min-w-0">
+                          <div className="text-[13px] font-medium text-[color:var(--text)]">{offDays.label}</div>
+                          <p className="mt-0.5 text-[11px] text-[color:var(--text-3)]">{offDays.hint}</p>
+                        </div>
+                        <Toggle
+                          checked={prefs.skip_weekends}
+                          onChange={(value) => setGeneral({ skip_weekends: value })}
+                          disabled={locked}
+                          label={offDays.label}
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+
+            {/* This browser's push status */}
+            <div className="rounded-xl border border-[color:var(--border)] bg-[var(--bg-3)] p-3.5">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="min-w-0">
+                  <div className="text-[13px] font-semibold text-[color:var(--text)]">Push on this device</div>
+                  <p className="mt-0.5 text-xs text-[color:var(--text-3)]">{pushText}</p>
+                </div>
+                {push?.supported && push.permission !== 'denied' && !pushReady && (
+                  <button
+                    type="button"
+                    onClick={enablePush}
+                    disabled={pushBusy}
+                    className={`${BTN_NEUTRAL} flex shrink-0 items-center gap-1.5 self-start sm:self-center ${FOCUS_RING}`}
+                  >
+                    {pushBusy ? <Loader label="Enabling..." size="sm" variant="button" /> : 'Enable push on this device'}
+                  </button>
+                )}
+              </div>
+              {hasPushOnly && push && !pushReady && (
+                <p className="mt-2.5 text-xs font-medium text-[color:var(--warning)]">
+                  Some types are set to Push only, but push is not enabled in this browser, so they will not reach you here.
+                </p>
+              )}
+            </div>
+
+            {/* Test + Save */}
+            <div className="flex flex-col gap-3 border-t border-[color:var(--border)] pt-4 sm:flex-row sm:items-center sm:justify-between">
+              <button
+                type="button"
+                onClick={handleTest}
+                disabled={testing}
+                className={`${BTN_NEUTRAL} flex items-center gap-1.5 self-start ${FOCUS_RING}`}
+              >
+                {testing ? <Loader label="Sending..." size="sm" variant="button" /> : 'Send me a test notification'}
+              </button>
+              <div className="flex items-center gap-3 self-end sm:self-auto">
+                {dirty && !saveMsg && (
+                  <span className="text-xs text-[color:var(--text-3)]">Unsaved changes</span>
+                )}
+                <button
+                  type="button"
+                  onClick={handleSave}
+                  disabled={saving || !dirty}
+                  className={`flex items-center gap-1.5 rounded-lg bg-[var(--accent)] px-5 py-2.5 text-[13px] font-semibold text-white transition duration-200 hover:brightness-110 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-70 ${FOCUS_RING}`}
+                >
+                  {saving ? <Loader label="Saving..." size="sm" variant="button" /> : 'Save notification settings'}
+                </button>
+              </div>
+            </div>
+
+            {[testMsg, saveMsg].filter(Boolean).map((message) => (
+              <div
+                key={message.text}
+                role={message.type === 'error' ? 'alert' : 'status'}
+                className={`-mt-2 flex items-center gap-1.5 text-xs font-medium ${
+                  message.type === 'success'
+                    ? 'text-[color:var(--success)]'
+                    : 'text-[color:var(--danger)]'
+                }`}
+              >
+                {message.type === 'success' ? '✓' : '✕'} {message.text}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </Section>
+  );
+}
 
 // ── Active sessions ──────────────────────────────────────────
 // Where the member is signed in. The server groups browser tabs of the same
@@ -1266,6 +1714,9 @@ export default function AccountSettings() {
               </button>
             </div>
           </form>
+
+          {/* ── Notifications ── outside the form: it has its own Save button */}
+          <NotificationsCard />
 
           {/* ── Active sessions ── outside the form: it has its own actions */}
           <SessionsCard reloadKey={sessionsReloadKey} />

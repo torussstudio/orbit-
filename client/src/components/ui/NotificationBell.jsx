@@ -402,6 +402,20 @@ const setupPush = useCallback(async () => {
   }
 }, [user]);
 
+  // ── "Enable push on this device" (Account settings) ────────────
+  // The Notifications card asks for the same set-up that runs after login,
+  // so there is one subscribe flow in the app. `done` tells the card it can
+  // read this browser's push status again.
+  useEffect(() => {
+    const onEnablePush = (event) => {
+      setupPush()
+        .catch(() => {})
+        .finally(() => event.detail?.done?.());
+    };
+    window.addEventListener('orbit:enable-push', onEnablePush);
+    return () => window.removeEventListener('orbit:enable-push', onEnablePush);
+  }, [setupPush]);
+
   // ── Handle SW → app "subscription changed" message ─────────────
   useEffect(() => {
     const handleMessage = async (event) => {

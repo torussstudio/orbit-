@@ -44,6 +44,13 @@ function normalizeNotification(row) {
 // ============================================================
 // GET NOTIFICATIONS
 // ============================================================
+//
+// The bell only ever shows rows with in_app = true. A notification the
+// member chose to get as "push only" is saved with in_app = false (the row
+// carries the dedupe key) and is left out of the list and the unread count.
+// Those rows are saved as already read, so "mark all read" has nothing to
+// do for them, and they cannot be opened or deleted from the bell because
+// the bell never learns their id.
 
 async function getNotifications(userId) {
   if (!userId) {
@@ -66,6 +73,7 @@ async function getNotifications(userId) {
       created_at
     FROM notifications
     WHERE member_id = $1
+      AND in_app = true
     ORDER BY created_at DESC
     LIMIT 50
     `,
@@ -90,6 +98,7 @@ async function getUnreadCount(userId) {
     FROM notifications
     WHERE member_id = $1
       AND read = false
+      AND in_app = true
     `,
     [userId],
   );

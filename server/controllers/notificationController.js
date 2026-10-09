@@ -1,6 +1,7 @@
 'use strict';
 
 const notificationService = require('../services/notificationService');
+const notificationPrefsService = require('../services/notificationPrefsService');
 
 // ============================================================
 // GET NOTIFICATIONS
@@ -234,6 +235,58 @@ function getVapidPublicKey(req, res) {
   });
 }
 
+// ============================================================
+// PREFERENCES (the member's own, never another member's)
+// ============================================================
+
+async function getPreferences(req, res, next) {
+  try {
+    const preferences =
+      await notificationPrefsService.getPreferences(
+        req.user.id,
+        req.user.role,
+      );
+
+    return res.json(preferences);
+  } catch (err) {
+    return next(err);
+  }
+}
+
+// 400 for anything invalid: an unknown type, a security alert sent as
+// turned off, a bad hour. Nothing is saved in that case.
+async function savePreferences(req, res, next) {
+  try {
+    const preferences =
+      await notificationPrefsService.savePreferences(
+        req.user.id,
+        req.user.role,
+        req.body,
+      );
+
+    return res.json(preferences);
+  } catch (err) {
+    return next(err);
+  }
+}
+
+// ============================================================
+// TEST NOTIFICATION
+// ============================================================
+
+async function sendTest(req, res, next) {
+  try {
+    const result =
+      await notificationPrefsService.sendTestNotification(
+        req.user.id,
+      );
+
+    return res.json(result);
+  } catch (err) {
+    return next(err);
+  }
+}
+
 module.exports = {
   getNotifications,
   getUnreadCount,
@@ -243,4 +296,7 @@ module.exports = {
   pushSubscribe,
   pushUnsubscribe,
   getVapidPublicKey,
+  getPreferences,
+  savePreferences,
+  sendTest,
 };

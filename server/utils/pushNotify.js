@@ -3,6 +3,7 @@
 const db = require('../db');
 const webpush = require('web-push');
 const liveEvents = require('../services/liveEvents');
+const { prefKey, isSecurity } = require('./notificationTypes');
 
 // ── VAPID setup ──────────────────────────────────────────────────
 // web-push was already a dependency in package.json but nothing ever
@@ -23,6 +24,11 @@ if (process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY) {
   console.warn(
     '[pushNotify] VAPID_PUBLIC_KEY/VAPID_PRIVATE_KEY not set — push notifications will be saved in-app only, not delivered to the browser.',
   );
+}
+
+// True when this server can send browser pushes at all.
+function isPushConfigured() {
+  return vapidConfigured;
 }
 
 // Sends the actual browser push to every device this member is
@@ -74,19 +80,114 @@ async function deliverPush(userId, title, body, data = {}) {
   );
 }
 
-// Save notification row to DB (for the in-app bell list) AND deliver a
-// real browser push to every device the member is subscribed on.
-async function createNotification(userId, title, body, data = {}) {
+// ── Notification preferences ─────────────────────────────────────
+// Each member can pause everything, switch a type off, or choose how a type
+// reaches them (Account settings -> Notifications). A member who never saved
+// the card has no rows and gets what everyone got before: everything, as
+// push + in-app.
+
+// As before preferences existed: saved for the bell and pushed.
+const SEND_BOTH = { send: true, inApp: true, push: true };
+const SEND_NOTHING = { send: false, inApp: false, push: false };
+const IN_APP_ONLY = { send: true, inApp: true, push: false };
+const PUSH_ONLY = { send: true, inApp: false, push: true };
+
+// One query: the member's pause switch, this type's row, and whether the
+// member has any push subscription (needed for "push only").
+async function readPrefs(userId, type) {
+  const { rows } = await db.query(
+    `SELECT
+       COALESCE(p.pause_all, false) AS pause_all,
+       COALESCE(t.enabled, true) AS enabled,
+       COALESCE(t.delivery, 'both') AS delivery,
+       EXISTS (
+         SELECT 1 FROM push_subscriptions s WHERE s.member_id = m.id
+       ) AS has_push
+     FROM members m
+     LEFT JOIN member_notification_prefs p ON p.member_id = m.id
+     LEFT JOIN member_notification_type_prefs t
+            ON t.member_id = m.id AND t.type = $2
+     WHERE m.id = $1`,
+    [userId, prefKey(type)],
+  );
+
+  return rows[0] || null;
+}
+
+/*
+ * What to do with one notification of this type for a member with these
+ * preferences (a row from readPrefs, or null when there is none).
+ *
+ *   send   false = save nothing, send nothing
+ *   inApp  the row shows in the bell list (and the live bell event is sent)
+ *   push   a browser push is sent
+ *
+ * - Security alerts ignore "Pause all" and the off switch; only their
+ *   delivery can be chosen.
+ * - "Push only" needs somewhere to push to. A member with no push
+ *   subscription (or a server without VAPID keys) gets it in the bell
+ *   instead, so the notification is never lost.
+ */
+function decideDelivery(type, prefs, pushConfigured = vapidConfigured) {
+  if (!prefs) return SEND_BOTH;
+
+  if (!isSecurity(type) && (prefs.pause_all || prefs.enabled === false)) {
+    return SEND_NOTHING;
+  }
+
+  if (prefs.delivery === 'in_app') return IN_APP_ONLY;
+
+  if (prefs.delivery === 'push') {
+    return pushConfigured && prefs.has_push ? PUSH_ONLY : IN_APP_ONLY;
+  }
+
+  return SEND_BOTH;
+}
+
+// The member's preferences must never be the reason a notification is lost:
+// if they cannot be read, it is sent the way everything was sent before.
+async function deliveryFor(userId, type, options) {
+  if (options.ignorePrefs) return SEND_BOTH;
+
   try {
+    return decideDelivery(type, await readPrefs(userId, type));
+  } catch (err) {
+    console.error(
+      '[pushNotify] reading notification preferences failed, sending as push + in-app:',
+      err.message,
+    );
+    return SEND_BOTH;
+  }
+}
+
+// Save notification row to DB (for the in-app bell list) AND deliver a
+// real browser push to every device the member is subscribed on, as far as
+// the member's notification preferences for this type allow.
+//
+// options.ignorePrefs: send as push + in-app whatever the member's
+// preferences say (only the "Send me a test notification" button).
+//
+// Returns the notification row, or null when nothing was saved (the member
+// paused notifications or switched this type off, or the save failed).
+async function createNotification(userId, title, body, data = {}, options = {}) {
+  try {
+    const type = data.type || "general";
+    const delivery = await deliveryFor(userId, type, options);
+
+    if (!delivery.send) return null;
+
     const message = body ? `${title}: ${body}` : title;
     const metadata = { ...data };
     const dedupeKey = metadata.eventKey || null;
     delete metadata.eventKey;
+    // A push-only row is saved because it carries the dedupe key. It is
+    // hidden from the bell (in_app = false) and saved as already read, so
+    // it can never count towards the unread badge.
     const { rows } = await db.query(
       `INSERT INTO notifications
          (member_id, message, type, title, body, related_entity_id,
-          related_entity_type, metadata, dedupe_key)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+          related_entity_type, metadata, dedupe_key, in_app, read)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
        ON CONFLICT (member_id, dedupe_key) WHERE dedupe_key IS NOT NULL
        DO NOTHING
        RETURNING id, member_id, type, title, body, message, related_entity_id,
@@ -94,13 +195,15 @@ async function createNotification(userId, title, body, data = {}) {
       [
         userId,
         message,
-        data.type || "general",
+        type,
         title,
         body || null,
         data.entityId == null ? null : String(data.entityId),
         data.entityType || null,
         JSON.stringify(metadata),
         dedupeKey,
+        delivery.inApp,
+        !delivery.inApp,
       ],
     );
 
@@ -117,14 +220,15 @@ async function createNotification(userId, title, body, data = {}) {
     if (!notification) return null;
 
     // Live update for the bell: sent once the row is saved, so the member's
-    // refetch always finds it. Does nothing when live events are off.
-    if (created) {
+    // refetch always finds it. Does nothing when live events are off. Not
+    // sent for a push-only row: the bell has nothing new to show.
+    if (created && delivery.inApp) {
       liveEvents.notificationCreated(userId);
     }
 
     // Fire-and-forget: don't let a push delivery failure block the
     // in-app notification from being saved/returned.
-    if (created) {
+    if (created && delivery.push) {
       deliverPush(userId, title, body, metadata).catch((err) => {
         console.error('[pushNotify] deliverPush failed:', err.message);
       });
@@ -137,7 +241,8 @@ async function createNotification(userId, title, body, data = {}) {
   }
 }
 
-// Send to many users at once (daily reminders)
+// Send to many users at once (daily reminders). Each member's own
+// preferences apply, because each goes through createNotification.
 async function sendToMany(userIds, title, body, data = {}) {
   if (!userIds || !userIds.length) return;
   const BATCH = 10;
@@ -147,4 +252,9 @@ async function sendToMany(userIds, title, body, data = {}) {
   }
 }
 
-module.exports = { createNotification, sendToMany };
+module.exports = {
+  createNotification,
+  sendToMany,
+  decideDelivery,
+  isPushConfigured,
+};
