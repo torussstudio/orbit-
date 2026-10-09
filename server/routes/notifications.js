@@ -3,7 +3,6 @@
 const router = require('express').Router();
 
 const { auth } = require('../middleware/auth');
-const { testNotificationLimiter } = require('../middleware/rateLimit');
 
 const notificationController =
   require('../controllers/notificationController');
@@ -24,7 +23,7 @@ router.get(
 );
 
 // ============================================================
-// PREFERENCES (per member, per type) + TEST
+// PREFERENCES (per member, per type)
 // ============================================================
 
 router.get(
@@ -37,14 +36,6 @@ router.put(
   '/preferences',
   auth,
   notificationController.savePreferences,
-);
-
-// `auth` first: the limiter counts per member.
-router.post(
-  '/test',
-  auth,
-  testNotificationLimiter,
-  notificationController.sendTest,
 );
 
 // ============================================================

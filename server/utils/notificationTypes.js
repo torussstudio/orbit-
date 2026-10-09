@@ -67,7 +67,7 @@ function prefKey(type) {
 }
 
 // The registered type for a notification's `type`, or null (unknown types,
-// 'general', the test notification).
+// 'general').
 function findType(type) {
   return byKey.get(prefKey(type)) || null;
 }

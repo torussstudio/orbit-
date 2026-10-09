@@ -1,9 +1,7 @@
 'use strict';
 
-const crypto = require('crypto');
 const db = require('../db');
 const { GROUPS, DELIVERIES, typesFor } = require('../utils/notificationTypes');
-const { createNotification, isPushConfigured } = require('../utils/pushNotify');
 const {
   readSettings: readReminderSettings,
   readOffDays,
@@ -236,52 +234,7 @@ async function savePreferences(userId, role, body) {
   return getPreferences(userId, role);
 }
 
-// ============================================================
-// TEST NOTIFICATION
-// ============================================================
-
-/*
- * "Send me a test notification". Always sent, as push + in-app: it ignores
- * "Pause all" and the type switches, because its job is to show whether
- * notifications reach this member at all. The dedupe key is unique, so every
- * click sends a new one (the route is rate-limited).
- *
- * push_devices: how many browsers of the member a push was sent to. 0 means
- * it only went to the bell.
- */
-async function sendTestNotification(userId) {
-  const notification = await createNotification(
-    userId,
-    '🔔 Test notification',
-    'Notifications are working. This is how they reach you.',
-    {
-      type: 'test',
-      eventKey: `test:${userId}:${Date.now()}-${crypto.randomBytes(4).toString('hex')}`,
-      url: '/account-settings',
-    },
-    { ignorePrefs: true },
-  );
-
-  if (!notification) {
-    const err = new Error('The test notification could not be sent. Please try again.');
-    err.status = 500;
-    err.expose = true;
-    throw err;
-  }
-
-  const { rows } = await db.query(
-    `SELECT COUNT(*)::int AS n FROM push_subscriptions WHERE member_id = $1`,
-    [userId],
-  );
-
-  return {
-    success: true,
-    push_devices: isPushConfigured() ? rows[0].n : 0,
-  };
-}
-
 module.exports = {
   getPreferences,
   savePreferences,
-  sendTestNotification,
 };

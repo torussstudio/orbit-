@@ -26,11 +26,6 @@ if (process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY) {
   );
 }
 
-// True when this server can send browser pushes at all.
-function isPushConfigured() {
-  return vapidConfigured;
-}
-
 // Sends the actual browser push to every device this member is
 // subscribed on. Matches the payload shape client/public/sw.js expects:
 // { title, body, icon, badge, data }.
@@ -146,9 +141,7 @@ function decideDelivery(type, prefs, pushConfigured = vapidConfigured) {
 
 // The member's preferences must never be the reason a notification is lost:
 // if they cannot be read, it is sent the way everything was sent before.
-async function deliveryFor(userId, type, options) {
-  if (options.ignorePrefs) return SEND_BOTH;
-
+async function deliveryFor(userId, type) {
   try {
     return decideDelivery(type, await readPrefs(userId, type));
   } catch (err) {
@@ -164,15 +157,12 @@ async function deliveryFor(userId, type, options) {
 // real browser push to every device the member is subscribed on, as far as
 // the member's notification preferences for this type allow.
 //
-// options.ignorePrefs: send as push + in-app whatever the member's
-// preferences say (only the "Send me a test notification" button).
-//
 // Returns the notification row, or null when nothing was saved (the member
 // paused notifications or switched this type off, or the save failed).
-async function createNotification(userId, title, body, data = {}, options = {}) {
+async function createNotification(userId, title, body, data = {}) {
   try {
     const type = data.type || "general";
-    const delivery = await deliveryFor(userId, type, options);
+    const delivery = await deliveryFor(userId, type);
 
     if (!delivery.send) return null;
 
@@ -256,5 +246,4 @@ module.exports = {
   createNotification,
   sendToMany,
   decideDelivery,
-  isPushConfigured,
 };

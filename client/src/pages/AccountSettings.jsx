@@ -469,8 +469,6 @@ function NotificationsCard() {
   const [loadError, setLoadError] = useState('');
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState(null);
-  const [testing, setTesting] = useState(false);
-  const [testMsg, setTestMsg] = useState(null);
   const [push, setPush] = useState(null);
   const [pushBusy, setPushBusy] = useState(false);
 
@@ -522,28 +520,6 @@ function NotificationsCard() {
       setSaveMsg({ type: 'error', text: err.response?.data?.error || "We couldn't save your notification settings." });
     } finally {
       setSaving(false);
-    }
-  };
-
-  const handleTest = async () => {
-    setTesting(true);
-    setTestMsg(null);
-    try {
-      const { data } = await api.post('/notifications/test');
-      const devices = Number(data?.push_devices) || 0;
-      setTestMsg({
-        type: 'success',
-        text: devices > 0
-          ? `Test sent to the bell and, by push, to ${devices} device${devices === 1 ? '' : 's'}.`
-          : 'Test sent to the bell. No browser is subscribed to push for your account yet.',
-      });
-      // The bell reloads on this event.
-      window.dispatchEvent(new Event('orbit:notifications-updated'));
-    } catch (err) {
-      setTestMsg({ type: 'error', text: err.response?.data?.error || "We couldn't send the test notification. Please try again." });
-    } finally {
-      setTesting(false);
-      setTimeout(() => setTestMsg(null), 6000);
     }
   };
 
@@ -722,44 +698,33 @@ function NotificationsCard() {
               )}
             </div>
 
-            {/* Test + Save */}
-            <div className="flex flex-col gap-3 border-t border-[color:var(--border)] pt-4 sm:flex-row sm:items-center sm:justify-between">
+            {/* Save row: message on the left, button on the right, like the
+                main form's save bar */}
+            <div className="flex items-center gap-3 border-t border-[color:var(--border)] pt-4">
+              {saveMsg && (
+                <div
+                  role={saveMsg.type === 'error' ? 'alert' : 'status'}
+                  className={`flex items-center gap-1.5 text-xs font-medium ${
+                    saveMsg.type === 'success'
+                      ? 'text-[color:var(--success)]'
+                      : 'text-[color:var(--danger)]'
+                  }`}
+                >
+                  {saveMsg.type === 'success' ? '✓' : '✕'} {saveMsg.text}
+                </div>
+              )}
+              {dirty && !saveMsg && (
+                <span className="text-xs text-[color:var(--text-3)]">Unsaved changes</span>
+              )}
               <button
                 type="button"
-                onClick={handleTest}
-                disabled={testing}
-                className={`${BTN_NEUTRAL} flex items-center gap-1.5 self-start ${FOCUS_RING}`}
+                onClick={handleSave}
+                disabled={saving || !dirty}
+                className={`ml-auto flex shrink-0 items-center gap-1.5 rounded-lg bg-[var(--accent)] px-5 py-2.5 text-[13px] font-semibold text-white transition duration-200 hover:brightness-110 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-70 ${FOCUS_RING}`}
               >
-                {testing ? <Loader label="Sending..." size="sm" variant="button" /> : 'Send me a test notification'}
+                {saving ? <Loader label="Saving..." size="sm" variant="button" /> : 'Save notification settings'}
               </button>
-              <div className="flex items-center gap-3 self-end sm:self-auto">
-                {dirty && !saveMsg && (
-                  <span className="text-xs text-[color:var(--text-3)]">Unsaved changes</span>
-                )}
-                <button
-                  type="button"
-                  onClick={handleSave}
-                  disabled={saving || !dirty}
-                  className={`flex items-center gap-1.5 rounded-lg bg-[var(--accent)] px-5 py-2.5 text-[13px] font-semibold text-white transition duration-200 hover:brightness-110 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-70 ${FOCUS_RING}`}
-                >
-                  {saving ? <Loader label="Saving..." size="sm" variant="button" /> : 'Save notification settings'}
-                </button>
-              </div>
             </div>
-
-            {[testMsg, saveMsg].filter(Boolean).map((message) => (
-              <div
-                key={message.text}
-                role={message.type === 'error' ? 'alert' : 'status'}
-                className={`-mt-2 flex items-center gap-1.5 text-xs font-medium ${
-                  message.type === 'success'
-                    ? 'text-[color:var(--success)]'
-                    : 'text-[color:var(--danger)]'
-                }`}
-              >
-                {message.type === 'success' ? '✓' : '✕'} {message.text}
-              </div>
-            ))}
           </div>
         )}
       </div>

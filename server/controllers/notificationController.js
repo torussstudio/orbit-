@@ -270,23 +270,6 @@ async function savePreferences(req, res, next) {
   }
 }
 
-// ============================================================
-// TEST NOTIFICATION
-// ============================================================
-
-async function sendTest(req, res, next) {
-  try {
-    const result =
-      await notificationPrefsService.sendTestNotification(
-        req.user.id,
-      );
-
-    return res.json(result);
-  } catch (err) {
-    return next(err);
-  }
-}
-
 module.exports = {
   getNotifications,
   getUnreadCount,
@@ -298,5 +281,4 @@ module.exports = {
   getVapidPublicKey,
   getPreferences,
   savePreferences,
-  sendTest,
 };
