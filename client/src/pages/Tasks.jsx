@@ -41,6 +41,18 @@ const cx = (...parts) => parts.filter(Boolean).join(" ");
 const isAbort = (e) =>
   e?.code === "ERR_CANCELED" || e?.name === "CanceledError" || e?.name === "AbortError";
 
+// One place decides whether a stage counts as "done".
+// Case/space-insensitive, common synonyms, plus the project's last custom stage.
+const DONE_NAMES = new Set(["done", "completed", "complete", "closed"]);
+const normStage = (s) => String(s ?? "").trim().toLowerCase();
+const makeIsDone = (stages) => {
+  const last = stages?.length ? normStage(stages[stages.length - 1]) : "";
+  return (stage) => {
+    const s = normStage(stage);
+    return !!s && (DONE_NAMES.has(s) || s === last);
+  };
+};
+
 const getMonthKey = (t) => {
   const dateStr = t?.due_date || t?.created_at;
   return dateStr ? dateStr.slice(0, 7) : null;
@@ -186,26 +198,26 @@ function useProjectData(projectId, active) {
     const { signal } = c;
 
     // The first load picks up requests Project Detail already started
-// from the URL id (api/prefetch.js); later task/cluster loads send their own.
-const get = (url) => takePrefetched(url) || api.get(url, { signal });
+    // from the URL id (api/prefetch.js); later task/cluster loads send their own.
+    const get = (url) => takePrefetched(url) || api.get(url, { signal });
 
-// Members are shared across Tasks, Calendar, Task Detail and Members.
-// Reuse the in-memory list when available. Only fetch when the cache is empty.
-const knownMembers = cachedMembers();
+    // Members are shared across Tasks, Calendar, Task Detail and Members.
+    // Reuse the in-memory list when available. Only fetch when the cache is empty.
+    const knownMembers = cachedMembers();
 
-if (knownMembers) {
-  setMembers(knownMembers);
-} else {
-  get("/members")
-    .then((m) => {
-      if (!signal.aborted) {
-        setMembers(rememberMembers(m.data));
-      }
-    })
-    .catch((e) => {
-      if (!isAbort(e)) console.error(e);
-    });
-}
+    if (knownMembers) {
+      setMembers(knownMembers);
+    } else {
+      get("/members")
+        .then((m) => {
+          if (!signal.aborted) {
+            setMembers(rememberMembers(m.data));
+          }
+        })
+        .catch((e) => {
+          if (!isAbort(e)) console.error(e);
+        });
+    }
 
     return Promise.all([
       get(`/tasks/project/${projectId}`),
@@ -261,10 +273,12 @@ function useTaskIndex(tasks) {
 }
 
 // Everything the views need for one month, computed in a single pass.
-// A main task has no stage of its own: it is "Done" only once it has sub tasks
-// and every one of them is Done.
-function useMonthModel(tasks, month) {
+// A main task with sub tasks is "Done" once every sub task is Done; one without
+// sub tasks uses its own stage. Done state (main and sub) is decided here once,
+// so the views just read `done` and hide priority / due date.
+function useMonthModel(tasks, month, stages) {
   return useMemo(() => {
+    const isDone = makeIsDone(stages);
     const main = [];
     const subsByParent = {};
     for (const t of tasks) {
@@ -278,11 +292,24 @@ function useMonthModel(tasks, month) {
     let done = 0;
     let overdue = 0;
     const rows = main.map((task) => {
-      const subtasks = subsByParent[task.id] || EMPTY;
+      const subtasks = (subsByParent[task.id] || EMPTY).map((s) => {
+        const sDone = isDone(s.stage);
+        const sLate = !sDone && isOverdue(s.due_date, s.stage);
+        return {
+          task: s,
+          done: sDone,
+          late: sLate,
+          rel: !sDone && s.due_date ? relativeDue(s.due_date, sLate) : null,
+        };
+      });
       let doneSubs = 0;
-      for (const s of subtasks) if (s.stage === "Done") doneSubs++;
-      const mainDone = subtasks.length > 0 && doneSubs === subtasks.length;
-      const isLate = isOverdue(task.due_date, mainDone ? "Done" : undefined);
+      for (const s of subtasks) if (s.done) doneSubs++;
+      // With sub tasks: done once every sub task is done.
+      // Without sub tasks: use the main task's own stage (set from Task Detail).
+      const mainDone = subtasks.length
+        ? doneSubs === subtasks.length
+        : isDone(task.stage);
+      const isLate = !mainDone && isOverdue(task.due_date, undefined);
       if (subtasks.length) withSubs++;
       if (mainDone) done++;
       if (isLate) overdue++;
@@ -301,7 +328,7 @@ function useMonthModel(tasks, month) {
         overdue,
       },
     };
-  }, [tasks, month]);
+  }, [tasks, month, stages]);
 }
 
 /* ===========================================================================
@@ -536,7 +563,7 @@ export default function Tasks({ project: propProject, active = true }) {
   // Main tasks do not use stages. Stages are still available for SUB TASKS.
   const stages = propProject?.custom_stages || DEFAULT_STAGES;
 
-  const { rows, counts } = useMonthModel(tasks, selectedMonth);
+  const { rows, counts } = useMonthModel(tasks, selectedMonth, stages);
 
   const visibleRows = useMemo(() => {
     if (subFilter === "all") return rows;
@@ -1019,15 +1046,9 @@ const DueCell = memo(function DueCell({ date, late, rel }) {
   );
 });
 
-const SubTaskRow = memo(function SubTaskRow({
-  task: st,
-  projectId,
-  isManager,
-  onEdit,
-  onDelete,
-}) {
-  const late = isOverdue(st.due_date, st.stage);
-  const done = st.stage === "Done";
+// `row` comes from useMonthModel: { task, done, late, rel }.
+const SubTaskRow = memo(function SubTaskRow({ row, projectId, isManager, onEdit, onDelete }) {
+  const { task: st, done, late, rel } = row;
 
   return (
     <tr className={cx(ROW, ROW_SUB, late && ROW_OVERDUE)}>
@@ -1039,21 +1060,15 @@ const SubTaskRow = memo(function SubTaskRow({
         </Link>
       </td>
 
+      {/* Priority hidden once Done */}
       <td>{!done && <span className={`badge badge-${st.priority}`}>{st.priority}</span>}</td>
 
       <td>
-        <span className={`badge badge-${stageClass(st.stage)}`}>{st.stage}</span>
+        <span className={`badge badge-${done ? "done" : stageClass(st.stage)}`}>{st.stage}</span>
       </td>
 
-      <td>
-        {!done && st.due_date && (
-          <DueCell
-            date={st.due_date}
-            late={late}
-            rel={relativeDue(st.due_date, late)}
-          />
-        )}
-      </td>
+      {/* Due date hidden once Done */}
+      <td>{!done && st.due_date && <DueCell date={st.due_date} late={late} rel={rel} />}</td>
 
       {isManager && (
         <td>
@@ -1152,6 +1167,7 @@ const TaskRow = memo(function TaskRow({
         {/* Derived Done badge (same style as sub tasks) */}
         <td>{mainDone && <span className="badge badge-done">Done</span>}</td>
 
+        {/* Due date hidden once Done */}
         <td>
           {!mainDone && t.due_date && <DueCell date={t.due_date} late={overdue} rel={rel} />}
         </td>
@@ -1189,10 +1205,10 @@ const TaskRow = memo(function TaskRow({
 
       {/* SUB TASKS */}
       {isExpanded &&
-        subtasks.map((st) => (
+        subtasks.map((sub) => (
           <SubTaskRow
-            key={st.id}
-            task={st}
+            key={sub.task.id}
+            row={sub}
             projectId={projectId}
             isManager={isManager}
             onEdit={onEdit}

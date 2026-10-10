@@ -385,7 +385,8 @@ const DetailSkeleton = memo(function DetailSkeleton() {
  * ========================================================================= */
 
 const TaskHeader = memo(function TaskHeader({ task, project, projectId, isManager, assigneeLabel }) {
-  const late = task.stage !== "Done" && !!task.due_date && isOverdue(task.due_date);
+  const done = task.stage === "Done";
+  const late = !done && !!task.due_date && isOverdue(task.due_date);
   // Links come from the task payload (project_*_url) so members — who don't
   // load the full project — see them too. Fall back to `project` for managers.
   const projectLinks = useMemo(
@@ -449,7 +450,8 @@ const TaskHeader = memo(function TaskHeader({ task, project, projectId, isManage
             <Avatar name={assigneeLabel} />
             {assigneeLabel}
           </span>
-          {task.due_date && (
+          {/* Due date hidden once Done */}
+          {task.due_date && !done && (
             <span
               className={cx(
                 "tabular-nums",
@@ -465,7 +467,8 @@ const TaskHeader = memo(function TaskHeader({ task, project, projectId, isManage
       </div>
       {!isManager && (
         <div className="flex flex-wrap items-center gap-2">
-          <span className={`badge badge-${task.priority}`}>{task.priority}</span>
+          {/* Priority hidden once Done */}
+          {!done && <span className={`badge badge-${task.priority}`}>{task.priority}</span>}
           <span className={`badge badge-${stageClass(task.stage)}`}>{task.stage}</span>
         </div>
       )}
@@ -477,13 +480,15 @@ const TaskHeader = memo(function TaskHeader({ task, project, projectId, isManage
  * Main column panels
  * ========================================================================= */
 
-// Read-only, main tasks only: derived automatically from sub task stages.
+// Main tasks only. With sub tasks the stage is derived from their progress;
+// without sub tasks it is set directly from the Move stage panel.
 const StatusPanel = memo(function StatusPanel({ stages, stageIdx, doneSubs, totalSubs }) {
   return (
     <Panel title="Status">
       <p className={cx(HINT, "-mt-1 mb-4")}>
-        Set automatically from the sub tasks' progress. Change the stage on a sub task below to
-        update this.
+        {totalSubs > 0
+          ? "Set automatically from the sub tasks' progress. Change the stage on a sub task below to update this."
+          : "This task has no sub tasks, so its stage is set directly. Use Move stage below to update it."}
       </p>
       <ol className="flex m-0 p-0 list-none" aria-label="Task status">
         {stages.map((s, i) => {
@@ -570,16 +575,17 @@ const SubTaskItem = memo(function SubTaskItem({
   onEdit,
   onDelete,
 }) {
-  const locked = !isManager && st.stage === "Done";
+  const done = st.stage === "Done";
+  const locked = !isManager && done;
 
   return (
-    <div className={cx(SUB, PRIORITY_RAIL[st.priority])}>
+    <div className={cx(SUB, !done && PRIORITY_RAIL[st.priority])}>
       <div className="flex-[1_1_220px] min-w-0 flex flex-col gap-2">
         <Link
           to={`/projects/${projectId}/tasks/${st.id}`}
           className={cx(
             "text-sm font-semibold tracking-[-0.005em] no-underline [overflow-wrap:anywhere] underline-offset-[3px] hover:underline",
-            st.stage === "Done" ? "text-[color:var(--text-3)]" : "text-[color:var(--text)]",
+            done ? "text-[color:var(--text-3)]" : "text-[color:var(--text)]",
           )}
         >
           {st.title}
@@ -642,11 +648,12 @@ const SubTaskItem = memo(function SubTaskItem({
             <Avatar name={st.assignee_name} />
             {st.assignee_name || "Unassigned"}
           </span>
-          {st.due_date && (
+          {/* Due date hidden once Done */}
+          {st.due_date && !done && (
             <span
               className={cx(
                 "tabular-nums",
-                st.stage !== "Done" && isOverdue(st.due_date) && "font-medium text-[color:var(--danger)]",
+                isOverdue(st.due_date) && "font-medium text-[color:var(--danger)]",
               )}
             >
               {formatDate(st.due_date)}
@@ -723,7 +730,7 @@ const SubTasksPanel = memo(function SubTasksPanel({
             )
           }
         >
-          This task counts as done once every sub task is done.
+          Add sub tasks to split the work, or move this task's stage directly below.
         </Empty>
       ) : (
         <div className="flex flex-col gap-2">
@@ -1270,19 +1277,24 @@ export default function TaskDetail() {
           ? [...subAssignees].join(", ")
           : "Unassigned"
         : task.assignee_name || "Unassigned";
-    const dueOverdue =
-      task.stage !== "Done" && !!task.due_date && isOverdue(task.due_date);
+    const done = task.stage === "Done";
+    const dueOverdue = !done && !!task.due_date && isOverdue(task.due_date);
 
     const details = [
       { label: "Assignee", value: assigneeLabel === "Unassigned" ? "—" : assigneeLabel },
-      { label: "Priority", value: task.priority, className: "capitalize" },
-      {
-        label: "Due date",
-        value: task.due_date
-          ? `${formatDate(task.due_date)}${dueOverdue ? " · Overdue" : ""}`
-          : "—",
-        className: dueOverdue ? "!text-[color:var(--danger)] font-semibold" : "",
-      },
+      // Priority and due date are hidden once Done.
+      ...(done
+        ? []
+        : [
+            { label: "Priority", value: task.priority, className: "capitalize" },
+            {
+              label: "Due date",
+              value: task.due_date
+                ? `${formatDate(task.due_date)}${dueOverdue ? " · Overdue" : ""}`
+                : "—",
+              className: dueOverdue ? "!text-[color:var(--danger)] font-semibold" : "",
+            },
+          ]),
       { label: "Cluster", value: task.cluster_name || "No cluster" },
       { label: "Created", value: task.created_at ? formatDate(task.created_at) : "—" },
       ...(totalTime > 0 ? [{ label: "Total time", value: `${totalTime} min` }] : []),
