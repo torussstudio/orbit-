@@ -1,7 +1,428 @@
+// const db = require("../db");
+// const { assertProjectAccess } = require("./accessControl");
+// const liveEvents = require("./liveEvents");
+// const { keepStoredDate } = require("../utils/dateInput");
+
+// /* -------------------------------------------------------------------------- */
+// /* Project links (Milanote / Docs)                                            */
+// /* -------------------------------------------------------------------------- */
+
+// const LINK_LABELS = {
+//   milanote_url: "Milanote",
+//   docs_url: "Docs",
+// };
+
+// // Returns:
+// //   undefined -> field not sent (keep what's stored)
+// //   ""        -> clear the link
+// //   "https://…" -> validated, http(s) only (blocks javascript:, data:, etc.)
+// const parseLink = (value, label) => {
+//   if (value === undefined) return undefined;
+//   if (value === null) return "";
+//   const raw = String(value).trim();
+//   if (!raw) return "";
+//   if (raw.length > 2000) throw new Error(`${label} link is too long.`);
+
+//   const withScheme = /^[a-z][a-z0-9+.-]*:/i.test(raw) ? raw : `https://${raw}`;
+//   let url;
+//   try {
+//     url = new URL(withScheme);
+//   } catch {
+//     throw new Error(`${label} link is not a valid URL.`);
+//   }
+//   if (!["http:", "https:"].includes(url.protocol) || !url.hostname.includes(".")) {
+//     throw new Error(`${label} link must be a valid http(s) URL.`);
+//   }
+//   return url.href;
+// };
+
+// const parseAllLinks = (data) => ({
+//   milanote_url: parseLink(data.milanote_url, LINK_LABELS.milanote_url),
+//   docs_url: parseLink(data.docs_url, LINK_LABELS.docs_url),
+// });
+
+// /* -------------------------------------------------------------------------- */
+
+// // Progress counts for the Projects page, same rule as the client used to
+// // compute from GET /tasks/project/:id: count only leaf tasks of the
+// // project (sub tasks, and tasks with no sub task in the same project);
+// // "done" means stage is "Done" (ignoring case and surrounding spaces).
+// // Projects with no tasks get 0 / 0.
+// const TASK_COUNTS_JOIN = `
+//   LEFT JOIN LATERAL (
+//     SELECT
+//       COUNT(*)::int AS task_total_count,
+//       COUNT(*) FILTER (
+//         WHERE LOWER(BTRIM(t.stage, E' \\t\\n\\r')) = 'done'
+//       )::int AS task_done_count
+//     FROM tasks t
+//     WHERE t.project_id = p.id
+//       AND NOT EXISTS (
+//         SELECT 1
+//         FROM tasks s
+//         WHERE s.parent_task_id = t.id
+//           AND s.project_id = p.id
+//       )
+//   ) task_counts ON true
+// `;
+
+// const getAllProjects = async (user) => {
+//   let q, params;
+//   if (user.role === "manager") {
+//     q = `SELECT p.*, m.name as created_by_name,
+//                 task_counts.task_done_count, task_counts.task_total_count
+//          FROM projects p
+//          LEFT JOIN members m ON p.created_by=m.id
+//          ${TASK_COUNTS_JOIN}
+//          ORDER BY p.sort_order ASC NULLS LAST, p.created_at DESC`;
+//     params = [];
+//   } else {
+//     q = `SELECT p.*, m.name as created_by_name,
+//                 task_counts.task_done_count, task_counts.task_total_count
+//          FROM projects p
+//          LEFT JOIN members m ON p.created_by=m.id
+//          JOIN project_members pm ON pm.project_id=p.id
+//          ${TASK_COUNTS_JOIN}
+//          WHERE pm.member_id=$1 AND p.status != 'archived'
+//          ORDER BY p.sort_order ASC NULLS LAST, p.created_at DESC`;
+//     params = [user.id];
+//   }
+//   const { rows } = await db.query(q, params);
+//   return rows;
+// };
+
+// const reorderProjects = async (project_ids) => {
+//   if (!Array.isArray(project_ids) || !project_ids.length) {
+//     throw new Error("project_ids array required");
+//   }
+//   const client = await db.connect();
+//   try {
+//     await client.query("BEGIN");
+//     for (let i = 0; i < project_ids.length; i++) {
+//       await client.query("UPDATE projects SET sort_order=$1 WHERE id=$2", [
+//         i,
+//         project_ids[i],
+//       ]);
+//     }
+//     await client.query("COMMIT");
+//     // Live update, after the commit.
+//     liveEvents.projectChanged("project.updated", project_ids[0]);
+//   } catch (e) {
+//     await client.query("ROLLBACK");
+//     throw e;
+//   } finally {
+//     client.release();
+//   }
+// };
+
+// const getProjectById = async (user, projectId) => {
+//   await assertProjectAccess(user, projectId);
+//   const [project, members] = await Promise.all([
+//     db.query(
+//       `SELECT p.*, m.name as created_by_name FROM projects p
+//        LEFT JOIN members m ON p.created_by=m.id WHERE p.id=$1`,
+//       [projectId]
+//     ),
+//     db.query(
+//       `SELECT m.id,m.name,m.email,m.role FROM members m
+//        JOIN project_members pm ON pm.member_id=m.id WHERE pm.project_id=$1`,
+//       [projectId]
+//     ),
+//   ]);
+//   if (!project.rows[0]) return null;
+//   return { ...project.rows[0], members: members.rows };
+// };
+
+// const createProject = async (user, data) => {
+//   const {
+//     name,
+//     client_name,
+//     description,
+//     status,
+//     start_date,
+//     end_date,
+//     member_ids,
+//     custom_stages,
+//   } = data;
+
+//   // Validate before opening a transaction.
+//   const links = parseAllLinks(data);
+
+//   const client = await db.connect();
+//   try {
+//     await client.query("BEGIN");
+//     const { rows } = await client.query(
+//       `INSERT INTO projects(name,client_name,description,status,start_date,end_date,custom_stages,created_by,sort_order,milanote_url,docs_url)
+//        VALUES($1,$2,$3,$4,$5,$6,$7,$8,(SELECT COALESCE(MIN(sort_order), 0) - 1 FROM projects),$9,$10) RETURNING *`,
+//       [
+//         name,
+//         client_name,
+//         description,
+//         status || "active",
+//         start_date || null,
+//         end_date || null,
+//         JSON.stringify(
+//           custom_stages || [
+//             "Todo",
+//             "In Progress",
+//             "In Review",
+//             "Done",
+//           ]
+//         ),
+//         user.id,
+//         links.milanote_url || null,
+//         links.docs_url || null,
+//       ]
+//     );
+//     const proj = rows[0];
+//     if (member_ids?.length) {
+//       for (const mid of member_ids) {
+//         await client.query(
+//           "INSERT INTO project_members VALUES($1,$2) ON CONFLICT DO NOTHING",
+//           [proj.id, mid]
+//         );
+//       }
+//     }
+//     await client.query("COMMIT");
+//     if (member_ids?.length) {
+//       const { createNotification } = require("../utils/pushNotify");
+//       member_ids.forEach((memberId) => {
+//         createNotification(memberId, "Added to Project", `You have been added to: ${proj.name}`, {
+//           type: "project_member_added",
+//           entityId: proj.id,
+//           entityType: "project",
+//           eventKey: `project-member-added:${proj.id}:${memberId}:${proj.created_at}`,
+//           url: `/projects/${proj.id}`,
+//         }).catch(() => {});
+//       });
+//     }
+//     // Live update, after the commit.
+//     liveEvents.projectChanged("project.created", proj.id);
+//     return proj;
+//   } catch (e) {
+//     await client.query("ROLLBACK");
+//     throw e;
+//   } finally {
+//     client.release();
+//   }
+// };
+
+// const updateProject = async (projectId, data) => {
+//   const {
+//     name,
+//     client_name,
+//     description,
+//     status,
+//     start_date,
+//     end_date,
+//     custom_stages,
+//     member_ids,
+//   } = data;
+
+//   // Validate before opening a transaction.
+//   // undefined -> NULL param -> keep the stored value; "" -> clear; url -> set.
+//   const links = parseAllLinks(data);
+//   const keepIfUndefined = (v) => (v === undefined ? null : v);
+
+//   const client = await db.connect();
+//   try {
+//     await client.query("BEGIN");
+//     const { rows: previousMembers } = member_ids
+//       ? await client.query("SELECT member_id FROM project_members WHERE project_id=$1", [projectId])
+//       : { rows: [] };
+//     // Start / end date missing, or sent back exactly as the API returned
+//     // them: keep the stored values (see utils/dateInput.js).
+//     const { rows: storedDates } = await client.query(
+//       "SELECT start_date, end_date FROM projects WHERE id=$1",
+//       [projectId]
+//     );
+//     const stored = storedDates[0] || {};
+//     const dateToSave = (value, storedValue) =>
+//       keepStoredDate(value, storedValue) ? storedValue ?? null : value || null;
+//     const { rows } = await client.query(
+//       `UPDATE projects SET name=$1,client_name=$2,description=$3,status=$4,start_date=$5,end_date=$6,custom_stages=$7,
+//          milanote_url = CASE WHEN $9::text IS NULL THEN milanote_url WHEN $9::text = '' THEN NULL ELSE $9::text END,
+//          docs_url     = CASE WHEN $10::text IS NULL THEN docs_url     WHEN $10::text = '' THEN NULL ELSE $10::text END
+//        WHERE id=$8 RETURNING *`,
+//       [
+//         name,
+//         client_name,
+//         description,
+//         status,
+//         dateToSave(start_date, stored.start_date),
+//         dateToSave(end_date, stored.end_date),
+//         JSON.stringify(custom_stages),
+//         projectId,
+//         keepIfUndefined(links.milanote_url),
+//         keepIfUndefined(links.docs_url),
+//       ]
+//     );
+//     if (member_ids) {
+//       await client.query("DELETE FROM project_members WHERE project_id=$1", [
+//         projectId,
+//       ]);
+//       for (const mid of member_ids) {
+//         await client.query(
+//           "INSERT INTO project_members VALUES($1,$2) ON CONFLICT DO NOTHING",
+//           [projectId, mid]
+//         );
+//       }
+//     }
+//     await client.query("COMMIT");
+
+//     // Live update, after the commit. Previous members are included so a
+//     // member who was just removed hears about it too.
+//     liveEvents.projectChanged(
+//       "project.updated",
+//       projectId,
+//       previousMembers.map((row) => row.member_id),
+//     );
+
+//     if (member_ids) {
+//       const previousIds = new Set(previousMembers.map((row) => String(row.member_id)));
+//       const nextIds = new Set(member_ids.map((id) => String(id)));
+//       const added = member_ids.filter((id) => !previousIds.has(String(id)));
+//       const removed = [...previousIds].filter((id) => !nextIds.has(id));
+//       const { createNotification } = require("../utils/pushNotify");
+
+//       added.forEach((memberId) => {
+//         createNotification(memberId, "Added to Project", `You have been added to: ${rows[0].name}`, {
+//           type: "project_member_added",
+//           entityId: projectId,
+//           entityType: "project",
+//           eventKey: `project-member-added:${projectId}:${memberId}:${rows[0].updated_at || rows[0].created_at}`,
+//           url: `/projects/${projectId}`,
+//         }).catch(() => {});
+//       });
+//       removed.forEach((memberId) => {
+//         createNotification(memberId, "Removed from Project", `You have been removed from: ${rows[0].name}`, {
+//           type: "project_member_removed",
+//           entityId: projectId,
+//           entityType: "project",
+//           eventKey: `project-member-removed:${projectId}:${memberId}:${rows[0].updated_at || rows[0].created_at}`,
+//           url: "/projects",
+//         }).catch(() => {});
+//       });
+//     }
+//     return rows[0];
+//   } catch (e) {
+//     await client.query("ROLLBACK");
+//     throw e;
+//   } finally {
+//     client.release();
+//   }
+// };
+
+// const archiveProject = async (projectId) => {
+//   await db.query("UPDATE projects SET status='archived' WHERE id=$1", [
+//     projectId,
+//   ]);
+//   liveEvents.projectChanged("project.updated", projectId);
+// };
+
+// const unarchiveProject = async (projectId) => {
+//   await db.query("UPDATE projects SET status='active' WHERE id=$1", [
+//     projectId,
+//   ]);
+//   liveEvents.projectChanged("project.updated", projectId);
+// };
+
+// const deleteProject = async (projectId) => {
+//   const { rows: countRows } = await db.query(
+//     "SELECT COUNT(*)::int AS count FROM tasks WHERE project_id=$1",
+//     [projectId]
+//   );
+//   const taskCount = countRows[0]?.count || 0;
+//   if (taskCount > 0) {
+//     throw new Error(
+//       `This project still has ${taskCount} task${
+//         taskCount === 1 ? "" : "s"
+//       } (including sub tasks). Delete all tasks before deleting the project.`
+//     );
+//   }
+
+//   await db.query("DELETE FROM projects WHERE id=$1", [projectId]);
+//   // Live update. The project's member rows are gone with it, so this
+//   // reaches the managers.
+//   liveEvents.projectChanged("project.deleted", projectId);
+// };
+
+// module.exports = {
+//   getAllProjects,
+//   reorderProjects,
+//   getProjectById,
+//   createProject,
+//   updateProject,
+//   archiveProject,
+//   unarchiveProject,
+//   deleteProject,
+// };
+
+
+
+
+
 const db = require("../db");
 const { assertProjectAccess } = require("./accessControl");
 const liveEvents = require("./liveEvents");
 const { keepStoredDate } = require("../utils/dateInput");
+
+/* -------------------------------------------------------------------------- */
+/* Errors                                                                     */
+/* -------------------------------------------------------------------------- */
+
+// Error with an HTTP status the controller can send as-is.
+const httpError = (status, message) => Object.assign(new Error(message), { status });
+
+/* -------------------------------------------------------------------------- */
+/* Trash                                                                      */
+/* -------------------------------------------------------------------------- */
+
+// A trashed project can be restored for this many days. After that it is
+// deleted permanently, together with everything that cascades from it
+// (tasks, sub tasks, comments, clusters, credentials, knowledge files).
+const TRASH_RETENTION_DAYS = 7;
+
+// Expired trash is purged:
+//   - hourly on a long-running server (timer below), and
+//   - lazily when a manager loads the projects list, at most once per
+//     PURGE_THROTTLE_MS (covers serverless hosts like Vercel, where timers
+//     don't keep running).
+// Expired projects are never listed or restorable even before the purge
+// runs, because every trash query also checks the 7-day window.
+const PURGE_THROTTLE_MS = 10 * 60 * 1000;
+const PURGE_INTERVAL_MS = 60 * 60 * 1000;
+let lastPurgeAt = 0;
+
+const purgeExpiredTrash = async () => {
+  lastPurgeAt = Date.now();
+  const { rows } = await db.query(
+    `DELETE FROM projects
+     WHERE trashed_at IS NOT NULL
+       AND trashed_at <= NOW() - make_interval(days => $1)
+     RETURNING id`,
+    [TRASH_RETENTION_DAYS]
+  );
+  rows.forEach((row) => liveEvents.projectChanged("project.deleted", row.id));
+  if (rows.length) {
+    console.log(`[trash] Permanently deleted ${rows.length} project(s) older than ${TRASH_RETENTION_DAYS} days.`);
+  }
+  return rows.length;
+};
+
+// Fire-and-forget, throttled. Never lets a purge failure affect a request.
+const purgeExpiredTrashSoon = () => {
+  if (Date.now() - lastPurgeAt < PURGE_THROTTLE_MS) return;
+  purgeExpiredTrash().catch((err) => console.error("[trash] Purge failed:", err.message));
+};
+
+if (!process.env.VERCEL) {
+  // First run a minute after boot, so initDB has added the trashed_at column.
+  setTimeout(() => {
+    purgeExpiredTrashSoon();
+    setInterval(purgeExpiredTrashSoon, PURGE_INTERVAL_MS).unref();
+  }, 60 * 1000).unref();
+}
 
 /* -------------------------------------------------------------------------- */
 /* Project links (Milanote / Docs)                                            */
@@ -66,14 +487,17 @@ const TASK_COUNTS_JOIN = `
   ) task_counts ON true
 `;
 
+// Trashed projects are left out of the normal list (they have their own).
 const getAllProjects = async (user) => {
   let q, params;
   if (user.role === "manager") {
+    purgeExpiredTrashSoon();
     q = `SELECT p.*, m.name as created_by_name,
                 task_counts.task_done_count, task_counts.task_total_count
          FROM projects p
          LEFT JOIN members m ON p.created_by=m.id
          ${TASK_COUNTS_JOIN}
+         WHERE p.trashed_at IS NULL
          ORDER BY p.sort_order ASC NULLS LAST, p.created_at DESC`;
     params = [];
   } else {
@@ -83,11 +507,27 @@ const getAllProjects = async (user) => {
          LEFT JOIN members m ON p.created_by=m.id
          JOIN project_members pm ON pm.project_id=p.id
          ${TASK_COUNTS_JOIN}
-         WHERE pm.member_id=$1 AND p.status != 'archived'
+         WHERE pm.member_id=$1 AND p.status != 'archived' AND p.trashed_at IS NULL
          ORDER BY p.sort_order ASC NULLS LAST, p.created_at DESC`;
     params = [user.id];
   }
   const { rows } = await db.query(q, params);
+  return rows;
+};
+
+// Projects in trash that can still be restored, newest first.
+// purge_at = when it will be deleted permanently.
+const getTrashedProjects = async () => {
+  const { rows } = await db.query(
+    `SELECT p.id, p.name, p.client_name, p.status, p.trashed_at,
+            p.trashed_at + make_interval(days => $1) AS purge_at,
+            (SELECT COUNT(*)::int FROM tasks t WHERE t.project_id = p.id) AS task_count
+     FROM projects p
+     WHERE p.trashed_at IS NOT NULL
+       AND p.trashed_at > NOW() - make_interval(days => $1)
+     ORDER BY p.trashed_at DESC`,
+    [TRASH_RETENTION_DAYS]
+  );
   return rows;
 };
 
@@ -243,7 +683,7 @@ const updateProject = async (projectId, data) => {
       `UPDATE projects SET name=$1,client_name=$2,description=$3,status=$4,start_date=$5,end_date=$6,custom_stages=$7,
          milanote_url = CASE WHEN $9::text IS NULL THEN milanote_url WHEN $9::text = '' THEN NULL ELSE $9::text END,
          docs_url     = CASE WHEN $10::text IS NULL THEN docs_url     WHEN $10::text = '' THEN NULL ELSE $10::text END
-       WHERE id=$8 RETURNING *`,
+       WHERE id=$8 AND trashed_at IS NULL RETURNING *`,
       [
         name,
         client_name,
@@ -257,6 +697,9 @@ const updateProject = async (projectId, data) => {
         keepIfUndefined(links.docs_url),
       ]
     );
+    // Missing, or in trash: nothing to update (rolled back below).
+    if (!rows[0]) throw httpError(404, "Project not found or it is in trash.");
+
     if (member_ids) {
       await client.query("DELETE FROM project_members WHERE project_id=$1", [
         projectId,
@@ -314,46 +757,82 @@ const updateProject = async (projectId, data) => {
 };
 
 const archiveProject = async (projectId) => {
-  await db.query("UPDATE projects SET status='archived' WHERE id=$1", [
-    projectId,
-  ]);
+  const { rowCount } = await db.query(
+    "UPDATE projects SET status='archived' WHERE id=$1 AND trashed_at IS NULL",
+    [projectId]
+  );
+  if (!rowCount) throw httpError(404, "Project not found or it is in trash.");
   liveEvents.projectChanged("project.updated", projectId);
 };
 
 const unarchiveProject = async (projectId) => {
-  await db.query("UPDATE projects SET status='active' WHERE id=$1", [
-    projectId,
-  ]);
+  const { rowCount } = await db.query(
+    "UPDATE projects SET status='active' WHERE id=$1 AND trashed_at IS NULL",
+    [projectId]
+  );
+  if (!rowCount) throw httpError(404, "Project not found or it is in trash.");
   liveEvents.projectChanged("project.updated", projectId);
 };
 
-const deleteProject = async (projectId) => {
-  const { rows: countRows } = await db.query(
-    "SELECT COUNT(*)::int AS count FROM tasks WHERE project_id=$1",
+// Move to trash. Nothing is deleted yet: the project, its status and all
+// its tasks stay as they are until it is restored or purged.
+const trashProject = async (projectId) => {
+  const { rows } = await db.query(
+    "UPDATE projects SET trashed_at = NOW() WHERE id=$1 AND trashed_at IS NULL RETURNING id",
     [projectId]
   );
-  const taskCount = countRows[0]?.count || 0;
-  if (taskCount > 0) {
-    throw new Error(
-      `This project still has ${taskCount} task${
-        taskCount === 1 ? "" : "s"
-      } (including sub tasks). Delete all tasks before deleting the project.`
+  if (!rows.length) throw httpError(404, "Project not found or already in trash.");
+  liveEvents.projectChanged("project.updated", projectId);
+};
+
+// Restore from trash, only within the 7-day window. The project goes back
+// to the status it had (an archived project returns to Archived).
+const restoreProject = async (projectId) => {
+  const { rows } = await db.query(
+    `UPDATE projects SET trashed_at = NULL
+     WHERE id=$1
+       AND trashed_at IS NOT NULL
+       AND trashed_at > NOW() - make_interval(days => $2)
+     RETURNING id`,
+    [projectId, TRASH_RETENTION_DAYS]
+  );
+  if (!rows.length) {
+    throw httpError(
+      404,
+      `This project is no longer in trash. Projects are deleted permanently ${TRASH_RETENTION_DAYS} days after they are moved to trash.`
     );
   }
+  liveEvents.projectChanged("project.updated", projectId);
+};
 
-  await db.query("DELETE FROM projects WHERE id=$1", [projectId]);
+// Permanent delete ("Delete forever" in Trash). Only for projects already
+// in trash. Tasks, sub tasks, comments, clusters, credentials and
+// knowledge rows go with it (ON DELETE CASCADE).
+const deleteProject = async (projectId) => {
+  const { rows } = await db.query(
+    "DELETE FROM projects WHERE id=$1 AND trashed_at IS NOT NULL RETURNING id",
+    [projectId]
+  );
+  if (!rows.length) {
+    throw httpError(400, "Move the project to trash before deleting it permanently.");
+  }
   // Live update. The project's member rows are gone with it, so this
   // reaches the managers.
   liveEvents.projectChanged("project.deleted", projectId);
 };
 
 module.exports = {
+  TRASH_RETENTION_DAYS,
   getAllProjects,
+  getTrashedProjects,
   reorderProjects,
   getProjectById,
   createProject,
   updateProject,
   archiveProject,
   unarchiveProject,
+  trashProject,
+  restoreProject,
   deleteProject,
+  purgeExpiredTrash,
 };

@@ -146,6 +146,7 @@ async function ensureColumn(tableName, columnDefinition) {
   );
 }
 
+
 async function ensureConstraint(tableName, constraintName, sql) {
   if (await constraintExists(tableName, constraintName)) {
     return;
@@ -265,6 +266,15 @@ const initDB = async () => {
   // and on fresh databases.
   await ensureColumn("projects", "milanote_url TEXT");
   await ensureColumn("projects", "docs_url TEXT");
+
+   // Trash: set when a project is moved to trash, cleared on restore.
+  // Projects trashed more than 7 days ago are purged by projectService.
+  await ensureColumn("projects", "trashed_at TIMESTAMPTZ");
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_projects_trashed_at
+    ON projects (trashed_at) WHERE trashed_at IS NOT NULL
+  `);
+
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS clusters (
