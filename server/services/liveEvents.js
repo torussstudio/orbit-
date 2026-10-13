@@ -224,7 +224,54 @@ function passwordChanged(userId, revokedSessionIds) {
   sessionsRevoked(revokedSessionIds, "password changed");
 }
 
+// Every active manager, plus the given extra people.
+async function sendManagerEvent(type, projectId, extraUserIds) {
+  const { rows } = await db.query(
+    `SELECT id
+       FROM members
+      WHERE role = 'manager'
+        AND active = true`,
+  );
+
+  eventBus.publish([...rows.map((row) => row.id), ...extraUserIds], {
+    type,
+    taskId: null,
+    projectId: projectId ?? null,
+    at: new Date().toISOString(),
+  });
+}
+
+function sendToManagers(type, projectId, extraUserIds, label) {
+  try {
+    if (shouldSkip()) return;
+    const extra = (extraUserIds || []).filter((id) => id !== null && id !== undefined);
+    sendManagerEvent(type, projectId, extra).catch((err) => {
+      console.error(`[liveEvents] ${label} event failed:`, err?.message);
+    });
+  } catch (err) {
+    console.error(`[liveEvents] ${label} event failed:`, err?.message);
+  }
+}
+
+/*
+ * A time entry was added, edited or deleted. Goes to every active manager
+ * (admin Time Log) and the member who logged it.
+ */
+function timeLogChanged(projectId, memberId) {
+  sendToManagers("timelog.changed", projectId, [memberId], "time log");
+}
+
+/*
+ * A member was added, edited, activated, deactivated or deleted. Goes to
+ * every active manager (Members page, pickers) and the member themselves.
+ */
+function memberChanged(memberId) {
+  sendToManagers("member.changed", null, [memberId], "member");
+}
+
 module.exports = {
+  timeLogChanged,
+  memberChanged,
   accessChanged,
   sessionsRevoked,
   passwordChanged,

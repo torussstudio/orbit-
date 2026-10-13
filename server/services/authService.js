@@ -1355,6 +1355,9 @@ async function updateProfile(
     );
   }
 
+  // Managers' Members page shows the name / avatar.
+  liveEvents.memberChanged(memberId);
+
   return publicUser(
     rows[0],
   );

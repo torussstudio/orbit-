@@ -5,7 +5,7 @@
 // import { formatDate } from "../utils/helpers";
 // import { useCountUp } from "../utils/motion";
 // import Modal from "../components/ui/Modal";
-// import { useLiveRefetch, TASK_AND_PROJECT_EVENTS } from "../hooks/useLiveEvents";
+// import { useLiveRefetch, DASHBOARD_EVENTS } from "../hooks/useLiveEvents";
 
 // /* ===========================================================================
 //  * Constants & helpers
@@ -1056,7 +1056,7 @@
 
 //   // Live updates: a task or project changed (for example a member moved a
 //   // task to In Review). Numbers and lists update in place.
-//   useLiveRefetch(TASK_AND_PROJECT_EVENTS, refresh);
+//   useLiveRefetch(DASHBOARD_EVENTS, refresh);
 //   const firstName = user?.name?.split(" ")[0];
 
 //   return (
@@ -1644,7 +1644,7 @@ import { useAuth } from "../context/AuthContext";
 import { formatDate } from "../utils/helpers";
 import { useCountUp } from "../utils/motion";
 import Modal from "../components/ui/Modal";
-import { useLiveRefetch, TASK_AND_PROJECT_EVENTS } from "../hooks/useLiveEvents";
+import { useLiveRefetch, DASHBOARD_EVENTS } from "../hooks/useLiveEvents";
 import {
   PeriodToggle,
   ProgressChips,
@@ -2707,7 +2707,7 @@ export default function Dashboard() {
 
   // Live updates: a task or project changed (for example a member moved a
   // task to In Review). Numbers and lists update in place.
-  useLiveRefetch(TASK_AND_PROJECT_EVENTS, refresh);
+  useLiveRefetch(DASHBOARD_EVENTS, refresh);
   const firstName = user?.name?.split(" ")[0];
 
   return (

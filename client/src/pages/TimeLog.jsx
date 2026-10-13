@@ -1,7 +1,7 @@
 import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import api from '../api/client';
-import { useLiveRefetch, TASK_AND_PROJECT_EVENTS } from '../hooks/useLiveEvents';
+import { useLiveRefetch, TIMELOG_EVENTS } from '../hooks/useLiveEvents';
 import Modal from '../components/ui/Modal';
 import ConfirmModal from '../components/ui/ConfirmModal';
 import DatePicker from '../components/ui/DatePicker';
@@ -1372,7 +1372,7 @@ function ProjectDetailView({ projectId, from, to, onBack, onOpenMember }) {
     from,
     to,
   );
-  useLiveRefetch(TASK_AND_PROJECT_EVENTS, refreshSilently, {
+  useLiveRefetch(TIMELOG_EVENTS, refreshSilently, {
     match: (e) => e.projectId == null || String(e.projectId) === String(projectId),
   });
   const { onEdit, onDelete, modals, noticeBar } = useEntryActions(refreshSilently);
@@ -1645,7 +1645,7 @@ function MemberDetailView({ memberId, from, to, onBack, onOpenProject }) {
     from,
     to,
   );
-  useLiveRefetch(TASK_AND_PROJECT_EVENTS, refreshSilently);
+  useLiveRefetch(TIMELOG_EVENTS, refreshSilently);
   const { onEdit, onDelete, modals, noticeBar } = useEntryActions(refreshSilently);
 
   const [openKeys, setOpenKeys] = useState(() => new Set());
@@ -1857,7 +1857,7 @@ function ListError({ retry }) {
 
 function ProjectsList({ from, to, query, sort, onOpen, setExport }) {
   const { data, loading, error, refreshing, refreshSilently, retry } = useTimeLogData('/time-log/projects', from, to);
-  useLiveRefetch(TASK_AND_PROJECT_EVENTS, refreshSilently);
+  useLiveRefetch(TIMELOG_EVENTS, refreshSilently);
 
   const all = data?.projects || [];
   const visible = useMemo(() => {
@@ -1993,7 +1993,7 @@ function ProjectsList({ from, to, query, sort, onOpen, setExport }) {
 
 function MembersList({ from, to, query, sort, onOpen, setExport }) {
   const { data, loading, error, refreshing, refreshSilently, retry } = useTimeLogData('/time-log/members', from, to);
-  useLiveRefetch(TASK_AND_PROJECT_EVENTS, refreshSilently);
+  useLiveRefetch(TIMELOG_EVENTS, refreshSilently);
 
   const all = data?.members || [];
   const visible = useMemo(() => {

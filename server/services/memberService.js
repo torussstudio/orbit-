@@ -51,6 +51,7 @@ async function createMember({ name, email: rawEmail, password, role, birthday, s
       "INSERT INTO members(name,email,password_hash,role,birthday,skills) VALUES($1,$2,$3,$4,$5,$6) RETURNING id,name,email,role,birthday,skills,active",
       [name, email, hash, role, birthday || null, skills || []],
     );
+    liveEvents.memberChanged(rows[0]?.id);
     return rows[0];
   } catch (err) {
     if (isEmailUniqueViolation(err)) throw emailTakenError();
@@ -103,6 +104,7 @@ async function updateMember(id, { name, email: rawEmail, role, birthday, skills,
       // saved before subscriptions were linked to a session). A device
       // subscribes again when the member logs in on it.
       await removeAllPushSubscriptionsForMember(id);
+      liveEvents.memberChanged(id);
       return rows[0];
     }
     const { rows } = await db.query(
@@ -113,6 +115,7 @@ async function updateMember(id, { name, email: rawEmail, role, birthday, skills,
     if (roleChanged(rows[0])) {
       liveEvents.accessChanged(id, "role changed");
     }
+    liveEvents.memberChanged(id);
     return rows[0];
   } catch (err) {
     if (isEmailUniqueViolation(err)) throw emailTakenError();
@@ -124,10 +127,12 @@ async function deactivateMember(id) {
   await db.query("UPDATE members SET active=false WHERE id=$1", [id]);
   // Saved: end the member's live streams now.
   liveEvents.accessChanged(id, "deactivated");
+  liveEvents.memberChanged(id);
 }
 
 async function activateMember(id) {
   await db.query("UPDATE members SET active=true WHERE id=$1", [id]);
+  liveEvents.memberChanged(id);
 }
 
 async function deleteMember(id) {
@@ -155,6 +160,7 @@ async function deleteMember(id) {
     linkedMessage:
       "This member is still linked to projects, tasks or comments and cannot be deleted. Deactivate the member instead.",
   });
+  liveEvents.memberChanged(id);
 }
 
 module.exports = { getAllMembers, getMemberSuggestions, createMember, updateMember, deactivateMember, activateMember, deleteMember };

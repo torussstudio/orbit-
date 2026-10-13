@@ -11,7 +11,7 @@ import { useAuth } from "../context/AuthContext";
 import { formatDate } from "../utils/helpers";
 import ConfirmModal from "../components/ui/ConfirmModal";
 import Select from "../components/ui/Select";
-import { useLiveRefetch, TASK_AND_PROJECT_EVENTS } from "../hooks/useLiveEvents";
+import { useLiveRefetch, MEMBER_EVENTS } from "../hooks/useLiveEvents";
 import {
   MiniRing,
   PeriodToggle,
@@ -696,6 +696,13 @@ function useMemberTasks() {
 
   const retry = useCallback((id) => fetchTasks(id), [fetchTasks]);
 
+  // Live update: refresh the open list in place; drop the other caches.
+  const refreshOpen = useCallback(() => {
+    const open = latest.current.expandedId;
+    setTasks((p) => (open != null && p[open] ? { [open]: p[open] } : {}));
+    if (open != null) fetchTasks(open, true);
+  }, [fetchTasks]);
+
   // After any change, drop task caches (counts and assignments may have moved).
   const reset = useCallback(() => {
     controller.current?.abort();
@@ -707,7 +714,7 @@ function useMemberTasks() {
 
   useEffect(() => () => controller.current?.abort(), []);
 
-  return { expandedId, tasks, errors, loadingId, toggle, retry, reset };
+  return { expandedId, tasks, errors, loadingId, toggle, retry, reset, refreshOpen };
 }
 
 /* -------------------------------------------------------------------------- */
@@ -1456,7 +1463,7 @@ export default function Members() {
   // Task progress card (managers only).
   const team = useTeamProgress(isManager);
   const { load: loadTeam } = team;
-  useLiveRefetch(TASK_AND_PROJECT_EVENTS, loadTeam, { enabled: isManager });
+  useLiveRefetch(MEMBER_EVENTS, loadTeam, { enabled: isManager });
   const [progressFor, setProgressFor] = useState("all");
   const [progressPeriod, setProgressPeriod] = useState("month");
   const progressRef = useRef(null);
@@ -1471,6 +1478,17 @@ export default function Members() {
     progressRef.current?.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "start" });
   }, []);
   const memberTasks = useMemberTasks();
+
+  // Live: the list (and an open task list) follows changes made by anyone.
+  const { refreshOpen } = memberTasks;
+  const liveMembers = useCallback(
+    (event) => {
+      load();
+      if (event?.type !== "member.changed") refreshOpen();
+    },
+    [load, refreshOpen],
+  );
+  useLiveRefetch(MEMBER_EVENTS, liveMembers);
   const { reset: resetTasks } = memberTasks;
 
   // Auto-dismiss the inline error notice and the success toast.

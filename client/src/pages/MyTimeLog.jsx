@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import api from '../api/client';
+import { useLiveRefetch, TASK_AND_PROJECT_EVENTS } from '../hooks/useLiveEvents';
 import Select from '../components/ui/Select';
 import DatePicker from '../components/ui/DatePicker';
 import Loader from '../components/ui/Loader';
@@ -119,15 +120,21 @@ export default function MyTimeLog() {
   const taskNameRef = useRef(null);
   const hoursRef = useRef(null);
 
+  const hasOptions = useRef(false);
   const load = useCallback(async () => {
-    setLoadError(false);
     try {
       const res = await api.get('/time-log/my/options');
+      hasOptions.current = true;
+      setLoadError(false);
       setOptions(res.data);
     } catch {
-      setLoadError(true);
+      // A failed live refresh keeps the form as it is.
+      if (!hasOptions.current) setLoadError(true);
     }
   }, []);
+
+  // Live: new assignments, tasks marked Done, projects added or removed.
+  useLiveRefetch(TASK_AND_PROJECT_EVENTS, load);
 
   useEffect(() => {
     load();
@@ -307,7 +314,10 @@ export default function MyTimeLog() {
           </span>
           <button
             type="button"
-            onClick={load}
+            onClick={() => {
+              setLoadError(false);
+              load();
+            }}
             className={`rounded-lg border border-[color:var(--border)] px-3.5 py-2 text-xs font-medium text-[var(--text)] transition-colors hover:bg-[var(--bg-3)] ${focusRing}`}
           >
             Try again

@@ -1,4 +1,5 @@
 const db = require("../db");
+const liveEvents = require("./liveEvents");
 
 /*
  * Time Log
@@ -187,6 +188,7 @@ async function createEntry(memberId, body = {}) {
     [memberId, project.id, clusterId, taskId, title, isMisc, minutes, workDate],
   );
 
+  liveEvents.timeLogChanged(project.id, memberId);
   return rows[0];
 }
 
@@ -344,7 +346,7 @@ async function getMemberDetail(memberId, { from, to }) {
 // a Miscellaneous entry. Project / task stay as the member logged them.
 async function updateEntry(entryId, body = {}) {
   const { rows: found } = await db.query(
-    `SELECT id, is_misc FROM time_entries WHERE id::text = $1 LIMIT 1`,
+    `SELECT id, is_misc, project_id, member_id FROM time_entries WHERE id::text = $1 LIMIT 1`,
     [String(entryId)],
   );
   const entry = found[0];
@@ -367,14 +369,17 @@ async function updateEntry(entryId, body = {}) {
     [String(entryId), workDate, minutes, title],
   );
 
+  liveEvents.timeLogChanged(entry.project_id, entry.member_id);
   return rows[0];
 }
 
 async function deleteEntry(entryId) {
-  const { rowCount } = await db.query(`DELETE FROM time_entries WHERE id::text = $1`, [
-    String(entryId),
-  ]);
-  if (!rowCount) throw httpError(404, "Entry not found");
+  const { rows } = await db.query(
+    `DELETE FROM time_entries WHERE id::text = $1 RETURNING project_id, member_id`,
+    [String(entryId)],
+  );
+  if (!rows.length) throw httpError(404, "Entry not found");
+  liveEvents.timeLogChanged(rows[0].project_id, rows[0].member_id);
   return { ok: true };
 }
 

@@ -59,6 +59,17 @@ export const PROJECT_EVENTS = [
 
 export const TASK_AND_PROJECT_EVENTS = [...new Set([...TASK_EVENTS, ...PROJECT_EVENTS])];
 
+// A time entry was added, edited or deleted (admin Time Log). Task and
+// project changes are included: entries show live task titles and stages.
+export const TIMELOG_EVENTS = ["timelog.changed", ...TASK_AND_PROJECT_EVENTS];
+
+// A member was added, edited, activated, deactivated or deleted. Task changes
+// are included: the Members list shows task counts and progress.
+export const MEMBER_EVENTS = ["member.changed", ...TASK_AND_PROJECT_EVENTS];
+
+// Dashboard: tasks, projects and the team.
+export const DASHBOARD_EVENTS = MEMBER_EVENTS;
+
 // The bell keeps its own 30 s refresh, so it does not need "poll" / "resync".
 export const NOTIFICATION_EVENTS = ["notification.created"];
 
