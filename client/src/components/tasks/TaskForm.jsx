@@ -2,6 +2,7 @@ import { useId, useState } from 'react';
 import Select from '../ui/Select';
 import DatePicker from '../ui/DatePicker';
 import Loader from '../ui/Loader';
+import ConfirmModal from '../ui/ConfirmModal';
 
 /* ------------------------------------------------------------------ */
 /* Shared class strings (Tailwind only, driven by your existing CSS    */
@@ -9,7 +10,6 @@ import Loader from '../ui/Loader';
 /* ------------------------------------------------------------------ */
 
 const labelCls = 'mb-1.5 block text-[13px] font-medium tracking-[-0.005em]';
-const hintCls = 'mt-1.5 text-[11px] text-[color:var(--text-3)]';
 const panelCls =
   'flex flex-col gap-4 rounded-lg border border-[color:var(--border)] bg-[var(--bg-3)] p-4';
 const focusRing =
@@ -35,15 +35,6 @@ const chipCls = [
 /* ------------------------------------------------------------------ */
 /* Small presentational pieces                                         */
 /* ------------------------------------------------------------------ */
-
-function ClockIcon() {
-  return (
-    <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <circle cx="12" cy="12" r="9" />
-      <path d="M12 7v5l3 2" />
-    </svg>
-  );
-}
 
 function AlertIcon() {
   return (
@@ -132,8 +123,6 @@ export default function TaskForm({ initial, members, allMembers, clusters, stage
     assigneeError: `${uid}-assignee-error`,
      dueDateError: `${uid}-due-date-error`,
     stageError: `${uid}-stage-error`,
-    timeTaken: `${uid}-time-taken`,
-    timeTakenError: `${uid}-time-taken-error`,
   };
 
   const [form, setForm] = useState({
@@ -148,11 +137,11 @@ export default function TaskForm({ initial, members, allMembers, clusters, stage
     priority: initial?.priority || 'medium',
     stage: initial?.stage || stages[0] || 'Todo',
     cluster_id: initial?.cluster_id || '',
-    time_taken: initial?.time_taken || '',
     due_date: initial?.due_date || '',
   });
   const [titleError, setTitleError] = useState('');
-  const [timeTakenError, setTimeTakenError] = useState('');
+  // Simple "send to In Review?" confirmation (replaces the old time taken step).
+  const [confirmReview, setConfirmReview] = useState(null);
   const [assigneeError, setAssigneeError] = useState('');
   const [dueDateError, setDueDateError] = useState(''); 
   const [stageError, setStageError] = useState('');
@@ -200,7 +189,7 @@ export default function TaskForm({ initial, members, allMembers, clusters, stage
     setDueDateError('');
   };
 
-  const isMovingToReview = form.stage === 'In Review' && initial?.stage === 'In Progress';
+  const isMovingToReview = !!initial && form.stage === 'In Review' && initial?.stage !== 'In Review';
 
   // Done is only reachable from In Review (an already Done task can stay Done).
   const isInvalidDone =
@@ -235,11 +224,6 @@ export default function TaskForm({ initial, members, allMembers, clusters, stage
       return;
     }
 
-    if (isMovingToReview && (!form.time_taken || isNaN(form.time_taken) || parseInt(form.time_taken) <= 0)) {
-      setTimeTakenError('Enter the time taken before moving to In Review.');
-      return;
-    }
-
     if (ownerMode && !form.due_date) {
   setDueDateError('Select a due date.');
   return;
@@ -252,13 +236,17 @@ export default function TaskForm({ initial, members, allMembers, clusters, stage
     // server-side from them, so they must be excluded here. Keep this
     // condition identical to the ones guarding the field blocks below.
     const { due_date, assignee_ids, ...rest } = form;
-    const payload = { ...rest, title: form.title.trim(), time_taken: form.time_taken ? parseInt(form.time_taken) : null };
+    const payload = { ...rest, title: form.title.trim() };
     if (ownsAssignees) {
       payload.assignee_ids = assignee_ids;
       // On edit the due date is sent only when it was picked again: the value
       // the form opened with is the API's UTC string, and sending that back
       // would store it 5 h 30 min (one day on screen) earlier.
       if (due_date && due_date !== (initial?.due_date || '')) payload.due_date = due_date;
+    }
+    if (isMovingToReview) {
+      setConfirmReview(payload);
+      return;
     }
     onSave(payload);
   };
@@ -271,16 +259,6 @@ export default function TaskForm({ initial, members, allMembers, clusters, stage
   // Standalone tasks (subtasks disabled) aren't tied to project
   // membership, so they can be assigned to any active member in Orbit.
   const allActiveMembers = (allMembers || members)?.filter(m => m.active).sort((a, b) => a.name.localeCompare(b.name)) || [];
-
-  // The time taken field must be visible to anyone who can trigger the
-  // validation above (previously only members could see it, so other
-  // roles were blocked by an error with no field to fix).
-  const showTimeTaken =
-    form.stage === 'In Review' &&
-    (initial?.stage === 'In Progress' ||
-      (userRole === 'member' && initial?.stage === 'In Review' && !initial?.time_taken));
-
-  const showTimeLogged = form.time_taken && initial?.stage === 'In Review' && initial?.time_taken;
 
   return (
     <form
@@ -390,7 +368,7 @@ export default function TaskForm({ initial, members, allMembers, clusters, stage
         <Field label="Stage">
           <Select
             value={form.stage}
-            onChange={val => { setForm(f => ({ ...f, stage: val })); setTimeTakenError(''); setStageError(''); }}
+            onChange={val => { setForm(f => ({ ...f, stage: val })); setStageError(''); }}
           >
             {allowedStages.map(s => <option key={s} value={s}>{s}</option>)}
           </Select>
@@ -405,37 +383,6 @@ export default function TaskForm({ initial, members, allMembers, clusters, stage
             {clusters?.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
           </Select>
         </Field>
-      )}
-
-      {showTimeTaken && (
-        <div className={panelCls}>
-          <Field label="Time taken (minutes)" htmlFor={ids.timeTaken} required>
-            <input
-              id={ids.timeTaken}
-              className={inputCls}
-              type="number"
-              inputMode="numeric"
-              min="1"
-              value={form.time_taken}
-              onChange={e => { setForm(f => ({ ...f, time_taken: e.target.value })); setTimeTakenError(''); }}
-              placeholder="e.g. 45"
-              autoFocus
-              aria-invalid={!!timeTakenError}
-              aria-describedby={timeTakenError ? ids.timeTakenError : `${ids.timeTaken}-hint`}
-            />
-            <p id={`${ids.timeTaken}-hint`} className={hintCls}>
-              How long did this task take to reach In Review?
-            </p>
-            <FieldError id={ids.timeTakenError}>{timeTakenError}</FieldError>
-          </Field>
-        </div>
-      )}
-
-      {showTimeLogged && (
-        <div className="flex items-center gap-2 rounded-lg bg-[var(--bg-3)] px-3.5 py-2.5 text-[13px] text-[color:var(--accent)]">
-          <ClockIcon />
-          <span>Time logged: <strong className="font-semibold tabular-nums">{form.time_taken} min</strong></span>
-        </div>
       )}
 
       <div className="flex items-center justify-end gap-2 pt-1">
@@ -467,6 +414,21 @@ export default function TaskForm({ initial, members, allMembers, clusters, stage
           {saving ? <Loader label="Saving..." size="sm" variant="button" /> : 'Save task'}
         </button>
       </div>
+
+      <ConfirmModal
+        isOpen={!!confirmReview}
+        title="Send to In Review?"
+        message="This task will be sent to the manager for review. Continue?"
+        confirmText="Yes, send"
+        cancelText="No"
+        isDangerous={false}
+        onCancel={() => setConfirmReview(null)}
+        onConfirm={() => {
+          const payload = confirmReview;
+          setConfirmReview(null);
+          onSave(payload);
+        }}
+      />
     </form>
   );
-}
+}

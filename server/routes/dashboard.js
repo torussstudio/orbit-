@@ -7,5 +7,7 @@ router.get("/members/:id/tasks", auth, requireSelfOrRole("id", "manager"), dashb
 // Lists every main task across all projects — manager dashboard only.
 router.get("/tasks", auth, managerOnly, dashboardController.getTasksList);
 router.get("/my-tasks", auth, dashboardController.getMyTasks);
+// Members page (managers): task progress per member.
+router.get("/team-progress", auth, managerOnly, dashboardController.getTeamProgress);
 
 module.exports = router;

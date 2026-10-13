@@ -604,3 +604,18 @@
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
 }
+
+/* Member dashboard "My Task Progress" donut. Checked for colour-blind
+   separation; the dark steps are a little deeper so they sit right on the
+   charcoal cards. */
+:root {
+  --tp-done: #10b981;
+  --tp-review: #8b5cf6;
+  --tp-progress: #f59e0b;
+  --tp-todo: #6366f1;
+  --tp-rework: #ef4444;
+}
+:root[data-theme="dark"] {
+  --tp-done: #0ea371;
+  --tp-progress: #d07e08;
+}

@@ -11,6 +11,19 @@ import { useAuth } from "../context/AuthContext";
 import { formatDate } from "../utils/helpers";
 import ConfirmModal from "../components/ui/ConfirmModal";
 import Select from "../components/ui/Select";
+import { useLiveRefetch, TASK_AND_PROJECT_EVENTS } from "../hooks/useLiveEvents";
+import {
+  MiniRing,
+  PeriodToggle,
+  ProgressChips,
+  ProgressDonut,
+  ProgressLegend,
+  ProgressNote,
+  TpIcon,
+  plural,
+  progressPct,
+  progressTotal,
+} from "../components/progress/TaskProgress";
 
 /* -------------------------------------------------------------------------- */
 /* Constants                                                                  */
@@ -732,6 +745,8 @@ const MemberRow = memo(function MemberRow({
   onRetryTasks,
   onEdit,
   onAction,
+  progress,
+  onShowProgress,
 }) {
   const count = Number(m.task_count) || 0;
   const countLabel = `${count} task${count !== 1 ? "s" : ""}`;
@@ -826,6 +841,35 @@ const MemberRow = memo(function MemberRow({
             </span>
           )}
         </td>
+
+        {isManager && (
+          <td className={TD}>
+            {progress ? (
+              <button
+                type="button"
+                onClick={() => onShowProgress(m.id)}
+                title={`Show ${m.name}'s task progress`}
+                className={`${BARE} -mx-1.5 -my-1 inline-flex items-center gap-2.5 whitespace-nowrap rounded-lg px-1.5 py-1 text-left transition hover:bg-[color:var(--bg-3)] motion-reduce:transition-none ${FOCUS}`}
+              >
+                <MiniRing p={progress} size={32} />
+                <span className="text-[13.5px] font-bold tabular-nums text-[color:var(--text)]">
+                  {progressPct(progress)}%
+                  <span
+                    className={`block text-[11px] font-medium ${
+                      progress.overdue ? "text-[color:var(--danger)]" : "text-[color:var(--text-3)]"
+                    }`}
+                  >
+                    {progress.overdue
+                      ? `${progress.overdue} overdue`
+                      : `${progress.done}/${progressTotal(progress)} done`}
+                  </span>
+                </span>
+              </button>
+            ) : (
+              <span className="text-[color:var(--text-3)]">—</span>
+            )}
+          </td>
+        )}
 
         <td className={`${TD} whitespace-nowrap text-xs tabular-nums text-[color:var(--text-3)]`}>
           {formatDate(m.created_at)}
@@ -1068,6 +1112,327 @@ function MemberFormPanel({ editing, onClose, onSaved }) {
 /* Page                                                                       */
 /* -------------------------------------------------------------------------- */
 
+/* -------------------------------------------------------------------------- */
+/* Task progress (managers): one card, donut on the left, members on the right */
+/* -------------------------------------------------------------------------- */
+
+function useTeamProgress(enabled) {
+  const [data, setData] = useState(null);
+  const [error, setError] = useState(false);
+  const controller = useRef(null);
+  const hasData = useRef(false);
+
+  const load = useCallback(() => {
+    if (!enabled) return Promise.resolve();
+    controller.current?.abort();
+    const c = new AbortController();
+    controller.current = c;
+    return api
+      .get("/dashboard/team-progress", { signal: c.signal })
+      .then((r) => {
+        if (c.signal.aborted) return;
+        hasData.current = true;
+        setData(r.data?.members || []);
+        setError(false);
+      })
+      .catch((e) => {
+        if (isAbort(e) || c.signal.aborted) return;
+        // Keep what is on screen after a failed refresh.
+        if (!hasData.current) setError(true);
+      });
+  }, [enabled]);
+
+  useEffect(() => {
+    load();
+    return () => controller.current?.abort();
+  }, [load]);
+
+  return { data, error, load };
+}
+
+const sumProgress = (list, period) => {
+  const out = { done: 0, review: 0, in_progress: 0, todo: 0, rework: 0, overdue: 0, due_today: 0 };
+  for (const m of list) for (const k in out) out[k] += Number(m[period]?.[k]) || 0;
+  return out;
+};
+
+function teamMessage(p, member, period, lateMembers) {
+  const when = period === "month" ? "this month" : "this week";
+  const total = progressTotal(p);
+  if (!total) return ["info", "clock", "No tasks", `Nothing assigned ${when}.`];
+  if (member) {
+    const n = member.name;
+    if (p.done === total) return ["ok", "star", `${n} finished everything`, `All tasks ${when} are approved.`];
+    if (p.overdue) return ["bad", "alert", `${n} has ${p.overdue} overdue ${plural(p.overdue, "task", "tasks")}`, "Check in or move the due date."];
+    if (p.review) return ["info", "clock", `${p.review} ${plural(p.review, "task", "tasks")} waiting for your review`, `Review ${plural(p.review, "it", "them")} so ${n} can keep moving.`];
+    if (p.rework) return ["warn", "loop", `${p.rework} ${plural(p.rework, "task", "tasks")} in rework`, `${n} is fixing ${plural(p.rework, "it", "them")}.`];
+    return ["ok", "trophy", `${n} is on track`, `${progressPct(p)}% of tasks done ${when}.`];
+  }
+  if (p.overdue) {
+    return ["bad", "alert", `${p.overdue} ${plural(p.overdue, "task", "tasks")} overdue across ${lateMembers} ${plural(lateMembers, "member", "members")}`, 'Sort by "Most overdue" to see who needs help first.'];
+  }
+  if (p.review) return ["info", "clock", `${p.review} ${plural(p.review, "task", "tasks")} waiting for your review`, "Clear the review queue to keep the team moving."];
+  return ["ok", "trophy", "Team is on track", `${progressPct(p)}% of all tasks done ${when}.`];
+}
+
+function MemberAvatarRing({ m, p, size = 40 }) {
+  const hue = avatarHue(m.email || m.name);
+  return (
+    <MiniRing p={p} size={size}>
+      <span style={{ color: `hsl(${hue} 50% 42%)` }}>{initial(m.name)}</span>
+    </MiniRing>
+  );
+}
+
+const ProgressListItem = memo(function ProgressListItem({ id, icon, name, p, selected, onSelect }) {
+  const total = progressTotal(p);
+  return (
+    <li>
+      <button
+        type="button"
+        aria-pressed={selected}
+        onClick={() => onSelect(id)}
+        className={`grid w-full cursor-pointer grid-cols-[40px_minmax(0,1fr)_auto] items-center gap-3 rounded-xl border px-2.5 py-2 text-left transition-colors duration-150 motion-reduce:transition-none ${FOCUS} ${
+          selected
+            ? "border-[color:color-mix(in_srgb,var(--accent)_40%,transparent)] bg-[color:var(--accent-light)]"
+            : "border-transparent bg-transparent hover:bg-[color:var(--bg-3)]"
+        }`}
+      >
+        {icon}
+        <span className="min-w-0">
+          <span className="block truncate text-[13.5px] font-semibold text-[color:var(--text)]">{name}</span>
+          <span className="flex flex-wrap gap-x-2 text-xs text-[color:var(--text-3)]">
+            <span className="tabular-nums">
+              {p.done}/{total} done
+            </span>
+            {p.overdue > 0 && <span className="font-semibold text-[color:var(--danger)]">{p.overdue} overdue</span>}
+            {p.review > 0 && (
+              <span className="font-semibold text-[color:color-mix(in_srgb,var(--accent-2)_80%,var(--text))]">
+                {p.review} to review
+              </span>
+            )}
+          </span>
+        </span>
+        <span className="text-right text-sm font-bold tabular-nums text-[color:var(--text)]">
+          {progressPct(p)}%
+          <span className="block text-[11px] font-medium text-[color:var(--text-3)]">done</span>
+        </span>
+      </button>
+    </li>
+  );
+});
+
+// Width of an element, kept up to date (layout follows the card's own width,
+// not the window, so it works with the sidebar open or closed).
+function useWidth() {
+  const [node, setNode] = useState(null);
+  const [width, setWidth] = useState(0);
+  useEffect(() => {
+    if (!node) return undefined;
+    setWidth(node.getBoundingClientRect().width);
+    if (typeof ResizeObserver === "undefined") return undefined;
+    const ro = new ResizeObserver(([entry]) => setWidth(entry.contentRect.width));
+    ro.observe(node);
+    return () => ro.disconnect();
+  }, [node]);
+  return [setNode, width];
+}
+
+const PROGRESS_SORTS = [
+  { value: "overdue", label: "Most overdue" },
+  { value: "progress", label: "Lowest progress" },
+  { value: "name", label: "Name" },
+];
+
+const TeamProgressCard = memo(function TeamProgressCard({ data, error, onRetry, selectedId, onSelect, period, onPeriod, sectionRef }) {
+  const [active, setActive] = useState(null);
+  const [sortBy, setSortBy] = useState("overdue");
+  const [leftRef, leftWidth] = useWidth();
+  // Wide: donut | legend | message. Medium: donut | legend, message below. Narrow: stacked.
+  const layout = leftWidth >= 900 ? "wide" : leftWidth >= 560 ? "medium" : "narrow";
+
+  const list = data || [];
+  const selected = selectedId === "all" ? null : list.find((m) => String(m.id) === String(selectedId)) || null;
+  const p = selected ? selected[period] : sumProgress(list, period);
+  const lateMembers = list.filter((m) => m[period]?.overdue > 0).length;
+  const [tone, icon, title, text] = teamMessage(p, selected, period, lateMembers);
+
+  const sorted = useMemo(() => {
+    const copy = list.slice();
+    copy.sort((a, b) => {
+      if (sortBy === "name") return (a.name || "").localeCompare(b.name || "");
+      const pa = progressPct(a[period]);
+      const pb = progressPct(b[period]);
+      if (sortBy === "progress") return pa - pb;
+      return (b[period]?.overdue || 0) - (a[period]?.overdue || 0) || pa - pb;
+    });
+    return copy;
+  }, [list, sortBy, period]);
+
+  const selectAndReset = useCallback(
+    (id) => {
+      setActive(null);
+      onSelect(id);
+    },
+    [onSelect],
+  );
+
+  if (error) {
+    return (
+      <section ref={sectionRef} className="card mb-6 overflow-hidden !p-0">
+        <EmptyState
+          alert
+          title="We couldn't load task progress"
+          body="Check your connection and try again."
+          action={
+            <button type="button" className="btn btn-ghost btn-sm" onClick={onRetry}>
+              Try again
+            </button>
+          }
+        />
+      </section>
+    );
+  }
+
+  if (!data) {
+    return (
+      <section ref={sectionRef} className="card mb-6 !p-5 motion-safe:animate-pulse" aria-hidden="true">
+        <div className="mb-5 h-4 w-40 rounded-md bg-[color:var(--bg-3)]" />
+        <div className="flex items-center gap-6">
+          <div className="size-[150px] rounded-full border-[18px] border-[color:var(--bg-3)]" />
+          <div className="flex flex-1 flex-col gap-3">
+            {[0, 1, 2, 3].map((i) => (
+              <div key={i} className="h-3 w-[70%] rounded-md bg-[color:var(--bg-3)]" />
+            ))}
+          </div>
+        </div>
+      </section>
+    );
+  }
+
+  const whoHue = selected ? avatarHue(selected.email || selected.name) : 0;
+
+  return (
+    <section ref={sectionRef} className="card mb-6 scroll-mt-24 overflow-hidden !p-0" aria-labelledby="tp-team-title">
+      <div className="flex flex-wrap items-center justify-between gap-2.5 border-b border-[color:var(--border)] px-5 py-4">
+        <h2 id="tp-team-title" className="m-0 text-base font-bold tracking-[-0.01em] text-[color:var(--text)]">
+          Task progress
+        </h2>
+        <PeriodToggle value={period} onChange={onPeriod} />
+      </div>
+
+      <div className="grid min-[1100px]:grid-cols-[minmax(0,1fr)_minmax(340px,400px)]">
+        <div ref={leftRef} className="min-w-0 px-6 pb-6 pt-5">
+          {/* Who + chips on one line */}
+          <div className="mb-5 flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
+            <div className="flex min-w-0 items-center gap-2.5">
+              {selected ? (
+                <span
+                  aria-hidden="true"
+                  className="grid size-[34px] shrink-0 place-items-center overflow-hidden rounded-[10px] text-[13px] font-bold"
+                  style={{
+                    color: `hsl(${whoHue} 50% 40%)`,
+                    background: `color-mix(in srgb, hsl(${whoHue} 60% 50%) 16%, var(--bg-3))`,
+                  }}
+                >
+                  {selected.avatar_url ? (
+                    <img src={selected.avatar_url} alt="" className="block h-full w-full object-cover" />
+                  ) : (
+                    initial(selected.name)
+                  )}
+                </span>
+              ) : (
+                <span className="grid size-[34px] shrink-0 place-items-center rounded-[10px] bg-[color:var(--accent-light)] text-[color:var(--accent)]">
+                  <TpIcon name="team" size={18} />
+                </span>
+              )}
+              <div className="min-w-0">
+                <div className="truncate text-[15px] font-semibold text-[color:var(--text)]">
+                  {selected ? selected.name : "All members"}
+                </div>
+                <div className="text-xs text-[color:var(--text-3)]">
+                  {selected ? "Member · task progress" : `${list.length} ${plural(list.length, "member", "members")} · team task progress`}
+                </div>
+              </div>
+            </div>
+            <ProgressChips p={p} showReview />
+          </div>
+
+          {layout === "wide" ? (
+            <div className="grid grid-cols-[190px_minmax(0,1fr)_minmax(240px,300px)] items-center gap-10">
+              <ProgressDonut p={p} active={active} onActive={setActive} size={190} />
+              <ProgressLegend p={p} active={active} onActive={setActive} />
+              <div className="self-stretch">
+                <ProgressNote tone={tone} icon={icon} title={title} text={text} stacked />
+              </div>
+            </div>
+          ) : (
+            <>
+              <div
+                className={
+                  layout === "medium"
+                    ? "grid grid-cols-[190px_minmax(0,1fr)] items-center gap-8"
+                    : "flex flex-col items-center gap-5"
+                }
+              >
+                <ProgressDonut p={p} active={active} onActive={setActive} size={layout === "medium" ? 190 : 170} />
+                <div className="w-full min-w-0">
+                  <ProgressLegend p={p} active={active} onActive={setActive} />
+                </div>
+              </div>
+              <div className="mt-5">
+                <ProgressNote tone={tone} icon={icon} title={title} text={text} />
+              </div>
+            </>
+          )}
+        </div>
+
+        {/* Members: as tall as the left side; scrolls inside when the team is long */}
+        <div className="relative min-w-0 border-t border-[color:var(--border)] min-[1100px]:border-l min-[1100px]:border-t-0">
+          <div className="flex flex-col p-4 min-[1100px]:absolute min-[1100px]:inset-0">
+            <div className="mb-2.5 flex shrink-0 items-center justify-between gap-2">
+              <h3 className="m-0 text-sm font-semibold text-[color:var(--text)]">
+                Members <span className="font-normal text-[color:var(--text-3)]">{list.length}</span>
+              </h3>
+              <div className="w-40">
+                <Select value={sortBy} onChange={setSortBy} options={PROGRESS_SORTS} aria-label="Sort members" />
+              </div>
+            </div>
+            <ul className="m-0 grid min-h-0 list-none content-start gap-1 overflow-y-auto p-0 max-[1099px]:max-h-[420px] min-[1100px]:flex-1">
+              <ProgressListItem
+                id="all"
+                name="All members"
+                p={sumProgress(list, period)}
+                selected={!selected}
+                onSelect={selectAndReset}
+                icon={
+                  <span className="grid size-10 place-items-center rounded-xl bg-[color:var(--bg-3)] text-[color:var(--accent)]">
+                    <TpIcon name="team" size={20} />
+                  </span>
+                }
+              />
+              {sorted.map((m) => (
+                <ProgressListItem
+                  key={m.id}
+                  id={m.id}
+                  name={m.name}
+                  p={m[period]}
+                  selected={selected?.id === m.id}
+                  onSelect={selectAndReset}
+                  icon={<MemberAvatarRing m={m} p={m[period]} />}
+                />
+              ))}
+            </ul>
+            {list.length === 0 && (
+              <p className="m-0 mt-2 px-2 text-xs text-[color:var(--text-3)]">No active members yet.</p>
+            )}
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+});
+
 export default function Members() {
   const auth = useAuth();
   const { isManager } = auth;
@@ -1087,6 +1452,24 @@ export default function Members() {
   const deferredQuery = useDeferredValue(query);
 
   const { members, loading, loadError, load, retry } = useMembersData(setNotice);
+
+  // Task progress card (managers only).
+  const team = useTeamProgress(isManager);
+  const { load: loadTeam } = team;
+  useLiveRefetch(TASK_AND_PROJECT_EVENTS, loadTeam, { enabled: isManager });
+  const [progressFor, setProgressFor] = useState("all");
+  const [progressPeriod, setProgressPeriod] = useState("month");
+  const progressRef = useRef(null);
+  const progressById = useMemo(() => {
+    const map = new Map();
+    for (const m of team.data || []) map.set(String(m.id), m[progressPeriod]);
+    return map;
+  }, [team.data, progressPeriod]);
+  const showProgress = useCallback((id) => {
+    setProgressFor(id);
+    const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    progressRef.current?.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "start" });
+  }, []);
   const memberTasks = useMemberTasks();
   const { reset: resetTasks } = memberTasks;
 
@@ -1119,6 +1502,7 @@ export default function Members() {
     clearMembersCache();
     resetTasks();
     await load();
+    loadTeam();
 
     if (message) {
       setToast({
@@ -1127,7 +1511,7 @@ export default function Members() {
       });
     }
   },
-  [resetTasks, load],
+  [resetTasks, load, loadTeam],
 );
 
   const openCreate = useCallback(() => setPanel({ editing: null }), []);
@@ -1223,7 +1607,7 @@ export default function Members() {
 
   const filtersActive = query.trim() !== "" || roleFilter !== "all" || statusFilter !== "all";
   const activeCount = useMemo(() => members.filter((m) => m.active).length, [members]);
-  const colCount = isManager ? 7 : 6;
+  const colCount = isManager ? 8 : 6;
 
   const { expandedId, tasks: tasksById, errors: tasksErrors, loadingId } = memberTasks;
 
@@ -1310,6 +1694,25 @@ export default function Members() {
           </div>
         ) : (
           <>
+            {isManager && (
+              <TeamProgressCard
+                data={team.data}
+                error={team.error}
+                onRetry={loadTeam}
+                selectedId={progressFor}
+                onSelect={setProgressFor}
+                period={progressPeriod}
+                onPeriod={setProgressPeriod}
+                sectionRef={progressRef}
+              />
+            )}
+
+            {isManager && (
+              <div className="mb-3 flex items-baseline justify-between gap-3">
+                <h2 className="m-0 text-base font-semibold tracking-[-0.01em] text-[color:var(--text)]">All members</h2>
+              </div>
+            )}
+
             {/* Toolbar */}
             <div className="mb-4 flex flex-wrap items-center gap-3">
               <div className="relative w-full sm:w-72">
@@ -1362,6 +1765,7 @@ export default function Members() {
                         <th scope="col" className={TH}>Email</th>
                         <th scope="col" className={TH}>Role</th>
                         <SortTh label="Tasks" sortKey="tasks" sort={sort} onSort={toggleSort} />
+                        {isManager && <th scope="col" className={TH}>Progress</th>}
                         <SortTh label="Joined" sortKey="joined" sort={sort} onSort={toggleSort} />
                         <th scope="col" className={TH}>Status</th>
                         {isManager && <th scope="col" className={`${TH} text-right`}>Actions</th>}
@@ -1383,6 +1787,8 @@ export default function Members() {
                           onRetryTasks={memberTasks.retry}
                           onEdit={openEdit}
                           onAction={handleAction}
+                          progress={progressById.get(String(m.id))}
+                          onShowProgress={showProgress}
                         />
                       ))}
                     </tbody>

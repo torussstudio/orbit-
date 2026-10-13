@@ -35,7 +35,7 @@ const ICONS = {
   sheet: 'M3 3h18v18H3zM3 9h18M3 15h18M9 3v18',
   // Inbox tray: Task Request
   inbox: 'M22 12h-6l-2 3h-4l-2-3H2M5.45 5.11L2 12v6a2 2 0 002 2h16a2 2 0 002-2v-6l-3.45-6.89A2 2 0 0016.76 4H7.24a2 2 0 00-1.79 1.11z',
-  // Clock: Time Log (manager view)
+  // Clock: Time Log (managers: everyone's time, members: log time)
   clock: 'M12 22a10 10 0 100-20 10 10 0 000 20zM12 6v6l4 2',
   search: 'M21 21l-4.35-4.35M19 11a8 8 0 11-16 0 8 8 0 0116 0z',
   close: 'M18 6L6 18M6 6l12 12',
@@ -860,6 +860,7 @@ export default function Layout() {
           items: [
             { to: TASKS_PATH, icon: ICONS.tasks, label: 'Task View', badge: newAssigned },
             { to: '/task-request', icon: ICONS.inbox, label: 'Task Request' },
+            { to: '/time-log', icon: ICONS.clock, label: 'Time Log' },
           ],
         },
       ];

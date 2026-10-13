@@ -1,6 +1,6 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { AuthProvider } from './context/AuthContext';
-import { RequireAuth, RequireManager } from './routes/guards';
+import { RequireAuth, RequireManager, ByRole } from './routes/guards';
 import Layout from './components/layout/Layout';
 import { lazy, Suspense } from 'react';
 import { ToastProvider } from './context/ToastContext';
@@ -25,6 +25,7 @@ const AccountSettings = lazy(() => import('./pages/AccountSettings'));
 const TaskRequest = lazy(() => import('./pages/Taskrequest'));
 const RequestedTasks = lazy(() => import('./pages/Requestedtasks'));
 const TimeLog = lazy(() => import('./pages/TimeLog'));
+const MyTimeLog = lazy(() => import('./pages/MyTimeLog'));
 
 const SuspenseFallback = () => (
   <Loader label="Loading page" size="lg" variant="page" />
@@ -54,7 +55,8 @@ export default function App() {
             <Route path="calendar" element={<Suspense fallback={<SuspenseFallback />}><Calendar /></Suspense>} />
             <Route path="in-review" element={<RequireManager><Suspense fallback={<SuspenseFallback />}><InReview /></Suspense></RequireManager>} />
             <Route path="requested-tasks" element={<RequireManager><Suspense fallback={<SuspenseFallback />}><RequestedTasks /></Suspense></RequireManager>} />
-            <Route path="time-log" element={<RequireManager><Suspense fallback={<SuspenseFallback />}><TimeLog /></Suspense></RequireManager>} />
+            {/* Managers: everyone's time. Members: their own "log time" form. */}
+            <Route path="time-log" element={<Suspense fallback={<SuspenseFallback />}><ByRole manager={<TimeLog />} member={<MyTimeLog />} /></Suspense>} />
             <Route path="account-settings" element={<Suspense fallback={<SuspenseFallback />}><AccountSettings /></Suspense>} />
           </Route>
         </Routes>
@@ -63,4 +65,4 @@ export default function App() {
     </AuthProvider>
     </ErrorBoundary>
   );
-}
+}

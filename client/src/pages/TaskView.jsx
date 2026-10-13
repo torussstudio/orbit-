@@ -4,7 +4,7 @@ import api from "../api/client";
 import { useAuth } from "../context/AuthContext";
 import { formatDate, isOverdue } from "../utils/helpers";
 import Select from "../components/ui/Select";
-import Modal from "../components/ui/Modal";
+import ConfirmModal from "../components/ui/ConfirmModal";
 import ProjectLinks from "../components/projects/ProjectLinks";
 import { useLiveRefetch, TASK_AND_PROJECT_EVENTS } from "../hooks/useLiveEvents";
 
@@ -363,110 +363,29 @@ const TaskRow = memo(function TaskRow({ task: t, locked, onStageSelect }) {
   );
 });
 
-// Owns its input state, so typing never re-renders the task list.
-function TimeTakenModal({ task, onClose, onConfirm }) {
-  const [hours, setHours] = useState("");
-  const [mins, setMins] = useState("");
-  const [error, setError] = useState("");
+// Simple "send to In Review?" confirmation (replaces the old time taken popup).
+function ReviewConfirm({ task, onClose, onConfirm }) {
   const [saving, setSaving] = useState(false);
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+  const confirm = async () => {
     if (saving) return;
-    const h = hours === "" ? 0 : Number(hours);
-    const m = mins === "" ? 0 : Number(mins);
-    if (!Number.isInteger(h) || !Number.isInteger(m) || h < 0 || m < 0) {
-      setError("Enter whole numbers for hours and minutes.");
-      return;
-    }
-    if (m > 59) {
-      setError("Minutes must be between 0 and 59.");
-      return;
-    }
-    const total = h * 60 + m;
-    if (total <= 0) {
-      setError("Enter the time taken (at least 1 minute).");
-      return;
-    }
     setSaving(true);
-    const ok = await onConfirm(task, total);
-    if (ok) {
-      onClose();
-    } else {
-      setSaving(false);
-      setError("We couldn't save this. Please try again.");
-    }
+    const ok = await onConfirm(task);
+    if (ok) onClose();
+    else setSaving(false);
   };
-
   return (
-    <Modal title="Time taken" onClose={onClose}>
-      <form onSubmit={handleSubmit} noValidate>
-        <p className="mb-4 text-[13px] leading-normal text-[color:var(--text-2)]">
-          Moving <strong>{task?.title}</strong> to <strong>In Review</strong>. How long did this task take?
-        </p>
-        <div className="form-group">
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="form-label" htmlFor="tv-time-hours">
-                Hours
-              </label>
-              <input
-                id="tv-time-hours"
-                className="form-input"
-                type="number"
-                inputMode="numeric"
-                min="0"
-                step="1"
-                value={hours}
-                onChange={(e) => {
-                  setHours(e.target.value);
-                  setError("");
-                }}
-                placeholder="0"
-                aria-invalid={!!error}
-                aria-describedby={error ? "tv-time-taken-error" : undefined}
-                autoFocus
-              />
-            </div>
-            <div>
-              <label className="form-label" htmlFor="tv-time-mins">
-                Minutes
-              </label>
-              <input
-                id="tv-time-mins"
-                className="form-input"
-                type="number"
-                inputMode="numeric"
-                min="0"
-                max="59"
-                step="1"
-                value={mins}
-                onChange={(e) => {
-                  setMins(e.target.value);
-                  setError("");
-                }}
-                placeholder="45"
-                aria-invalid={!!error}
-                aria-describedby={error ? "tv-time-taken-error" : undefined}
-              />
-            </div>
-          </div>
-          {error && (
-            <div id="tv-time-taken-error" className="mt-1.5 text-xs text-[color:var(--danger)]" role="alert">
-              {error}
-            </div>
-          )}
-        </div>
-        <div className="modal-actions">
-          <button type="button" className="btn btn-ghost" onClick={onClose} disabled={saving}>
-            Cancel
-          </button>
-          <button type="submit" className="btn btn-primary" disabled={saving}>
-            {saving ? "Saving…" : "Confirm & move"}
-          </button>
-        </div>
-      </form>
-    </Modal>
+    <ConfirmModal
+      isOpen
+      title="Send to In Review?"
+      message={<>Move <strong>{task?.title}</strong> to <strong>In Review</strong>?</>}
+      confirmText="Yes, send"
+      cancelText="No"
+      loadingText="Sending…"
+      isDangerous={false}
+      loading={saving}
+      onCancel={onClose}
+      onConfirm={confirm}
+    />
   );
 }
 
@@ -483,7 +402,7 @@ export default function TaskView() {
   const [projectFilter, setProjectFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
   const [limit, setLimit] = useState(PAGE_SIZE);
-  const [timeTakenTask, setTimeTakenTask] = useState(null);
+  const [reviewTask, setReviewTask] = useState(null);
 
   const listCtl = useRef(null);
   // Stage changes being saved right now (see liveRefresh).
@@ -594,7 +513,7 @@ export default function TaskView() {
       return true;
     } catch (err) {
       console.error("Failed to update stage:", err.message);
-      // Revert on failure (restores time_taken too, not just stage).
+      // Revert on failure.
       setTasks((prev) => prev.map((t) => (t.id === task.id ? task : t)));
       setNotice(`We couldn't move "${task.title}" to ${newStage}. Please try again.`);
       return false;
@@ -608,20 +527,20 @@ export default function TaskView() {
     }
   }, [load]);
 
-  // In Review needs a time-taken value first (same popup as the task detail page).
+  // In Review asks for a simple confirmation first.
   const handleStageSelect = useCallback(
     (task, newStage) => {
-      if (newStage === "In Review") setTimeTakenTask(task);
+      if (newStage === "In Review") setReviewTask(task);
       else handleStageChange(task, newStage);
     },
     [handleStageChange],
   );
 
-  const confirmTimeTaken = useCallback(
-    (task, minutes) => handleStageChange(task, "In Review", { time_taken: minutes }),
+  const confirmReview = useCallback(
+    (task) => handleStageChange(task, "In Review"),
     [handleStageChange],
   );
-  const closeModal = useCallback(() => setTimeTakenTask(null), []);
+  const closeModal = useCallback(() => setReviewTask(null), []);
   const dismissNotice = useCallback(() => setNotice(""), []);
   const reload = useCallback(() => window.location.reload(), []);
   const showMore = useCallback(() => setLimit((n) => n + PAGE_SIZE), []);
@@ -761,8 +680,8 @@ export default function TaskView() {
         )}
       </div>
 
-      {timeTakenTask && (
-        <TimeTakenModal task={timeTakenTask} onClose={closeModal} onConfirm={confirmTimeTaken} />
+      {reviewTask && (
+        <ReviewConfirm task={reviewTask} onClose={closeModal} onConfirm={confirmReview} />
       )}
     </>
   );

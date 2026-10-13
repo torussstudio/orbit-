@@ -1,200 +1,262 @@
 const db = require("../db");
 
 /*
- * Time Log (manager only)
+ * Time Log
  *
- * Time source: tasks.time_taken (minutes), entered when a task / sub task
- * is moved to In Review.
+ * Source: time_entries (see db/index.js). Members add entries from their
+ * own "Time Log" page: project, optional cluster, task (or a typed
+ * Miscellaneous task), work date and time. A task can be logged any number
+ * of times. Miscellaneous entries live only here and never create a task.
  *
- * "Completed" = stage is Done. The date a task was completed is kept in
- * tasks.completed_at, set by a database trigger (below), so every way a
- * task can reach Done (stage buttons, review modal, board drag, parent
- * stage recompute) is covered without touching taskService.
- *
- * Date filters are calendar days in IST (Asia/Kolkata).
- *
- * Counting rule (same as the Projects page):
- *  - a task with no sub tasks counts as 1
- *  - a task with sub tasks is not counted itself, only its sub tasks are
- * Time is the sum of every completed task's own time_taken, so a main task
- * and its sub tasks are never counted twice.
+ * Managers see every entry on the admin Time Log page, filtered by work
+ * date (IST calendar days, stored as a DATE), and can edit or delete them.
+ * Members never see their old entries.
  */
 
 const IST = "Asia/Kolkata";
+const MAX_MINUTES = 24 * 60; // one entry is at most one full day
+const MAX_TITLE = 500;
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
-/* ------------------------------------------------------------------ */
-/* Schema: completed_at column + trigger + one-time backfill           */
-/* ------------------------------------------------------------------ */
-
-const BACKFILL_NAME = "timelog_backfill_completed_at";
-
-async function setupSchema() {
-  await db.query(
-    `ALTER TABLE tasks ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ`,
-  );
-
-  // Done           -> completed_at = now (kept if it was already Done)
-  // anything else  -> completed_at = NULL (rework clears it; the next
-  //                   Done gets a new date)
-  await db.query(`
-    CREATE OR REPLACE FUNCTION orbit_set_task_completed_at()
-    RETURNS trigger AS $$
-    BEGIN
-      IF lower(trim(coalesce(NEW.stage, ''))) = 'done' THEN
-        IF TG_OP = 'INSERT' THEN
-          NEW.completed_at := coalesce(NEW.completed_at, NOW());
-        ELSIF lower(trim(coalesce(OLD.stage, ''))) <> 'done' THEN
-          NEW.completed_at := NOW();
-        ELSE
-          NEW.completed_at := coalesce(NEW.completed_at, OLD.completed_at, NOW());
-        END IF;
-      ELSE
-        NEW.completed_at := NULL;
-      END IF;
-      RETURN NEW;
-    END;
-    $$ LANGUAGE plpgsql
-  `);
-
-  await db.query(`
-    CREATE OR REPLACE TRIGGER trg_tasks_completed_at
-    BEFORE INSERT OR UPDATE ON tasks
-    FOR EACH ROW EXECUTE FUNCTION orbit_set_task_completed_at()
-  `);
-
-  await db.query(`
-    CREATE INDEX IF NOT EXISTS idx_tasks_completed_at
-    ON tasks (completed_at)
-    WHERE completed_at IS NOT NULL
-  `);
-
-  // Same table db.js uses, so the backfill runs exactly once.
-  await db.query(`
-    CREATE TABLE IF NOT EXISTS schema_migrations (
-      name VARCHAR(255) PRIMARY KEY,
-      run_at TIMESTAMPTZ DEFAULT NOW()
-    )
-  `);
-
-  const { rows } = await db.query(
-    `SELECT 1 FROM schema_migrations WHERE name = $1`,
-    [BACKFILL_NAME],
-  );
-
-  if (rows.length === 0) {
-    // Tasks already Done before this feature: use the last "moved to Done"
-    // activity, otherwise updated_at, otherwise created_at.
-    await db.query(`
-      UPDATE tasks t
-      SET completed_at = coalesce(
-        (
-          SELECT MAX(a.created_at)
-          FROM task_activity a
-          WHERE a.task_id = t.id
-            AND lower(trim(coalesce(a.meta->>'to', ''))) = 'done'
-        ),
-        t.updated_at,
-        t.created_at
-      )
-      WHERE lower(trim(coalesce(t.stage, ''))) = 'done'
-        AND t.completed_at IS NULL
-    `);
-
-    await db.query(
-      `INSERT INTO schema_migrations (name, run_at) VALUES ($1, NOW())
-       ON CONFLICT (name) DO NOTHING`,
-      [BACKFILL_NAME],
-    );
-  }
-}
-
-let schemaReady = null;
-
-function ensureSchema() {
-  if (!schemaReady) {
-    schemaReady = setupSchema().catch((err) => {
-      // Try again on the next request.
-      schemaReady = null;
-      throw err;
-    });
-  }
-  return schemaReady;
-}
-
-// Install the trigger shortly after boot (db.js creates the tables first),
-// so tasks completed before anyone opens Time Log still get their date.
-setTimeout(() => {
-  ensureSchema().catch((err) =>
-    console.error("[time-log] schema setup failed:", err.message),
-  );
-}, 3000);
-
-/* ------------------------------------------------------------------ */
-/* Queries                                                             */
-/* ------------------------------------------------------------------ */
-
-// $1 = from (YYYY-MM-DD or null), $2 = to (YYYY-MM-DD or null), both IST days.
-const DONE_CTE = `
-  done AS (
-    SELECT
-      t.id,
-      t.project_id,
-      t.parent_task_id,
-      t.title,
-      t.time_taken,
-      t.rework_count,
-      t.completed_at,
-      NOT EXISTS (SELECT 1 FROM tasks c WHERE c.parent_task_id = t.id) AS is_leaf
-    FROM tasks t
-    WHERE lower(trim(coalesce(t.stage, ''))) = 'done'
-      AND t.completed_at IS NOT NULL
-      AND ($1::date IS NULL OR t.completed_at >= ($1::date::timestamp AT TIME ZONE '${IST}'))
-      AND ($2::date IS NULL OR t.completed_at < (($2::date + 1)::timestamp AT TIME ZONE '${IST}'))
-  )
-`;
-
-const ASSIGNEES = `
-  coalesce(
-    (
-      SELECT json_agg(json_build_object('id', m.id, 'name', m.name) ORDER BY m.name)
-      FROM task_assignees ta
-      JOIN members m ON m.id = ta.member_id
-      WHERE ta.task_id = d.id
-    ),
-    '[]'::json
-  ) AS assignees
-`;
-
-const TOTALS = `
-  coalesce(SUM(coalesce(d.time_taken, 0)), 0)::int AS total_minutes,
-  (COUNT(*) FILTER (WHERE d.is_leaf))::int AS task_count,
-  (COUNT(*) FILTER (WHERE d.is_leaf AND coalesce(d.time_taken, 0) = 0))::int AS unlogged_count,
-  MAX(d.completed_at) AS last_completed_at
-`;
-
-function notFound(message) {
+function httpError(status, message) {
   const err = new Error(message);
-  err.status = 404;
+  err.status = status;
   return err;
 }
 
-async function getProjects({ from, to }) {
-  await ensureSchema();
+// Today as YYYY-MM-DD in IST.
+function istToday() {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: IST,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
+}
+
+function readWorkDate(value) {
+  if (typeof value !== "string" || !DATE_RE.test(value)) {
+    throw httpError(400, "Select the date you worked on this.");
+  }
+  const d = new Date(`${value}T00:00:00Z`);
+  if (Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== value) {
+    throw httpError(400, "Select a valid date.");
+  }
+  if (value > istToday()) {
+    throw httpError(400, "The date can't be in the future.");
+  }
+  return value;
+}
+
+function readMinutes(value) {
+  const minutes = Number(value);
+  if (!Number.isInteger(minutes) || minutes <= 0) {
+    throw httpError(400, "Enter the time taken (at least 1 minute).");
+  }
+  if (minutes > MAX_MINUTES) {
+    throw httpError(400, "One entry can't be more than 24 hours.");
+  }
+  return minutes;
+}
+
+function readTitle(value) {
+  const title = String(value ?? "").trim();
+  if (!title) throw httpError(400, "Enter the task name.");
+  if (title.length > MAX_TITLE) throw httpError(400, "The task name is too long.");
+  return title;
+}
+
+const sameId = (a, b) => a !== null && a !== undefined && String(a) === String(b);
+
+/* ------------------------------------------------------------------ */
+/* Member: form options                                                */
+/* ------------------------------------------------------------------ */
+
+/*
+ * Projects the member can log time on: projects they are a member of, plus
+ * projects where they have an assigned task (stand-alone tasks can be given
+ * to anyone). Archived and trashed projects are left out.
+ *
+ * Tasks: tasks and sub tasks assigned to the member that are not Done yet.
+ * Once the manager marks a task Done it no longer shows up here.
+ *
+ * Clusters: only clusters that hold at least one of those tasks. A sub task
+ * belongs to its own cluster, or its main task's cluster.
+ */
+async function getMemberOptions(memberId) {
+  const { rows: tasks } = await db.query(
+    `
+      SELECT
+        t.id,
+        t.title,
+        t.stage,
+        t.project_id,
+        t.parent_task_id,
+        pt.title AS parent_title,
+        coalesce(t.cluster_id, pt.cluster_id) AS cluster_id
+      FROM tasks t
+      JOIN task_assignees ta ON ta.task_id = t.id AND ta.member_id::text = $1
+      JOIN projects p ON p.id = t.project_id
+      LEFT JOIN tasks pt ON pt.id = t.parent_task_id
+      WHERE lower(trim(coalesce(t.stage, ''))) <> 'done'
+        AND p.status <> 'archived'
+        AND p.trashed_at IS NULL
+      ORDER BY coalesce(pt.title, t.title), t.parent_task_id NULLS FIRST, t.title
+    `,
+    [String(memberId)],
+  );
+
+  const { rows: projects } = await db.query(
+    `
+      SELECT p.id, p.name, p.client_name
+      FROM projects p
+      WHERE p.status <> 'archived'
+        AND p.trashed_at IS NULL
+        AND (
+          EXISTS (
+            SELECT 1 FROM project_members pm
+            WHERE pm.project_id = p.id AND pm.member_id::text = $1
+          )
+          OR EXISTS (
+            SELECT 1 FROM tasks t
+            JOIN task_assignees ta ON ta.task_id = t.id
+            WHERE t.project_id = p.id AND ta.member_id::text = $1
+          )
+        )
+      ORDER BY lower(p.name)
+    `,
+    [String(memberId)],
+  );
+
+  const clusterIds = [...new Set(tasks.map((t) => t.cluster_id).filter((id) => id != null).map(String))];
+  const { rows: clusters } = clusterIds.length
+    ? await db.query(
+        `SELECT id, name, project_id FROM clusters WHERE id::text = ANY($1::text[]) ORDER BY lower(name)`,
+        [clusterIds],
+      )
+    : { rows: [] };
+
+  return { projects, clusters, tasks, today: istToday() };
+}
+
+/* ------------------------------------------------------------------ */
+/* Member: add an entry                                                */
+/* ------------------------------------------------------------------ */
+
+async function createEntry(memberId, body = {}) {
+  const isMisc = body.is_misc === true || body.is_misc === "true";
+  const workDate = readWorkDate(body.work_date);
+  const minutes = readMinutes(body.minutes);
+
+  if (body.project_id === undefined || body.project_id === null || body.project_id === "") {
+    throw httpError(400, "Select a project.");
+  }
+
+  // Same rules as the form options: never trust ids from the client.
+  const options = await getMemberOptions(memberId);
+  const project = options.projects.find((p) => sameId(p.id, body.project_id));
+  if (!project) throw httpError(403, "You can't log time on this project.");
+
+  let taskId = null;
+  let clusterId = null;
+  let title;
+
+  if (isMisc) {
+    title = readTitle(body.task_name);
+  } else {
+    if (body.task_id === undefined || body.task_id === null || body.task_id === "") {
+      throw httpError(400, "Select a task.");
+    }
+    const task = options.tasks.find((t) => sameId(t.id, body.task_id));
+    if (!task || !sameId(task.project_id, project.id)) {
+      throw httpError(403, "This task isn't assigned to you, or it is already Done.");
+    }
+    taskId = task.id;
+    clusterId = task.cluster_id ?? null;
+    title = task.title;
+  }
 
   const { rows } = await db.query(
     `
-      WITH ${DONE_CTE}
+      INSERT INTO time_entries
+        (member_id, project_id, cluster_id, task_id, task_title, is_misc, minutes, work_date)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      RETURNING id, project_id, task_id, task_title, is_misc, minutes,
+                to_char(work_date, 'YYYY-MM-DD') AS work_date
+    `,
+    [memberId, project.id, clusterId, taskId, title, isMisc, minutes, workDate],
+  );
+
+  return rows[0];
+}
+
+/* ------------------------------------------------------------------ */
+/* Admin: queries                                                      */
+/* ------------------------------------------------------------------ */
+
+// $1 = from (YYYY-MM-DD or null), $2 = to (YYYY-MM-DD or null): work dates.
+const RANGE = `
+  ($1::date IS NULL OR e.work_date >= $1::date)
+  AND ($2::date IS NULL OR e.work_date <= $2::date)
+`;
+
+// Everything the admin page shows for one entry. Uses the live task title
+// when the task still exists, otherwise the copy saved with the entry.
+const ENTRY_COLUMNS = `
+  e.id,
+  e.member_id,
+  m.name AS member_name,
+  e.project_id,
+  p.name AS project_name,
+  p.client_name,
+  p.status AS project_status,
+  e.cluster_id,
+  c.name AS cluster_name,
+  e.task_id,
+  coalesce(t.title, e.task_title) AS task_title,
+  t.parent_task_id,
+  pt.title AS parent_title,
+  t.stage AS task_stage,
+  (e.task_id IS NULL AND NOT e.is_misc) AS task_deleted,
+  e.is_misc,
+  e.minutes,
+  to_char(e.work_date, 'YYYY-MM-DD') AS work_date,
+  e.created_at
+`;
+
+const ENTRY_JOINS = `
+  JOIN projects p ON p.id = e.project_id
+  LEFT JOIN members m ON m.id = e.member_id
+  LEFT JOIN clusters c ON c.id = e.cluster_id
+  LEFT JOIN tasks t ON t.id = e.task_id
+  LEFT JOIN tasks pt ON pt.id = t.parent_task_id
+`;
+
+// A "task" for counting: a real task id, or a Miscellaneous name.
+const TASK_KEY = `
+  CASE WHEN e.is_misc THEN 'misc:' || lower(e.task_title)
+       WHEN e.task_id IS NOT NULL THEN 'task:' || e.task_id::text
+       ELSE 'gone:' || lower(e.task_title) END
+`;
+
+const TOTALS = `
+  coalesce(SUM(e.minutes), 0)::int AS total_minutes,
+  coalesce(SUM(e.minutes) FILTER (WHERE e.is_misc), 0)::int AS misc_minutes,
+  COUNT(*)::int AS entry_count,
+  COUNT(DISTINCT ${TASK_KEY})::int AS task_count,
+  to_char(MAX(e.work_date), 'YYYY-MM-DD') AS last_logged_on
+`;
+
+async function getProjects({ from, to }) {
+  const { rows } = await db.query(
+    `
       SELECT
         p.id, p.name, p.client_name, p.status,
         ${TOTALS},
-        (
-          SELECT COUNT(DISTINCT ta.member_id)
-          FROM task_assignees ta
-          JOIN done d2 ON d2.id = ta.task_id
-          WHERE d2.project_id = p.id
-        )::int AS member_count
-      FROM projects p
-      JOIN done d ON d.project_id = p.id
+        COUNT(DISTINCT e.member_id)::int AS member_count
+      FROM time_entries e
+      JOIN projects p ON p.id = e.project_id
+      WHERE ${RANGE}
       GROUP BY p.id
       ORDER BY total_minutes DESC, p.name ASC
     `,
@@ -205,46 +267,38 @@ async function getProjects({ from, to }) {
 }
 
 async function getProjectDetail(projectId, { from, to }) {
-  await ensureSchema();
-
   const { rows: projectRows } = await db.query(
     `SELECT id, name, client_name, status FROM projects WHERE id::text = $1 LIMIT 1`,
     [String(projectId)],
   );
 
-  if (!projectRows[0]) throw notFound("Project not found");
+  if (!projectRows[0]) throw httpError(404, "Project not found");
 
-  const { rows: tasks } = await db.query(
+  const { rows: entries } = await db.query(
     `
-      WITH ${DONE_CTE}
-      SELECT
-        d.id, d.title, d.parent_task_id, pt.title AS parent_title,
-        d.time_taken, d.rework_count, d.completed_at, d.is_leaf,
-        ${ASSIGNEES}
-      FROM done d
-      LEFT JOIN tasks pt ON pt.id = d.parent_task_id
-      WHERE d.project_id::text = $3
-      ORDER BY d.completed_at DESC
+      SELECT ${ENTRY_COLUMNS}
+      FROM time_entries e
+      ${ENTRY_JOINS}
+      WHERE ${RANGE}
+        AND e.project_id::text = $3
+      ORDER BY e.work_date DESC, e.created_at DESC
     `,
     [from, to, String(projectId)],
   );
 
-  return { project: projectRows[0], tasks };
+  return { project: projectRows[0], entries };
 }
 
 async function getMembers({ from, to }) {
-  await ensureSchema();
-
   const { rows } = await db.query(
     `
-      WITH ${DONE_CTE}
       SELECT
         m.id, m.name, m.email, m.avatar_url, m.role, m.active,
         ${TOTALS},
-        COUNT(DISTINCT d.project_id)::int AS project_count
-      FROM members m
-      JOIN task_assignees ta ON ta.member_id = m.id
-      JOIN done d ON d.id = ta.task_id
+        COUNT(DISTINCT e.project_id)::int AS project_count
+      FROM time_entries e
+      JOIN members m ON m.id = e.member_id
+      WHERE ${RANGE}
       GROUP BY m.id
       ORDER BY total_minutes DESC, m.name ASC
     `,
@@ -255,8 +309,6 @@ async function getMembers({ from, to }) {
 }
 
 async function getMemberDetail(memberId, { from, to }) {
-  await ensureSchema();
-
   const { rows: memberRows } = await db.query(
     `
       SELECT id, name, email, avatar_url, role, active
@@ -267,33 +319,72 @@ async function getMemberDetail(memberId, { from, to }) {
     [String(memberId)],
   );
 
-  if (!memberRows[0]) throw notFound("Member not found");
+  if (!memberRows[0]) throw httpError(404, "Member not found");
 
-  const { rows: tasks } = await db.query(
+  const { rows: entries } = await db.query(
     `
-      WITH ${DONE_CTE}
-      SELECT
-        d.id, d.title, d.parent_task_id, pt.title AS parent_title,
-        d.time_taken, d.rework_count, d.completed_at, d.is_leaf,
-        p.id AS project_id, p.name AS project_name,
-        p.client_name, p.status AS project_status,
-        ${ASSIGNEES}
-      FROM done d
-      JOIN task_assignees ta ON ta.task_id = d.id AND ta.member_id::text = $3
-      JOIN projects p ON p.id = d.project_id
-      LEFT JOIN tasks pt ON pt.id = d.parent_task_id
-      ORDER BY d.completed_at DESC
+      SELECT ${ENTRY_COLUMNS}
+      FROM time_entries e
+      ${ENTRY_JOINS}
+      WHERE ${RANGE}
+        AND e.member_id::text = $3
+      ORDER BY e.work_date DESC, e.created_at DESC
     `,
     [from, to, String(memberId)],
   );
 
-  return { member: memberRows[0], tasks };
+  return { member: memberRows[0], entries };
+}
+
+/* ------------------------------------------------------------------ */
+/* Admin: edit / delete                                                */
+/* ------------------------------------------------------------------ */
+
+// Managers can change the date and time of any entry, and the task name of
+// a Miscellaneous entry. Project / task stay as the member logged them.
+async function updateEntry(entryId, body = {}) {
+  const { rows: found } = await db.query(
+    `SELECT id, is_misc FROM time_entries WHERE id::text = $1 LIMIT 1`,
+    [String(entryId)],
+  );
+  const entry = found[0];
+  if (!entry) throw httpError(404, "Entry not found");
+
+  const workDate = readWorkDate(body.work_date);
+  const minutes = readMinutes(body.minutes);
+  const title = entry.is_misc && body.task_name !== undefined ? readTitle(body.task_name) : null;
+
+  const { rows } = await db.query(
+    `
+      UPDATE time_entries
+      SET work_date = $2,
+          minutes = $3,
+          task_title = coalesce($4, task_title),
+          updated_at = NOW()
+      WHERE id::text = $1
+      RETURNING id, minutes, task_title, to_char(work_date, 'YYYY-MM-DD') AS work_date
+    `,
+    [String(entryId), workDate, minutes, title],
+  );
+
+  return rows[0];
+}
+
+async function deleteEntry(entryId) {
+  const { rowCount } = await db.query(`DELETE FROM time_entries WHERE id::text = $1`, [
+    String(entryId),
+  ]);
+  if (!rowCount) throw httpError(404, "Entry not found");
+  return { ok: true };
 }
 
 module.exports = {
-  ensureSchema,
+  getMemberOptions,
+  createEntry,
   getProjects,
   getProjectDetail,
   getMembers,
   getMemberDetail,
+  updateEntry,
+  deleteEntry,
 };

@@ -61,7 +61,6 @@ const Icon = ({ d, className = 'h-3.5 w-3.5 shrink-0' }) => (
 const ICONS = {
   check: 'M5 12.5l4.5 4.5L19 7.5',
   rework: 'M3 12a9 9 0 019-9 9.75 9.75 0 016.74 2.74L21 8M21 3v5h-5M21 12a9 9 0 01-9 9 9.75 9.75 0 01-6.74-2.74L3 16M3 21v-5h5',
-  clock: 'M12 7v5l3 2M21 12a9 9 0 11-18 0 9 9 0 0118 0z',
   queue: 'M4 6h16M4 12h16M4 18h10',
   alert: 'M12 4L2.5 20h19L12 4zM12 10v4M12 17.5v.01',
 };
@@ -69,15 +68,6 @@ const ICONS = {
 /* ------------------------------------------------------------------ */
 /* Helpers                                                             */
 /* ------------------------------------------------------------------ */
-
-function formatMinutes(total) {
-  const minutes = Number(total);
-  if (!minutes) return '';
-  if (minutes < 60) return `${minutes} min`;
-  const h = Math.floor(minutes / 60);
-  const m = minutes % 60;
-  return m ? `${h}h ${m}m` : `${h}h`;
-}
 
 function timeAgo(value) {
   const date = new Date(value);
@@ -142,16 +132,6 @@ function AssigneeCell({ item }) {
         {item.assignee_name[0]}
       </span>
       <span className="truncate">{item.assignee_name}</span>
-    </span>
-  );
-}
-
-function TimeCell({ item }) {
-  if (!item.time_taken) return <span className="text-xs text-[var(--text-3)]">Not logged</span>;
-  return (
-    <span className="inline-flex items-center gap-1.5 text-[13px] font-medium tabular-nums text-[var(--text)]">
-      <Icon d={ICONS.clock} className="h-3.5 w-3.5 shrink-0 text-[var(--text-3)]" />
-      {formatMinutes(item.time_taken)}
     </span>
   );
 }
@@ -287,7 +267,7 @@ export default function InReview() {
     setBusy({ id: subtask.id, type: 'done' });
     setNotice('');
     try {
-      await api.put(`/tasks/${subtask.id}`, { stage: 'Done', time_taken: null });
+      await api.put(`/tasks/${subtask.id}`, { stage: 'Done' });
       await load();
     } catch (error) {
       console.error('Failed to approve task:', error);
@@ -314,7 +294,6 @@ export default function InReview() {
     try {
       await api.put(`/tasks/${subtask.id}`, {
         stage: 'Rework',
-        time_taken: null,
         new_due_date: reworkDeadline || null,
       });
       closeRework();
@@ -334,7 +313,6 @@ export default function InReview() {
       if (sort === 'newest') return new Date(b.updated_at) - new Date(a.updated_at);
       if (sort === 'oldest') return new Date(a.updated_at) - new Date(b.updated_at);
       if (sort === 'rework') return (b.rework_count || 0) - (a.rework_count || 0);
-      if (sort === 'time') return (b.time_taken || 0) - (a.time_taken || 0);
       return 0;
     });
 
@@ -408,7 +386,6 @@ export default function InReview() {
                     <option value="newest">Newest first</option>
                     <option value="oldest">Oldest first</option>
                     <option value="rework">Most reworks</option>
-                    <option value="time">Most time</option>
                   </select>
                 </div>
                 <p className="m-0 text-xs tabular-nums text-[var(--text-3)] sm:ml-auto max-sm:w-full max-sm:text-right" aria-live="polite">
@@ -436,7 +413,7 @@ export default function InReview() {
                     <table className="w-full border-collapse text-left">
                       <thead>
                         <tr className="border-b border-[var(--border)] bg-[var(--bg-3)]">
-                          {['Task', 'Assignee', 'Time', 'Reworks', 'Updated'].map((label) => (
+                          {['Task', 'Assignee', 'Reworks', 'Updated'].map((label) => (
                             <th key={label} scope="col" className="px-4 py-2.5 text-left text-xs font-medium normal-case tracking-normal text-[var(--text-3)]">
                               {label}
                             </th>
@@ -451,7 +428,6 @@ export default function InReview() {
                           <tr key={s.id} className="border-b border-[var(--border)] transition-colors duration-150 last:border-b-0 hover:bg-[var(--bg-3)] motion-reduce:transition-none">
                             <td className="max-w-[22rem] px-4 py-3.5 align-top"><TaskCell item={s} /></td>
                             <td className="px-4 py-3.5 align-top"><AssigneeCell item={s} /></td>
-                            <td className="px-4 py-3.5 align-top"><TimeCell item={s} /></td>
                             <td className="px-4 py-3.5 align-top"><ReworkCell item={s} /></td>
                             <td className="px-4 py-3.5 align-top"><UpdatedCell item={s} /></td>
                             <td className="px-4 py-3.5 align-top">
@@ -471,7 +447,6 @@ export default function InReview() {
                       <TaskCell item={s} />
                       <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2">
                         <AssigneeCell item={s} />
-                        <TimeCell item={s} />
                         <ReworkCell item={s} />
                         <span className="ml-auto"><UpdatedCell item={s} /></span>
                       </div>
@@ -529,4 +504,4 @@ export default function InReview() {
       )}
     </>
   );
-}
+}

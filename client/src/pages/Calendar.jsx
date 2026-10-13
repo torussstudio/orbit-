@@ -394,7 +394,7 @@ export default function Calendar() {
 
   // Modals: null = closed.
   const [formModal, setFormModal] = useState(null); // { editing, prefillStart }
-  const [timeTakenTask, setTimeTakenTask] = useState(null);
+  const [reviewTask, setReviewTask] = useState(null);
   const [confirmModal, setConfirmModal] = useState(EMPTY_CONFIRM);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState('');
@@ -578,22 +578,22 @@ export default function Calendar() {
     [setData],
   );
 
-  // Members: "In Review" asks for time taken first (same flow as Task View).
+  // Members: "In Review" asks for a simple confirmation first (same flow as Task View).
   const handleTaskStageSelect = useCallback(
     (task, newStage) => {
       setNotice('');
-      if (newStage === 'In Review') setTimeTakenTask(task);
+      if (newStage === 'In Review') setReviewTask(task);
       else changeTaskStage(task, newStage);
     },
     [changeTaskStage],
   );
 
-  const closeTimeTaken = useCallback(() => setTimeTakenTask(null), []);
+  const closeReviewConfirm = useCallback(() => setReviewTask(null), []);
 
-  const confirmTimeTaken = useCallback(
-    (task, minutes) => {
-      setTimeTakenTask(null);
-      return changeTaskStage(task, 'In Review', { time_taken: minutes });
+  const confirmReview = useCallback(
+    (task) => {
+      setReviewTask(null);
+      return changeTaskStage(task, 'In Review');
     },
     [changeTaskStage],
   );
@@ -789,7 +789,7 @@ export default function Calendar() {
       </div>
 
       {/* Day drill-down. Hidden while another modal is open, and comes back afterwards. */}
-      {selectedDay && !formModal && !timeTakenTask && (
+      {selectedDay && !formModal && !reviewTask && (
         <DayModal
           date={selectedDay}
           items={selectedItems}
@@ -805,8 +805,8 @@ export default function Calendar() {
         />
       )}
 
-      {timeTakenTask && (
-        <TimeTakenModal task={timeTakenTask} onClose={closeTimeTaken} onConfirm={confirmTimeTaken} />
+      {reviewTask && (
+        <ReviewConfirm task={reviewTask} onClose={closeReviewConfirm} onConfirm={confirmReview} />
       )}
 
       {formModal && (
@@ -1492,58 +1492,24 @@ const DayView = memo(function DayView({ items, isManager, onEdit, onDelete, onOp
 /* Forms                                                               */
 /* ------------------------------------------------------------------ */
 
-// Owns its input state, so typing never re-renders the calendar behind it.
-function TimeTakenModal({ task, onClose, onConfirm }) {
-  const uid = useId();
-  const [value, setValue] = useState('');
-  const [error, setError] = useState('');
-
-  const handleSubmit = (event) => {
-    event.preventDefault();
-    const minutes = parseInt(value, 10);
-    if (!minutes || minutes <= 0) {
-      setError('Enter the time taken in minutes.');
-      return;
-    }
-    onConfirm(task, minutes);
-  };
-
+// Simple "send to In Review?" confirmation (replaces the old time taken popup).
+function ReviewConfirm({ task, onClose, onConfirm }) {
   return (
-    <Modal title="Time taken" onClose={onClose}>
-      <form noValidate onSubmit={handleSubmit} className="flex flex-col gap-4">
-        <p className="m-0 text-[13px] leading-relaxed text-[color:var(--text-2)]">
-          Moving <strong className="text-[color:var(--text)]">{task?.displayTitle}</strong> to{' '}
-          <strong className="text-[color:var(--text)]">In Review</strong>. How long did this task take?
-        </p>
-        <div>
-          <label htmlFor={`${uid}-minutes`} className={labelCls}>
-            Time taken (minutes)
-            <span className="ml-0.5 text-[color:var(--danger)]" aria-hidden="true">*</span>
-          </label>
-          <input
-            id={`${uid}-minutes`}
-            className={inputCls}
-            type="number"
-            inputMode="numeric"
-            min="1"
-            value={value}
-            onChange={(event) => {
-              setValue(event.target.value);
-              setError('');
-            }}
-            placeholder="e.g. 45"
-            autoFocus
-            aria-invalid={!!error}
-            aria-describedby={error ? `${uid}-error` : undefined}
-          />
-          <FieldError id={`${uid}-error`}>{error}</FieldError>
-        </div>
-        <div className="flex justify-end gap-2">
-          <button type="button" className={btnGhost()} onClick={onClose}>Cancel</button>
-          <button type="submit" className={btnPrimary()}>Confirm and move</button>
-        </div>
-      </form>
-    </Modal>
+    <ConfirmModal
+      isOpen
+      title="Send to In Review?"
+      message={
+        <>
+          Move <strong className="text-[color:var(--text)]">{task?.displayTitle}</strong> to{' '}
+          <strong className="text-[color:var(--text)]">In Review</strong>?
+        </>
+      }
+      confirmText="Yes, send"
+      cancelText="No"
+      isDangerous={false}
+      onCancel={onClose}
+      onConfirm={() => onConfirm(task)}
+    />
   );
 }
 

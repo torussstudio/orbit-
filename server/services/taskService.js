@@ -51,21 +51,6 @@ function assertDoneFromInReview(fromStage, toStage) {
   }
 }
 
-/*
- * Time tracking (minutes).
- *
- * Every time a task is sent to In Review the member enters how long that
- * round took, and it is ADDED to what is already logged. A rework keeps the
- * time already logged, so the total covers every cycle (first attempt +
- * each rework). Requests without a time entry keep the stored total.
- */
-function nextTimeTaken(existingTime, incoming) {
-  const current = Number(existingTime) || 0;
-  const added = parseInt(incoming, 10);
-  const total = Number.isFinite(added) && added > 0 ? current + added : current;
-  return total > 0 ? total : null;
-}
-
 const ASSIGNEE_JOIN = `
   LEFT JOIN LATERAL (
     SELECT
@@ -656,15 +641,12 @@ async function updateTask(taskId, data, user) {
       throw err;
     }
 
-    if (existing.stage === stage && !data.time_taken) {
+    if (existing.stage === stage) {
       return existing;
     }
 
     const isRework = stage === "Rework";
     const actualStage = isRework ? "Todo" : stage;
-
-    // Adds this round's time to what is already logged (see nextTimeTaken).
-    const time_taken = nextTimeTaken(existing.time_taken, data.time_taken);
 
     /*
      * Detect actual transition to In Review.
@@ -679,13 +661,11 @@ async function updateTask(taskId, data, user) {
        SET
          stage=$1,
          updated_at=NOW(),
-         time_taken=$2,
-         rework_count=rework_count+$3
-       WHERE id=$4
+         rework_count=rework_count+$2
+       WHERE id=$3
        RETURNING *`,
       [
         actualStage,
-        time_taken,
         isRework ? 1 : 0,
         taskId,
       ],
@@ -774,10 +754,6 @@ async function updateTask(taskId, data, user) {
    */
   const actualStage = isRework ? "Todo" : requestedStage;
 
-  // Adds this round's time to what is already logged. A rework keeps the
-  // time from earlier rounds (see nextTimeTaken).
-  const time_taken = nextTimeTaken(existing.time_taken, data.time_taken);
-
   const { rows: existingSubtasks } = await db.query(
     `SELECT 1
      FROM tasks
@@ -827,9 +803,8 @@ async function updateTask(taskId, data, user) {
          due_date=$5,
          cluster_id=$6,
          updated_at=NOW(),
-         time_taken=$7,
-         rework_count=rework_count+$8
-       WHERE id=$9
+         rework_count=rework_count+$7
+       WHERE id=$8
        RETURNING *`,
       [
         newTitle,
@@ -838,7 +813,6 @@ async function updateTask(taskId, data, user) {
         actualStage,
         finalDueDate,
         newClusterId,
-        time_taken,
         isRework ? 1 : 0,
         taskId,
       ],
@@ -1147,7 +1121,6 @@ async function getInReviewTasks() {
        t.id,
        t.title,
        t.stage,
-       t.time_taken,
        t.rework_count,
        t.updated_at,
        t.parent_task_id,
@@ -1178,4 +1151,4 @@ module.exports = {
   deleteTask,
   createComment,
   getInReviewTasks,
-};
+};

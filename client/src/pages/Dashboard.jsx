@@ -1645,6 +1645,14 @@ import { formatDate } from "../utils/helpers";
 import { useCountUp } from "../utils/motion";
 import Modal from "../components/ui/Modal";
 import { useLiveRefetch, TASK_AND_PROJECT_EVENTS } from "../hooks/useLiveEvents";
+import {
+  PeriodToggle,
+  ProgressChips,
+  ProgressDonut,
+  ProgressLegend,
+  ProgressNote,
+  progressTotal,
+} from "../components/progress/TaskProgress";
 
 /* ===========================================================================
  * Constants & helpers
@@ -1711,7 +1719,9 @@ const STAGGER_4 =
 const STAGGER_2 = "[&>:nth-child(2)]:[animation-delay:80ms]";
 
 const GRID_ASYM = `grid grid-cols-1 min-[901px]:grid-cols-[1.4fr_1fr] gap-5 [&>*]:min-w-0 ${RISE} ${STAGGER_2}`;
-const GRID_DEV = `grid grid-cols-1 min-[901px]:grid-cols-[2fr_1fr] gap-5 [&>*]:min-w-0 ${RISE} ${STAGGER_2}`;
+// Member view: My Task Progress + Recent comments (the "My tasks" list was
+// removed; members see their tasks on Task View).
+const GRID_DEV = `grid grid-cols-1 min-[1101px]:grid-cols-[1.25fr_1fr] gap-5 items-start [&>*]:min-w-0 ${RISE} ${STAGGER_2}`;
 const STATS_GRID = `stats-grid ${RISE} ${STAGGER_4}`;
 
 const DIVIDE = "divide-y divide-[color:var(--border)]";
@@ -3118,70 +3128,67 @@ function ManagerDash({ data }) {
  * Developer view
  * ========================================================================= */
 
-const TaskTreeItem = memo(function TaskTreeItem({ task, subtasks, isOpen, onToggle }) {
-  const count = subtasks.length;
-  const hasSubtasks = count > 0;
-  const treeId = `dash-subtree-${task.id}`;
+/* ===========================================================================
+ * Member view: "My Task Progress" card
+ * Donut of the member's tasks by stage (week / month), due today and overdue,
+ * and a message that changes with the situation. Data: data.task_progress
+ * from dashboardService. The donut pieces are shared with the Members page.
+ * ========================================================================= */
+
+function progressMessage(p, total, period) {
+  const when = period === "month" ? "this month" : "this week";
+  const pct = total ? Math.round((p.done / total) * 100) : 0;
+  const s = (n, one, many) => (n === 1 ? one : many);
+  if (!total) return ["info", "clock", "No tasks yet", `Nothing assigned to you ${when}. New tasks will show up here.`];
+  if (p.done === total) return ["ok", "star", "All done!", `Every task you had ${when} is approved. Great work.`];
+  if (p.overdue) return ["bad", "alert", `${p.overdue} ${s(p.overdue, "task is", "tasks are")} overdue`, "Finish these first, then pick up new work."];
+  if (p.rework) return ["warn", "loop", `${p.rework} ${s(p.rework, "task", "tasks")} back for rework`, "Fix them quickly to keep your progress moving."];
+  if (p.review >= 4) return ["info", "clock", `${p.review} tasks waiting for review`, "Nice pace. They move to Done once the admin approves."];
+  return ["ok", "trophy", "You're on track!", `You've completed ${pct}% of your tasks ${when}. Keep it up!`];
+}
+
+const TaskProgressCard = memo(function TaskProgressCard({ progress }) {
+  const [period, setPeriod] = useState("month");
+  const [active, setActive] = useState(null);
+
+  const p = progress?.[period];
+  if (!p) return null;
+
+  const [tone, icon, title, text] = progressMessage(p, progressTotal(p), period);
+
   return (
-    <div className="flex flex-col">
-      <div className="flex items-start gap-1.5">
-        {hasSubtasks ? (
-          <button
-            type="button"
-            className={`shrink-0 size-[22px] mt-2.5 p-0 text-[11px] text-[color:var(--text-3)] bg-transparent border-0 rounded-md cursor-pointer transition-[background-color,color,transform] duration-150 hover:text-[color:var(--text)] hover:bg-[color:var(--bg-3)] active:scale-90 motion-reduce:transition-none ${FOCUS}`}
-            onClick={() => onToggle(task.id)}
-            aria-expanded={isOpen}
-            aria-controls={treeId}
-            aria-label={`${isOpen ? "Hide" : "Show"} ${count} sub-task${count !== 1 ? "s" : ""}`}
+    <section className="card" aria-labelledby="tp-title">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2.5">
+        <h2 id="tp-title" className={CARD_H}>My Task Progress</h2>
+        <div className="flex items-center gap-3">
+          <PeriodToggle value={period} onChange={setPeriod} />
+          <Link
+            to="/tasks-view"
+            className={cx("whitespace-nowrap rounded text-[13px] font-semibold text-[color:var(--success)] no-underline hover:underline", FOCUS)}
           >
-            {isOpen ? "▾" : "▸"}
-          </button>
-        ) : (
-          <span className="w-[22px] shrink-0" aria-hidden="true" />
-        )}
-        <TaskLink
-          task={task}
-          className="flex-1 min-w-0"
-          suffix={hasSubtasks ? `(${count})` : null}
-        />
-      </div>
-      {hasSubtasks && isOpen && (
-        <div
-          className={cx(
-            "mb-1 ml-2.5 pl-4 border-l-2 border-l-[color:var(--border)]",
-            DIVIDE,
-            FADE_IN,
-          )}
-          id={treeId}
-        >
-          {subtasks.map((st) => (
-            <TaskLink key={st.id} task={st} size="sm" sub prefix="↳ " />
-          ))}
+            View all →
+          </Link>
         </div>
-      )}
-    </div>
+      </div>
+
+      <div className="mb-4">
+        <ProgressChips p={p} />
+      </div>
+
+      <div className="grid items-center gap-6 min-[521px]:grid-cols-[170px_minmax(0,1fr)] max-[520px]:justify-items-center">
+        <ProgressDonut p={p} active={active} onActive={setActive} />
+        <ProgressLegend p={p} active={active} onActive={setActive} />
+      </div>
+
+      <div className="mt-4">
+        <ProgressNote tone={tone} icon={icon} title={title} text={text} />
+      </div>
+    </section>
   );
 });
 
 function DevDash({ data }) {
-  const [expandedIds, setExpandedIds] = useState(() => new Set());
-
   const myTasks = data?.my_tasks ?? EMPTY_LIST;
-
-  // Main tasks, sub-tasks nested under their parent, and orphan sub-tasks
-  // (parent assigned to someone else) shown as their own rows so none hide.
-  const { mainTasks, subtasksByParent, orphanSubtasks } = useMemo(() => {
-    const main = myTasks.filter((t) => !t.parent_task_id);
-    const mainIds = new Set(main.map((t) => t.id));
-    const byParent = {};
-    const orphans = [];
-    for (const t of myTasks) {
-      if (!t.parent_task_id) continue;
-      if (mainIds.has(t.parent_task_id)) (byParent[t.parent_task_id] ||= []).push(t);
-      else orphans.push(t);
-    }
-    return { mainTasks: main, subtasksByParent: byParent, orphanSubtasks: orphans };
-  }, [myTasks]);
 
   // Stat cards count every task assigned to this member (main tasks AND
   // sub-tasks): a member's work is often entirely sub-tasks.
@@ -3190,15 +3197,6 @@ function DevDash({ data }) {
     for (const t of myTasks) counts[t.stage] = (counts[t.stage] || 0) + 1;
     return counts;
   }, [myTasks]);
-
-  const toggleExpanded = useCallback((id) => {
-    setExpandedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }, []);
 
   if (!data) return null;
 
@@ -3212,30 +3210,7 @@ function DevDash({ data }) {
       </div>
 
       <div className={GRID_DEV}>
-        <section className="card">
-          <CardHead title="My tasks" />
-          {mainTasks.length === 0 && orphanSubtasks.length === 0 ? (
-            <Empty title="No tasks assigned" hint="New assignments will appear here." icon="check" />
-          ) : (
-            <div className={DIVIDE}>
-              {mainTasks.map((t) => (
-                <TaskTreeItem
-                  key={t.id}
-                  task={t}
-                  subtasks={subtasksByParent[t.id] || EMPTY_LIST}
-                  isOpen={expandedIds.has(t.id)}
-                  onToggle={toggleExpanded}
-                />
-              ))}
-              {orphanSubtasks.map((st) => (
-                <div key={st.id} className="flex items-start gap-1.5">
-                  <span className="w-[22px] shrink-0" aria-hidden="true" />
-                  <TaskLink task={st} className="flex-1 min-w-0" suffix="(sub-task)" />
-                </div>
-              ))}
-            </div>
-          )}
-        </section>
+        <TaskProgressCard progress={data.task_progress} />
 
         <section className="card">
           <CardHead title="Recent comments" />

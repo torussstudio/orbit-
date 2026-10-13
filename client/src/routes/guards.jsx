@@ -16,3 +16,11 @@ export function RequireManager({ children }) {
   return isManager ? children : <Navigate to="/" replace />;
 }
 
+
+// Same URL, different page per role (e.g. /time-log).
+export function ByRole({ manager, member }) {
+  const { user, loading, isManager } = useAuth();
+  if (loading) return <Loader label="Loading Orbit" size="lg" variant="screen" />;
+  if (!user) return <Navigate to="/login" replace />;
+  return isManager ? manager : member;
+}

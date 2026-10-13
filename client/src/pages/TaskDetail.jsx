@@ -659,7 +659,6 @@ const SubTaskItem = memo(function SubTaskItem({
               {formatDate(st.due_date)}
             </span>
           )}
-          {st.time_taken > 0 && <Chip>{st.time_taken} min</Chip>}
           {st.rework_count > 0 && (
             <Chip danger>
               {st.rework_count} rework{st.rework_count > 1 ? "s" : ""}
@@ -688,7 +687,6 @@ const SubTaskItem = memo(function SubTaskItem({
 
 const SubTasksPanel = memo(function SubTasksPanel({
   subtasks,
-  totalTime,
   projectId,
   isManager,
   menuStages,
@@ -708,7 +706,6 @@ const SubTasksPanel = memo(function SubTasksPanel({
         <>
           Sub tasks
           <Count n={subtasks.length} />
-          {totalTime > 0 && <Chip>{totalTime} min total</Chip>}
         </>
       }
       extraHead={
@@ -954,123 +951,49 @@ const ActivityPanel = memo(function ActivityPanel({ activity }) {
 
 const MODAL_TEXT = "m-0 mb-4 text-[13px] leading-[1.55] text-[color:var(--text-2)]";
 
-// Members moving a sub task to In Review must say how long it took.
-function TimeTakenModal({ subtask, nextStage, onClose, onSaved }) {
-  const [hours, setHours] = useState("");
-  const [mins, setMins] = useState("");
-  const [error, setError] = useState("");
+// Simple "send to In Review?" confirmation (replaces the old time taken popup).
+function ReviewConfirmModal({ subtask, nextStage, onClose, onSaved }) {
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
 
-  const submit = async (e) => {
-    e?.preventDefault();
+  const submit = async () => {
     if (saving) return;
-    const h = hours === "" ? 0 : Number(hours);
-    const m = mins === "" ? 0 : Number(mins);
-
-    if (!Number.isInteger(h) || !Number.isInteger(m) || h < 0 || m < 0) {
-      setError("Enter whole numbers for hours and minutes.");
-      return;
-    }
-    if (m > 59) {
-      setError("Minutes must be between 0 and 59.");
-      return;
-    }
-    const total = h * 60 + m;
-    if (total <= 0 || total > 100000) {
-      setError("Please enter a valid time between 1 minute and 100,000 minutes.");
-      return;
-    }
-
     setSaving(true);
+    setError("");
     try {
-      await api.put(`/tasks/${subtask.id}`, { stage: nextStage, time_taken: total });
+      await api.put(`/tasks/${subtask.id}`, { stage: nextStage });
       onClose();
       await onSaved(subtask);
     } catch (err) {
-      console.error("Failed to save time taken:", err);
-      setError(
-        err?.response?.data?.message || "We couldn't save the time taken. Please try again.",
-      );
-    } finally {
+      console.error("Failed to move to In Review:", err);
+      setError(err?.response?.data?.message || "We couldn't move this. Please try again.");
       setSaving(false);
     }
   };
 
   return (
-    <Modal title="Time taken" onClose={onClose}>
-      <form onSubmit={submit} noValidate>
-        <p className={MODAL_TEXT}>
-          Moving <strong className="text-[color:var(--text)]">{subtask?.title}</strong> to{" "}
-          <strong className="text-[color:var(--text)]">In Review</strong>. How long did this sub
-          task take?
-        </p>
-        <div className="form-group">
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="form-label" htmlFor="td-time-hours">
-                Hours
-              </label>
-              <input
-                id="td-time-hours"
-                className="form-input"
-                type="number"
-                inputMode="numeric"
-                min="0"
-                step="1"
-                value={hours}
-                onChange={(e) => {
-                  setHours(e.target.value);
-                  setError("");
-                }}
-                placeholder="0"
-                aria-invalid={!!error}
-                aria-describedby={error ? "td-time-taken-error" : undefined}
-                autoFocus
-              />
-            </div>
-            <div>
-              <label className="form-label" htmlFor="td-time-mins">
-                Minutes
-              </label>
-              <input
-                id="td-time-mins"
-                className="form-input"
-                type="number"
-                inputMode="numeric"
-                min="0"
-                max="59"
-                step="1"
-                value={mins}
-                onChange={(e) => {
-                  setMins(e.target.value);
-                  setError("");
-                }}
-                placeholder="45"
-                aria-invalid={!!error}
-                aria-describedby={error ? "td-time-taken-error" : undefined}
-              />
-            </div>
-          </div>
+    <ConfirmModal
+      isOpen
+      title="Send to In Review?"
+      message={
+        <>
+          Move <strong className="text-[color:var(--text)]">{subtask?.title}</strong> to{" "}
+          <strong className="text-[color:var(--text)]">In Review</strong>?
           {error && (
-            <div
-              id="td-time-taken-error"
-              className="mt-1.5 text-xs text-[color:var(--danger)]"
-              role="alert"
-            >
+            <span className="mt-1.5 block text-xs text-[color:var(--danger)]" role="alert">
               {error}
-            </div>
+            </span>
           )}
-        </div>
-        <div className="modal-actions">
-          <button type="button" className="btn btn-ghost" onClick={onClose} disabled={saving}>
-            Cancel
-          </button>
-          <button type="submit" className="btn btn-primary" disabled={saving}>
-            {saving ? "Saving…" : "Confirm and move"}
-          </button>
-        </div>
-      </form>
-    </Modal>
+        </>
+      }
+      confirmText="Yes, send"
+      cancelText="No"
+      loadingText="Sending…"
+      isDangerous={false}
+      loading={saving}
+      onCancel={onClose}
+      onConfirm={submit}
+    />
   );
 }
 
@@ -1088,7 +1011,6 @@ function ReviewModal({ subtask, onClose, onSaved }) {
     try {
       await api.put(`/tasks/${subtask.id}`, {
         stage: action === "done" ? "Done" : "Rework",
-        time_taken: null,
         new_due_date: action === "rework" && deadline ? deadline : null,
       });
       onClose();
@@ -1223,7 +1145,7 @@ export default function TaskDetail() {
   const [subModal, setSubModal] = useState(null); // { task: subtask | null }
   const [savingSubTask, setSavingSubTask] = useState(false);
   const [confirm, setConfirm] = useState(null); // { title, message, action, loading, isDangerous }
-  const [timeTaken, setTimeTaken] = useState(null); // { subtask, nextStage }
+  const [reviewConfirm, setReviewConfirm] = useState(null); // { subtask, nextStage }
   const [review, setReview] = useState(null); // { subtask }
 
   // Auto-dismiss the inline notice.
@@ -1258,13 +1180,11 @@ export default function TaskDetail() {
     const allowedStages = isManager ? stages : stages.filter((s) => s !== "Done");
     const subtasks = task.subtasks || EMPTY;
     let doneSubs = 0;
-    let totalTime = 0;
     // Main tasks that use sub tasks aren't assigned directly: the people on the
     // task are the assignees of its sub tasks.
     const subAssignees = new Set();
     for (const s of subtasks) {
       if (s.stage === "Done") doneSubs++;
-      totalTime += s.time_taken || 0;
       if (Array.isArray(s.assignees) && s.assignees.length) {
         for (const a of s.assignees) if (a?.name) subAssignees.add(a.name);
       } else if (s.assignee_name) {
@@ -1297,7 +1217,6 @@ export default function TaskDetail() {
           ]),
       { label: "Cluster", value: task.cluster_name || "No cluster" },
       { label: "Created", value: task.created_at ? formatDate(task.created_at) : "—" },
-      ...(totalTime > 0 ? [{ label: "Total time", value: `${totalTime} min` }] : []),
     ];
 
     return {
@@ -1306,7 +1225,6 @@ export default function TaskDetail() {
       subtasks,
       isLeaf: !!task.parent_task_id || subtasks.length === 0,
       doneSubs,
-      totalTime,
       stageIdx: stages.indexOf(task.stage),
       details,
       assigneeLabel,
@@ -1318,10 +1236,10 @@ export default function TaskDetail() {
   const dismissNotice = useCallback(() => setNotice(""), []);
   const closeSubModal = useCallback(() => setSubModal(null), []);
   const closeConfirm = useCallback(() => setConfirm(null), []);
-  const closeTimeTaken = useCallback(() => setTimeTaken(null), []);
+  const closeReviewConfirm = useCallback(() => setReviewConfirm(null), []);
   const closeReview = useCallback(() => setReview(null), []);
-  const openTimeTaken = useCallback(
-    (subtask, nextStage) => setTimeTaken({ subtask, nextStage }),
+  const openReviewConfirm = useCallback(
+    (subtask, nextStage) => setReviewConfirm({ subtask, nextStage }),
     [],
   );
   const openReview = useCallback((subtask) => setReview({ subtask }), []);
@@ -1359,22 +1277,22 @@ export default function TaskDetail() {
 
       if (!isManager) {
         if (chosen === "Done") return;
-        if (chosen === "In Review") return openTimeTaken(st, chosen);
-        return moveSubTask(st, chosen, { time_taken: null }, loadTaskOnly);
+        if (chosen === "In Review") return openReviewConfirm(st, chosen);
+        return moveSubTask(st, chosen, null, loadTaskOnly);
       }
 
-      if (chosen === "In Review") return openTimeTaken(st, chosen);
+      if (chosen === "In Review") return openReviewConfirm(st, chosen);
       if (chosen === "Done") {
         // Done is only reachable from In Review.
         if (st.stage !== "In Review") {
-          setNotice("Move this sub task to In Review (with time taken) before marking it Done.");
+          setNotice("Move this sub task to In Review before marking it Done.");
           return;
         }
         return openReview(st);
       }
       return moveSubTask(st, chosen, null, () => refreshFor(st));
     },
-    [isManager, openTimeTaken, openReview, moveSubTask, loadTaskOnly, refreshFor],
+    [isManager, openReviewConfirm, openReview, moveSubTask, loadTaskOnly, refreshFor],
   );
 
   // Stage buttons on a leaf task (main task stage is derived, never edited).
@@ -1385,14 +1303,14 @@ export default function TaskDetail() {
       if (!isManager && task.stage === "Done") return;
 
       if (view.isLeaf) {
-        // Anyone moving into In Review must enter time taken.
+        // Anyone moving into In Review gets a simple confirmation.
         if (stage === "In Review" && task.stage !== "In Review") {
-          return openTimeTaken(task, stage);
+          return openReviewConfirm(task, stage);
         }
         // Managers moving to Done go through the review decision, and only from In Review.
         if (isManager && stage === "Done" && task.stage !== "Done") {
           if (task.stage !== "In Review") {
-            setNotice("Move this task to In Review (with time taken) before marking it Done.");
+            setNotice("Move this task to In Review before marking it Done.");
             return;
           }
           return openReview(task);
@@ -1409,7 +1327,7 @@ export default function TaskDetail() {
         setChangingStage(null);
       }
     },
-    [task, view, isManager, taskId, load, openTimeTaken, openReview],
+    [task, view, isManager, taskId, load, openReviewConfirm, openReview],
   );
 
   const handleSaveSubTask = useCallback(
@@ -1520,7 +1438,7 @@ export default function TaskDetail() {
       </div>
     );
   } else {
-    const { stages, allowedStages, subtasks, isLeaf, doneSubs, totalTime, stageIdx, details, assigneeLabel } =
+    const { stages, allowedStages, subtasks, isLeaf, doneSubs, stageIdx, details, assigneeLabel } =
       view;
     const isMain = !task.parent_task_id;
 
@@ -1553,7 +1471,6 @@ export default function TaskDetail() {
               {isMain && (
                 <SubTasksPanel
                   subtasks={subtasks}
-                  totalTime={totalTime}
                   projectId={projectId}
                   isManager={isManager}
                   menuStages={allowedStages}
@@ -1621,11 +1538,11 @@ export default function TaskDetail() {
           loading={!!confirm?.loading}
         />
 
-        {timeTaken && (
-          <TimeTakenModal
-            subtask={timeTaken.subtask}
-            nextStage={timeTaken.nextStage}
-            onClose={closeTimeTaken}
+        {reviewConfirm && (
+          <ReviewConfirmModal
+            subtask={reviewConfirm.subtask}
+            nextStage={reviewConfirm.nextStage}
+            onClose={closeReviewConfirm}
             onSaved={refreshFor}
           />
         )}

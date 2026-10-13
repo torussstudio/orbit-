@@ -117,6 +117,7 @@ export default function DatePicker({
   onChange,
   placeholder = 'Select date',
   minDate,
+  maxDate,
   disabled,
   fromYear = 1900,
   toYear = new Date().getFullYear() + 10,
@@ -258,9 +259,12 @@ export default function DatePicker({
   // (e.g. new Date()) doesn't disable the day it falls on.
   const min = toDate(minDate);
   const minDay = min ? startOfDay(min) : null;
+  const max = toDate(maxDate);
+  const maxDay = max ? startOfDay(max) : null;
+  const outOfRange = (day) => Boolean((minDay && day < minDay) || (maxDay && startOfDay(day) > maxDay));
 
   const today = new Date();
-  const todayDisabled = Boolean(minDay && startOfDay(today) < minDay);
+  const todayDisabled = outOfRange(startOfDay(today));
 
   const focusDay =
     selected && isSameMonth(selected, viewDate)
@@ -270,7 +274,7 @@ export default function DatePicker({
         : startOfMonth(viewDate);
 
   const pick = (day) => {
-    if (minDay && day < minDay) return;
+    if (outOfRange(day)) return;
     onChange(format(day, 'yyyy-MM-dd'));
     setOpen(false);
     triggerRef.current?.focus();
@@ -402,7 +406,7 @@ export default function DatePicker({
                 const inMonth = isSameMonth(day, viewDate);
                 const isSel = Boolean(selected && isSameDay(day, selected));
                 const isTod = isToday(day);
-                const isDisabled = Boolean(minDay && day < minDay);
+                const isDisabled = outOfRange(day);
 
                 const state = isSel
                   ? 'border-transparent bg-[var(--accent)] font-semibold text-white'
@@ -454,4 +458,4 @@ export default function DatePicker({
         )}
     </>
   );
-}
+}

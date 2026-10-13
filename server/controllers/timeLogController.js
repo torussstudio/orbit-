@@ -2,7 +2,7 @@ const timeLogService = require("../services/timeLogService");
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
-// ?from=YYYY-MM-DD&to=YYYY-MM-DD (IST calendar days, both optional)
+// ?from=YYYY-MM-DD&to=YYYY-MM-DD (IST work dates, both optional)
 function readRange(req) {
   const pick = (value) => {
     if (typeof value !== "string" || !DATE_RE.test(value)) return null;
@@ -18,10 +18,10 @@ function readRange(req) {
   return { from, to };
 }
 
-function handle(fn) {
+function handle(fn, status = 200) {
   return async (req, res, next) => {
     try {
-      res.json(await fn(req));
+      res.status(status).json(await fn(req));
     } catch (error) {
       if (error.status) {
         return res.status(error.status).json({ error: error.message });
@@ -32,6 +32,11 @@ function handle(fn) {
 }
 
 module.exports = {
+  // Member
+  getMyOptions: handle((req) => timeLogService.getMemberOptions(req.user.id)),
+  createEntry: handle((req) => timeLogService.createEntry(req.user.id, req.body), 201),
+
+  // Manager
   getProjects: handle((req) => timeLogService.getProjects(readRange(req))),
   getProjectDetail: handle((req) =>
     timeLogService.getProjectDetail(req.params.id, readRange(req)),
@@ -40,4 +45,6 @@ module.exports = {
   getMemberDetail: handle((req) =>
     timeLogService.getMemberDetail(req.params.id, readRange(req)),
   ),
+  updateEntry: handle((req) => timeLogService.updateEntry(req.params.id, req.body)),
+  deleteEntry: handle((req) => timeLogService.deleteEntry(req.params.id)),
 };

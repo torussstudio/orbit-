@@ -301,8 +301,9 @@ app.use(
 );
 
 /*
- * Time Log (managers only): time spent on
- * completed tasks, per project and per member.
+ * Time Log: members add their own time entries,
+ * managers see / edit / delete them per project
+ * and per member.
  */
 app.use(
   "/api/time-log",
@@ -454,4 +455,4 @@ if (
   );
 }
 
-module.exports = app;
+module.exports = app;

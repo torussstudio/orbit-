@@ -339,9 +339,10 @@ const initDB = async () => {
     `);
   });
 
-  // Used by every task update (time tracking + rework counter) but never
-  // created here, so a fresh database couldn't update tasks. No-op on
-  // databases that already have them.
+  // rework_count is used by every task update but was never created here,
+  // so a fresh database couldn't update tasks. time_taken is the old
+  // "time taken at In Review" column: no longer used (time now lives in
+  // time_entries), kept only so the one-time copy below can read it.
   await ensureColumn("tasks", "time_taken INTEGER");
   await ensureColumn("tasks", "rework_count INTEGER DEFAULT 0");
 
@@ -735,6 +736,100 @@ const initDB = async () => {
   `);
 
   // -------------------------------------------------------------------
+  // Time log entries.
+  //
+  // Members log time themselves from their "Time Log" page (project,
+  // optional cluster, task, date, time). One row per entry, so a task can
+  // be logged many times (one entry per day / sitting). Miscellaneous work
+  // has is_misc = true, no task_id and a typed task_title; it lives only
+  // here and never becomes a real task.
+  //
+  // task_title is a copy of the task name at log time, so an entry still
+  // reads correctly if the task is renamed or deleted later.
+  // -------------------------------------------------------------------
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS time_entries (
+      id ${idDefinition(defaultIdType)},
+      member_id ${refType(memberIdType)} REFERENCES members(id) ON DELETE SET NULL,
+      project_id ${refType(projectIdType)} NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      cluster_id ${refType(clusterIdType)} REFERENCES clusters(id) ON DELETE SET NULL,
+      task_id ${refType(taskIdType)} REFERENCES tasks(id) ON DELETE SET NULL,
+      task_title VARCHAR(500) NOT NULL DEFAULT '',
+      is_misc BOOLEAN NOT NULL DEFAULT false,
+      minutes INTEGER NOT NULL CHECK (minutes > 0),
+      work_date DATE NOT NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+  for (const [name, definition] of [
+    ["idx_time_entries_work_date", "time_entries (work_date)"],
+    ["idx_time_entries_member_id", "time_entries (member_id)"],
+    ["idx_time_entries_project_id", "time_entries (project_id)"],
+    ["idx_time_entries_task_id", "time_entries (task_id)"],
+  ]) {
+    await pool.query(`CREATE INDEX IF NOT EXISTS ${name} ON ${definition}`);
+  }
+
+  // One-time copy of the old "time taken" values (entered when a task was
+  // moved to In Review) into time_entries, so the admin Time Log keeps its
+  // history. Dated by when the task was completed (or last updated), in
+  // IST. A task with several assignees has its time split evenly between
+  // them, so project totals stay the same as before. tasks.time_taken is
+  // left untouched in the database but nothing reads or writes it any more.
+  await runOnce("time_entries_from_time_taken_v1", async () => {
+    const hasCompletedAt = await getColumnType("tasks", "completed_at");
+    const dateExpr = hasCompletedAt
+      ? "coalesce(t.completed_at, t.updated_at, t.created_at)"
+      : "coalesce(t.updated_at, t.created_at)";
+
+    await pool.query(`
+      WITH src AS (
+        SELECT
+          t.id AS task_id,
+          t.project_id,
+          coalesce(t.cluster_id, pt.cluster_id) AS cluster_id,
+          t.title,
+          t.time_taken,
+          (${dateExpr} AT TIME ZONE 'Asia/Kolkata')::date AS work_date
+        FROM tasks t
+        LEFT JOIN tasks pt ON pt.id = t.parent_task_id
+        WHERE coalesce(t.time_taken, 0) > 0
+          AND t.project_id IS NOT NULL
+      ),
+      people AS (
+        SELECT
+          s.*,
+          a.member_id,
+          COUNT(*) OVER (PARTITION BY s.task_id) AS n,
+          ROW_NUMBER() OVER (PARTITION BY s.task_id ORDER BY a.member_id::text) AS rn
+        FROM src s
+        LEFT JOIN LATERAL (
+          SELECT ta.member_id FROM task_assignees ta WHERE ta.task_id = s.task_id
+          UNION
+          SELECT t2.assignee_id FROM tasks t2
+          WHERE t2.id = s.task_id
+            AND t2.assignee_id IS NOT NULL
+            AND NOT EXISTS (SELECT 1 FROM task_assignees x WHERE x.task_id = s.task_id)
+        ) a ON true
+      )
+      INSERT INTO time_entries
+        (member_id, project_id, cluster_id, task_id, task_title, is_misc, minutes, work_date)
+      SELECT
+        member_id,
+        project_id,
+        cluster_id,
+        task_id,
+        title,
+        false,
+        (time_taken / n) + CASE WHEN rn = 1 THEN time_taken % n ELSE 0 END,
+        work_date
+      FROM people
+      WHERE (time_taken / n) + CASE WHEN rn = 1 THEN time_taken % n ELSE 0 END > 0
+    `);
+  });
+
+  // -------------------------------------------------------------------
   // Dashboard activity log.
   //
   // One row per event the dashboard "Activity" chart counts. Rows are
@@ -943,4 +1038,4 @@ if (process.env.DB_SKIP_INIT !== "true") {
 // Exposed so a cron route or script can trigger the cleanup.
 pool.cleanupActivityLog = cleanupActivityLog;
 
-module.exports = pool;
+module.exports = pool;

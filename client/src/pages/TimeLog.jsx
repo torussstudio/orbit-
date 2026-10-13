@@ -2,6 +2,9 @@ import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useSta
 import { Link, useSearchParams } from 'react-router-dom';
 import api from '../api/client';
 import { useLiveRefetch, TASK_AND_PROJECT_EVENTS } from '../hooks/useLiveEvents';
+import Modal from '../components/ui/Modal';
+import ConfirmModal from '../components/ui/ConfirmModal';
+import DatePicker from '../components/ui/DatePicker';
 
 const IST = 'Asia/Kolkata';
 
@@ -22,7 +25,7 @@ const SORTS = [
   { value: 'time_desc', label: 'Most time' },
   { value: 'time_asc', label: 'Least time' },
   { value: 'name', label: 'Name (A–Z)' },
-  { value: 'recent', label: 'Recently completed' },
+  { value: 'recent', label: 'Recently logged' },
 ];
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -140,15 +143,14 @@ const hueOf = (seed) => {
 const hueColor = (seed, light = 56) => `hsl(${hueOf(seed)} 58% ${light}%)`;
 const hueTint = (seed, pct = 14) => `color-mix(in srgb, hsl(${hueOf(seed)} 60% 52%) ${pct}%, var(--bg-2))`;
 
-const minutesOf = (t) => Number(t.time_taken) || 0;
-const isUnlogged = (t) => t.is_leaf && minutesOf(t) === 0;
+const minutesOf = (e) => Number(e.minutes) || 0;
 
 function sortList(list, sort, nameKey = 'name') {
   const copy = [...list];
   copy.sort((a, b) => {
     if (sort === 'time_asc') return a.total_minutes - b.total_minutes;
     if (sort === 'name') return String(a[nameKey] || '').localeCompare(String(b[nameKey] || ''));
-    if (sort === 'recent') return new Date(b.last_completed_at || 0) - new Date(a.last_completed_at || 0);
+    if (sort === 'recent') return String(b.last_logged_on || '').localeCompare(String(a.last_logged_on || ''));
     return b.total_minutes - a.total_minutes;
   });
   return copy;
@@ -196,84 +198,95 @@ const slug = (s) =>
 
 const fileSuffix = (from, to) => (from || to ? `${from || 'start'}_to_${to || 'today'}` : 'all-time');
 
+
 /* -------------------------------------------------------------------------- */
 /* Grouping                                                                   */
 /* -------------------------------------------------------------------------- */
 
-// Project detail: completed tasks grouped under their main task.
-// A main task's total = its own time + its completed sub tasks' time.
-function groupByMainTask(tasks) {
-  const groups = new Map();
+// A "task" for grouping: a real task, or a Miscellaneous name.
+const taskKeyOf = (e) =>
+  e.is_misc
+    ? `misc:${String(e.task_title || '').trim().toLowerCase()}`
+    : e.task_id != null
+      ? `task:${e.task_id}`
+      : `gone:${String(e.task_title || '').trim().toLowerCase()}`;
 
-  for (const t of tasks) {
-    const key = String(t.parent_task_id ?? t.id);
+// Entries grouped by task (newest work first). Miscellaneous names group
+// together, so "Client call" logged three times is one row.
+function groupByTask(entries) {
+  const groups = new Map();
+  for (const e of entries) {
+    const key = taskKeyOf(e);
     let g = groups.get(key);
     if (!g) {
       g = {
         key,
-        id: t.parent_task_id ?? t.id,
-        title: t.parent_task_id ? t.parent_title : t.title,
-        own: null, // the main task row itself, when it is Done
-        subs: [],
+        task_id: e.task_id,
+        project_id: e.project_id,
+        title: e.task_title || 'Untitled',
+        parent_title: e.parent_task_id ? e.parent_title : null,
+        cluster_name: e.cluster_name,
+        is_misc: e.is_misc,
+        task_deleted: e.task_deleted,
+        task_stage: e.task_stage,
+        entries: [],
         total: 0,
-        unlogged: 0,
         last: null,
-        assignees: new Map(),
+        members: new Map(),
       };
       groups.set(key, g);
     }
-
-    if (t.parent_task_id) g.subs.push(t);
-    else g.own = t;
-
-    g.total += minutesOf(t);
-    if (isUnlogged(t)) g.unlogged += 1;
-    if (!g.last || new Date(t.completed_at) > new Date(g.last)) g.last = t.completed_at;
-    for (const a of t.assignees || []) g.assignees.set(String(a.id), a.name);
+    g.entries.push(e);
+    g.total += minutesOf(e);
+    if (!g.last || e.work_date > g.last) g.last = e.work_date;
+    if (e.member_id != null) g.members.set(String(e.member_id), e.member_name);
   }
-
-  return [...groups.values()].map((g) => ({
-    ...g,
-    hasSubs: g.subs.length > 0,
-    // Sub tasks done, but the main task is not Done yet.
-    mainOpen: g.subs.length > 0 && !g.own,
-    assigneeNames: [...g.assignees.values()],
-  }));
+  return [...groups.values()]
+    .map((g) => ({ ...g, memberNames: [...g.members.values()].filter(Boolean) }))
+    .sort((a, b) => String(b.last).localeCompare(String(a.last)) || b.total - a.total);
 }
 
-// Member detail: the member's completed tasks grouped by project.
-function groupByProject(tasks) {
+// Member detail: the member's entries grouped by project.
+function groupByProject(entries) {
   const groups = new Map();
-
-  for (const t of tasks) {
-    const key = String(t.project_id);
+  for (const e of entries) {
+    const key = String(e.project_id);
     let g = groups.get(key);
     if (!g) {
       g = {
         key,
-        id: t.project_id,
-        name: t.project_name,
-        client_name: t.client_name,
-        status: t.project_status,
-        tasks: [],
+        id: e.project_id,
+        name: e.project_name,
+        client_name: e.client_name,
+        status: e.project_status,
+        entries: [],
+        tasks: new Set(),
         total_minutes: 0,
-        task_count: 0,
-        unlogged_count: 0,
-        last_completed_at: null,
+        misc_minutes: 0,
+        last_logged_on: null,
       };
       groups.set(key, g);
     }
-
-    g.tasks.push(t);
-    g.total_minutes += minutesOf(t);
-    if (t.is_leaf) g.task_count += 1;
-    if (isUnlogged(t)) g.unlogged_count += 1;
-    if (!g.last_completed_at || new Date(t.completed_at) > new Date(g.last_completed_at)) {
-      g.last_completed_at = t.completed_at;
-    }
+    g.entries.push(e);
+    g.tasks.add(taskKeyOf(e));
+    g.total_minutes += minutesOf(e);
+    if (e.is_misc) g.misc_minutes += minutesOf(e);
+    if (!g.last_logged_on || e.work_date > g.last_logged_on) g.last_logged_on = e.work_date;
   }
+  return [...groups.values()].map((g) => ({ ...g, task_count: g.tasks.size }));
+}
 
-  return [...groups.values()];
+// Totals over a list of entries.
+function sumEntries(entries) {
+  const tasks = new Set();
+  let minutes = 0;
+  let misc = 0;
+  for (const e of entries) {
+    minutes += minutesOf(e);
+    if (e.is_misc) misc += minutesOf(e);
+    tasks.add(taskKeyOf(e));
+  }
+  return { minutes, misc, entries: entries.length, tasks: tasks.size };
 }
 
 /* -------------------------------------------------------------------------- */
@@ -462,29 +475,6 @@ function Duration({ minutes, size = 'md', className = '' }) {
   );
 }
 
-function TimeValue({ minutes, unlogged, className = '' }) {
-  if (unlogged) {
-    return (
-      <span
-        title="Completed without a time entry"
-        className="inline-flex items-center gap-1 whitespace-nowrap rounded-md border border-dashed border-[color:color-mix(in_srgb,var(--warning)_55%,transparent)] px-1.5 py-px text-[11px] font-medium text-[color:color-mix(in_srgb,var(--warning)_85%,var(--text))]"
-      >
-        Not logged
-      </span>
-    );
-  }
-  return <Duration minutes={minutes} className={cx('text-[color:var(--text)]', className)} />;
-}
-
-function UnloggedNote({ count, className = '' }) {
-  if (!count) return null;
-  return (
-    <span className={cx('text-[11px] font-medium tabular-nums text-[color:color-mix(in_srgb,var(--warning)_85%,var(--text))]', className)}>
-      {count} not logged
-    </span>
-  );
-}
-
 function Avatar({ name, url, size = 34 }) {
   const hue = hueOf(name);
   return (
@@ -648,13 +638,12 @@ function DistributionBar({ segments, total, title }) {
   );
 }
 
-// How many completed tasks actually have time on them.
-function CoverageRing({ logged, total }) {
-  const pct = total > 0 ? logged / total : 0;
+// Share of the time that went to real tasks vs Miscellaneous work.
+function SplitRing({ total, misc }) {
+  const taskMinutes = Math.max(0, total - misc);
+  const pct = total > 0 ? taskMinutes / total : 0;
   const r = 34;
   const c = 2 * Math.PI * r;
-  const good = pct >= 0.8;
-  const color = good ? 'var(--success)' : pct >= 0.4 ? 'var(--warning)' : 'var(--danger)';
   return (
     <div className="flex items-center gap-4">
       <svg width="88" height="88" viewBox="0 0 88 88" className="shrink-0 -rotate-90" aria-hidden="true">
@@ -664,7 +653,7 @@ function CoverageRing({ logged, total }) {
           cy="44"
           r={r}
           fill="none"
-          stroke={color}
+          stroke="var(--accent)"
           strokeWidth="9"
           strokeLinecap="round"
           strokeDasharray={`${Math.max(pct * c, pct > 0 ? 4 : 0)} ${c}`}
@@ -682,23 +671,19 @@ function CoverageRing({ logged, total }) {
         </text>
       </svg>
       <div className="min-w-0">
-        <div className="text-[13px] font-semibold text-[color:var(--text)]">Logging coverage</div>
+        <div className="text-[13px] font-semibold text-[color:var(--text)]">On project tasks</div>
         <div className="mt-0.5 text-[12px] leading-snug text-[color:var(--text-2)]">
-          <span className={cx(MONO, 'font-semibold text-[color:var(--text)]')}>{logged}</span> of{' '}
-          <span className={MONO}>{total}</span> completed tasks have time
+          <span className={cx(MONO, 'font-semibold text-[color:var(--text)]')}>{formatMinutes(taskMinutes)}</span> on tasks
         </div>
-        {!good && total > 0 && (
-          <div className="mt-1 text-[11.5px] font-medium" style={{ color: `color-mix(in srgb, ${color} 85%, var(--text))` }}>
-            {total - logged} finished without a time entry
-          </div>
-        )}
+        <div className="mt-0.5 text-[12px] leading-snug text-[color:var(--text-3)]">
+          <span className={cx(MONO, 'font-semibold text-[color:var(--text-2)]')}>{formatMinutes(misc)}</span> miscellaneous
+        </div>
       </div>
     </div>
   );
 }
 
-function SummaryBand({ totalMinutes, taskCount, unlogged, countLabel, countValue, segments, segmentsTitle }) {
-  const avg = taskCount - unlogged > 0 ? totalMinutes / (taskCount - unlogged) : 0;
+function SummaryBand({ totalMinutes, miscMinutes, entryCount, taskCount, countLabel, countValue, segments, segmentsTitle }) {
   return (
     <section
       className={cx(SURFACE, 'tl-rise relative mb-6 overflow-hidden')}
@@ -729,13 +714,13 @@ function SummaryBand({ totalMinutes, taskCount, unlogged, countLabel, countValue
             className="mt-3 text-[48px] font-extrabold leading-none tracking-[-0.04em] text-[color:var(--text)] sm:text-[60px]"
           />
           <div className="mt-4 flex flex-wrap gap-2">
-            <StatChip label="Tasks done" value={taskCount} />
+            <StatChip label="Entries" value={entryCount} />
+            <StatChip label="Tasks" value={taskCount} />
             <StatChip label={countLabel} value={countValue} />
-            <StatChip label="Avg per logged task" value={avg ? formatMinutes(avg) : '—'} />
           </div>
         </div>
         <div className="rounded-xl bg-[color:color-mix(in_srgb,var(--bg-2)_75%,transparent)] p-4 shadow-[inset_0_0_0_1px_var(--border)] backdrop-blur-sm lg:min-w-[300px]">
-          <CoverageRing logged={taskCount - unlogged} total={taskCount} />
+          <SplitRing total={totalMinutes} misc={miscMinutes} />
         </div>
       </div>
       <div className="relative border-t border-[color:var(--border)] bg-[color:color-mix(in_srgb,var(--bg-3)_45%,transparent)] px-5 pb-5 pt-1 sm:px-7">
@@ -861,7 +846,7 @@ function RankBadge({ rank, color, empty }) {
   );
 }
 
-const RankedRow = memo(function RankedRow({ rank, seed, mark, title, subtitle, badge, minutes, max, total, meta, unlogged, onOpen, index }) {
+const RankedRow = memo(function RankedRow({ rank, seed, mark, title, subtitle, badge, minutes, max, total, meta, onOpen, index }) {
   const share = percentOf(minutes, total);
   const empty = !minutes;
   const color = hueColor(seed || title);
@@ -901,7 +886,6 @@ const RankedRow = memo(function RankedRow({ rank, seed, mark, title, subtitle, b
         </span>
         <span className="flex flex-wrap items-center gap-x-2.5 gap-y-0.5 text-[11.5px] tabular-nums text-[color:var(--text-3)]">
           {meta}
-          {unlogged > 0 && <UnloggedNote count={unlogged} />}
         </span>
       </span>
 
@@ -937,42 +921,97 @@ function Dot() {
 }
 
 /* -------------------------------------------------------------------------- */
-/* Task ledger rows                                                           */
+/* Entry ledger rows                                                          */
 /* -------------------------------------------------------------------------- */
 
-const TASK_ROW =
-  'grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-1 px-4 py-3 sm:px-5 md:grid-cols-[minmax(0,1fr)_11rem_6rem_6.5rem]';
+const ENTRY_ROW =
+  'grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-1 px-4 py-3 sm:px-5 md:grid-cols-[minmax(0,1fr)_9rem_5.5rem_5.5rem_4.25rem]';
 
-function TaskLink({ projectId, task, children, className = '' }) {
+function MiscChip() {
   return (
-    <Link
-      to={`/projects/${projectId}/tasks/${task.id}`}
-      className={cx(
-        'rounded text-[13.5px] font-medium text-[color:var(--text)] no-underline decoration-[color:var(--border-bright)] underline-offset-[3px] [overflow-wrap:anywhere] hover:text-[color:var(--accent)] hover:underline',
-        FOCUS,
-        className,
-      )}
-    >
-      {children}
-    </Link>
-  );
-}
-
-function ReworkChip({ count }) {
-  if (!count) return null;
-  return (
-    <span className="ml-2 inline-block rounded-[5px] bg-[color:color-mix(in_srgb,var(--danger)_10%,transparent)] px-1.5 py-px align-middle text-[10.5px] font-semibold tabular-nums text-[color:var(--danger)]">
-      {count}× rework
+    <span className="ml-2 inline-block rounded-[5px] bg-[color:color-mix(in_srgb,var(--warning)_14%,transparent)] px-1.5 py-px align-middle text-[10.5px] font-semibold text-[color:color-mix(in_srgb,var(--warning)_80%,var(--text))]">
+      Misc
     </span>
   );
 }
 
-function TaskRow({ projectId, task, indent = false, label, secondary }) {
-  const names = (task.assignees || []).map((a) => a.name).join(', ') || 'Unassigned';
+function SmallChip({ children }) {
+  return (
+    <span className="ml-2 inline-block rounded-[5px] bg-[color:var(--bg-4)] px-1.5 py-px align-middle text-[10.5px] font-semibold text-[color:var(--text-3)]">
+      {children}
+    </span>
+  );
+}
+
+// Task name: a link while the task exists, plain text for Miscellaneous
+// work or a task that was deleted after the time was logged.
+function TaskTitle({ item, className = '' }) {
+  const linkable = !item.is_misc && item.task_id != null;
+  const text = item.task_title || item.title || 'Untitled';
+  return (
+    <>
+      {linkable ? (
+        <Link
+          to={`/projects/${item.project_id}/tasks/${item.task_id}`}
+          className={cx(
+            'rounded text-[13.5px] font-medium text-[color:var(--text)] no-underline decoration-[color:var(--border-bright)] underline-offset-[3px] [overflow-wrap:anywhere] hover:text-[color:var(--accent)] hover:underline',
+            FOCUS,
+            className,
+          )}
+        >
+          {text}
+        </Link>
+      ) : (
+        <span className={cx('text-[13.5px] font-medium text-[color:var(--text)] [overflow-wrap:anywhere]', className)}>{text}</span>
+      )}
+      {item.is_misc && <MiscChip />}
+      {item.task_deleted && <SmallChip>Task deleted</SmallChip>}
+    </>
+  );
+}
+
+function IconButton({ label, onClick, danger, children }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={label}
+      title={label}
+      className={cx(
+        'flex size-8 cursor-pointer items-center justify-center rounded-md border-0 bg-transparent text-[color:var(--text-3)] transition-colors duration-150 max-[640px]:size-10 motion-reduce:transition-none',
+        danger
+          ? 'hover:bg-[color:color-mix(in_srgb,var(--danger)_10%,transparent)] hover:text-[color:var(--danger)]'
+          : 'hover:bg-[color:var(--bg-3)] hover:text-[color:var(--text)]',
+        FOCUS,
+      )}
+    >
+      {children}
+    </button>
+  );
+}
+
+function EntryActions({ entry, onEdit, onDelete }) {
+  return (
+    <div className="flex items-center justify-end gap-0.5">
+      <IconButton label="Edit entry" onClick={() => onEdit(entry)}>
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M4 20h4L18.5 9.5a2.1 2.1 0 0 0-4-4L4 16v4ZM13.5 6.5l4 4" />
+        </svg>
+      </IconButton>
+      <IconButton label="Delete entry" onClick={() => onDelete(entry)} danger>
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3" />
+        </svg>
+      </IconButton>
+    </div>
+  );
+}
+
+function EntryRow({ entry, main, secondary, indent = false, onEdit, onDelete }) {
   return (
     <div
       className={cx(
-        TASK_ROW,
+        ENTRY_ROW,
         'transition-colors duration-150 hover:bg-[color:color-mix(in_srgb,var(--bg-3)_55%,transparent)] motion-reduce:transition-none',
         indent && 'relative bg-[color:color-mix(in_srgb,var(--bg-3)_40%,transparent)] md:pl-[3.25rem]',
       )}
@@ -980,33 +1019,25 @@ function TaskRow({ projectId, task, indent = false, label, secondary }) {
       {indent && (
         <span aria-hidden="true" className="absolute bottom-0 left-[1.6rem] top-0 hidden w-px bg-[color:var(--border)] md:block" />
       )}
-      <div className="min-w-0 max-md:col-span-2">
-        {label && (
-          <span className="mr-2 rounded-[5px] bg-[color:var(--bg-4)] px-1.5 py-px align-middle text-[10.5px] font-semibold text-[color:var(--text-3)]">
-            {label}
-          </span>
-        )}
-        <TaskLink projectId={projectId} task={task}>
-          {task.title}
-        </TaskLink>
-        <ReworkChip count={task.rework_count} />
-      </div>
-      <div className="truncate text-[12px] text-[color:var(--text-2)]">{secondary ?? names}</div>
-      <div className="text-[12px] tabular-nums text-[color:var(--text-3)]">{formatDayShort(task.completed_at)}</div>
+      <div className="min-w-0 max-md:col-span-2">{main}</div>
+      <div className="truncate text-[12px] text-[color:var(--text-2)]">{secondary || '—'}</div>
+      <div className="text-[12px] tabular-nums text-[color:var(--text-3)]">{formatDayShort(entry.work_date)}</div>
       <div className="justify-self-end text-[13.5px]">
-        <TimeValue minutes={minutesOf(task)} unlogged={isUnlogged(task)} className="font-medium" />
+        <Duration minutes={minutesOf(entry)} className="font-medium text-[color:var(--text)]" />
       </div>
+      <EntryActions entry={entry} onEdit={onEdit} onDelete={onDelete} />
     </div>
   );
 }
 
-function TaskHead({ second = 'Assignee' }) {
+function EntryHead({ first = 'Task', second = 'Member', third = 'Date' }) {
   return (
-    <div className={cx(TASK_ROW, 'hidden !py-2.5 bg-[color:color-mix(in_srgb,var(--bg-3)_60%,var(--bg-2))] md:grid')}>
-      <span className={LABEL}>Task</span>
+    <div className={cx(ENTRY_ROW, 'hidden !py-2.5 bg-[color:color-mix(in_srgb,var(--bg-3)_60%,var(--bg-2))] md:grid')}>
+      <span className={LABEL}>{first}</span>
       <span className={LABEL}>{second}</span>
-      <span className={LABEL}>Completed</span>
+      <span className={LABEL}>{third}</span>
       <span className={cx(LABEL, 'justify-self-end')}>Time</span>
+      <span />
     </div>
   );
 }
@@ -1028,26 +1059,250 @@ function SectionHead({ title, count, children }) {
 }
 
 /* -------------------------------------------------------------------------- */
+/* Edit / delete entries (managers)                                           */
+/* -------------------------------------------------------------------------- */
+
+function EditEntryModal({ entry, onClose, onSaved }) {
+  const total = minutesOf(entry);
+  const [workDate, setWorkDate] = useState(entry.work_date || '');
+  const [hours, setHours] = useState(String(Math.floor(total / 60)));
+  const [mins, setMins] = useState(String(total % 60));
+  const [taskName, setTaskName] = useState(entry.task_title || '');
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
+  const today = istToday();
+
+  const submit = async (e) => {
+    e.preventDefault();
+    if (saving) return;
+    const h = hours === '' ? 0 : Number(hours);
+    const m = mins === '' ? 0 : Number(mins);
+    if (!Number.isInteger(h) || !Number.isInteger(m) || h < 0 || m < 0) {
+      setError('Enter whole numbers for hours and minutes.');
+      return;
+    }
+    if (m > 59) {
+      setError('Minutes must be between 0 and 59.');
+      return;
+    }
+    const minutes = h * 60 + m;
+    if (minutes <= 0) {
+      setError('Enter the time taken (at least 1 minute).');
+      return;
+    }
+    if (minutes > 24 * 60) {
+      setError("One entry can't be more than 24 hours.");
+      return;
+    }
+    if (!workDate) {
+      setError('Select a date.');
+      return;
+    }
+    if (entry.is_misc && !taskName.trim()) {
+      setError('Enter the task name.');
+      return;
+    }
+
+    setSaving(true);
+    setError('');
+    try {
+      const payload = { work_date: workDate, minutes };
+      if (entry.is_misc) payload.task_name = taskName.trim();
+      await api.put(`/time-log/entries/${entry.id}`, payload);
+      onClose();
+      onSaved();
+    } catch (err) {
+      setError(err?.response?.data?.error || "We couldn't save this entry. Please try again.");
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal title="Edit time entry" onClose={saving ? () => {} : onClose}>
+      <form onSubmit={submit} noValidate>
+        <p className="m-0 mb-4 text-[13px] leading-[1.55] text-[color:var(--text-2)]">
+          <strong className="text-[color:var(--text)]">{entry.member_name || 'Unknown member'}</strong>
+          {' · '}
+          {entry.project_name}
+          {!entry.is_misc && (
+            <>
+              {' · '}
+              {entry.task_title}
+            </>
+          )}
+        </p>
+
+        {entry.is_misc && (
+          <div className="form-group">
+            <label className="form-label" htmlFor="tl-edit-task">
+              Task name
+            </label>
+            <input
+              id="tl-edit-task"
+              className="form-input"
+              value={taskName}
+              maxLength={500}
+              onChange={(e) => {
+                setTaskName(e.target.value);
+                setError('');
+              }}
+            />
+          </div>
+        )}
+
+        <div className="form-group">
+          <span className="form-label">Date</span>
+          <DatePicker
+            value={workDate}
+            onChange={(v) => {
+              setWorkDate(v);
+              setError('');
+            }}
+            maxDate={today}
+            placeholder="dd-mm-yyyy"
+          />
+        </div>
+
+        <div className="form-group">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="form-label" htmlFor="tl-edit-hours">
+                Hours
+              </label>
+              <input
+                id="tl-edit-hours"
+                className="form-input"
+                type="number"
+                inputMode="numeric"
+                min="0"
+                max="24"
+                step="1"
+                value={hours}
+                onChange={(e) => {
+                  setHours(e.target.value);
+                  setError('');
+                }}
+              />
+            </div>
+            <div>
+              <label className="form-label" htmlFor="tl-edit-mins">
+                Minutes
+              </label>
+              <input
+                id="tl-edit-mins"
+                className="form-input"
+                type="number"
+                inputMode="numeric"
+                min="0"
+                max="59"
+                step="1"
+                value={mins}
+                onChange={(e) => {
+                  setMins(e.target.value);
+                  setError('');
+                }}
+              />
+            </div>
+          </div>
+        </div>
+
+        {error && (
+          <div className="mb-3 text-xs text-[color:var(--danger)]" role="alert">
+            {error}
+          </div>
+        )}
+
+        <div className="modal-actions">
+          <button type="button" className="btn btn-ghost" onClick={onClose} disabled={saving}>
+            Cancel
+          </button>
+          <button type="submit" className="btn btn-primary" disabled={saving}>
+            {saving ? 'Saving…' : 'Save'}
+          </button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+// Edit + delete for the detail views. `refresh` reloads the view afterwards.
+function useEntryActions(refresh) {
+  const [editing, setEditing] = useState(null);
+  const [deleting, setDeleting] = useState(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [notice, setNotice] = useState('');
+
+  const onEdit = useCallback((entry) => setEditing(entry), []);
+  const onDelete = useCallback((entry) => setDeleting(entry), []);
+
+  const confirmDelete = async () => {
+    if (!deleting || deleteBusy) return;
+    setDeleteBusy(true);
+    try {
+      await api.delete(`/time-log/entries/${deleting.id}`);
+      setDeleting(null);
+      setNotice('');
+      refresh();
+    } catch (err) {
+      setDeleting(null);
+      setNotice(err?.response?.data?.error || "We couldn't delete that entry. Please try again.");
+    } finally {
+      setDeleteBusy(false);
+    }
+  };
+
+  const modals = (
+    <>
+      {editing && <EditEntryModal entry={editing} onClose={() => setEditing(null)} onSaved={refresh} />}
+      <ConfirmModal
+        isOpen={!!deleting}
+        title="Delete time entry?"
+        message={
+          deleting
+            ? `${formatMinutes(minutesOf(deleting))} by ${deleting.member_name || 'unknown member'} on “${deleting.task_title}” (${formatDay(deleting.work_date)}) will be removed.`
+            : ''
+        }
+        confirmText="Delete"
+        loadingText="Deleting…"
+        loading={deleteBusy}
+        onCancel={() => setDeleting(null)}
+        onConfirm={confirmDelete}
+      />
+    </>
+  );
+
+  const noticeBar = notice ? (
+    <div
+      role="alert"
+      className="mb-4 flex items-center justify-between gap-3 rounded-lg bg-[color:color-mix(in_srgb,var(--danger)_10%,transparent)] px-4 py-2.5 text-[13px] text-[color:var(--danger)]"
+    >
+      <span>{notice}</span>
+      <button type="button" className={cx(QUIET_BTN, FOCUS, '!h-8')} onClick={() => setNotice('')}>
+        Dismiss
+      </button>
+    </div>
+  ) : null;
+
+  return { onEdit, onDelete, modals, noticeBar };
+}
+
+/* -------------------------------------------------------------------------- */
 /* Project detail                                                             */
 /* -------------------------------------------------------------------------- */
 
-function MainTaskGroup({ projectId, group, open, onToggle }) {
-  if (!group.hasSubs) {
-    // Plain task (no sub tasks).
-    return <TaskRow projectId={projectId} task={group.own} />;
-  }
-
-  const panelId = `tl-group-${group.key}`;
+function TaskGroup({ group, open, onToggle, onEdit, onDelete }) {
+  const panelId = `tl-group-${group.key.replace(/[^a-z0-9_-]/gi, '_')}`;
+  const count = group.entries.length;
   return (
     <div>
-      <div className={cx(TASK_ROW, open && 'bg-[color:color-mix(in_srgb,var(--accent)_4%,transparent)]')}>
+      <div className={cx(ENTRY_ROW, open && 'bg-[color:color-mix(in_srgb,var(--accent)_4%,transparent)]')}>
         <div className="flex min-w-0 items-start gap-2 max-md:col-span-2">
           <button
             type="button"
             onClick={() => onToggle(group.key)}
             aria-expanded={open}
             aria-controls={panelId}
-            aria-label={`${open ? 'Hide' : 'Show'} sub tasks of ${group.title}`}
+            aria-label={`${open ? 'Hide' : 'Show'} entries for ${group.title}`}
             className={cx(
               '-ml-1 mt-px flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md border-0 bg-transparent transition-colors hover:bg-[color:var(--bg-3)] max-[640px]:size-9',
               FOCUS,
@@ -1056,42 +1311,54 @@ function MainTaskGroup({ projectId, group, open, onToggle }) {
             <Chevron open={open} />
           </button>
           <div className="min-w-0">
-            <TaskLink projectId={projectId} task={{ id: group.id }} className="font-semibold">
-              {group.title || 'Main task'}
-            </TaskLink>
+            <div>
+              <TaskTitle item={group} className="font-semibold" />
+            </div>
             <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[11.5px] tabular-nums text-[color:var(--text-3)]">
               <span>
-                {group.subs.length} sub task{group.subs.length !== 1 ? 's' : ''}
+                {count} entr{count !== 1 ? 'ies' : 'y'}
               </span>
-              {group.mainOpen && (
+              {group.parent_title && (
                 <>
                   <Dot />
-                  <span>main task still open</span>
+                  <span className="truncate">sub task of {group.parent_title}</span>
                 </>
               )}
-              {group.unlogged > 0 && (
+              {group.cluster_name && (
                 <>
                   <Dot />
-                  <UnloggedNote count={group.unlogged} />
+                  <span className="truncate">{group.cluster_name}</span>
+                </>
+              )}
+              {group.task_stage === 'Done' && (
+                <>
+                  <Dot />
+                  <span>Done</span>
                 </>
               )}
             </div>
           </div>
         </div>
-        <div className="truncate text-[12px] text-[color:var(--text-2)]">{group.assigneeNames.join(', ') || '—'}</div>
+        <div className="truncate text-[12px] text-[color:var(--text-2)]">{group.memberNames.join(', ') || '—'}</div>
         <div className="text-[12px] tabular-nums text-[color:var(--text-3)]">{formatDayShort(group.last)}</div>
         <div className="justify-self-end text-[14px]">
           <Duration minutes={group.total} className="font-semibold text-[color:var(--text)]" />
         </div>
+        <span />
       </div>
 
       {open && (
         <div id={panelId} className="divide-y divide-[color:var(--border)] border-t border-[color:var(--border)]">
-          {group.own && minutesOf(group.own) > 0 && (
-            <TaskRow projectId={projectId} task={group.own} indent label="Main" />
-          )}
-          {group.subs.map((st) => (
-            <TaskRow key={st.id} projectId={projectId} task={st} indent />
+          {group.entries.map((e) => (
+            <EntryRow
+              key={e.id}
+              entry={e}
+              indent
+              main={<span className="text-[13px] text-[color:var(--text)]">{e.member_name || 'Unknown member'}</span>}
+              secondary={e.cluster_name}
+              onEdit={onEdit}
+              onDelete={onDelete}
+            />
           ))}
         </div>
       )}
@@ -1108,36 +1375,29 @@ function ProjectDetailView({ projectId, from, to, onBack, onOpenMember }) {
   useLiveRefetch(TASK_AND_PROJECT_EVENTS, refreshSilently, {
     match: (e) => e.projectId == null || String(e.projectId) === String(projectId),
   });
+  const { onEdit, onDelete, modals, noticeBar } = useEntryActions(refreshSilently);
 
   const [openKeys, setOpenKeys] = useState(() => new Set());
 
-  const tasks = data?.tasks || [];
+  const entries = data?.entries || [];
   const project = data?.project;
 
   const { groups, totals, perMember } = useMemo(() => {
-    const g = groupByMainTask(tasks).sort((a, b) => new Date(b.last) - new Date(a.last));
-    const t = tasks.reduce(
-      (acc, task) => {
-        acc.minutes += minutesOf(task);
-        if (task.is_leaf) acc.count += 1;
-        if (isUnlogged(task)) acc.unlogged += 1;
-        return acc;
-      },
-      { minutes: 0, count: 0, unlogged: 0 },
-    );
     const pm = new Map();
-    for (const task of tasks) {
-      for (const a of task.assignees || []) {
-        const k = String(a.id);
-        const row = pm.get(k) || { id: a.id, name: a.name, minutes: 0, count: 0, unlogged: 0 };
-        row.minutes += minutesOf(task);
-        if (task.is_leaf) row.count += 1;
-        if (isUnlogged(task)) row.unlogged += 1;
-        pm.set(k, row);
-      }
+    for (const e of entries) {
+      const k = String(e.member_id ?? 'none');
+      const row = pm.get(k) || { id: e.member_id, name: e.member_name || 'Unknown member', minutes: 0, entries: 0, tasks: new Set() };
+      row.minutes += minutesOf(e);
+      row.entries += 1;
+      row.tasks.add(taskKeyOf(e));
+      pm.set(k, row);
     }
-    return { groups: g, totals: t, perMember: [...pm.values()].sort((a, b) => b.minutes - a.minutes) };
-  }, [tasks]);
+    return {
+      groups: groupByTask(entries),
+      totals: sumEntries(entries),
+      perMember: [...pm.values()].map((m) => ({ ...m, count: m.tasks.size })).sort((a, b) => b.minutes - a.minutes),
+    };
+  }, [entries]);
 
   const toggle = useCallback((key) => {
     setOpenKeys((prev) => {
@@ -1148,27 +1408,24 @@ function ProjectDetailView({ projectId, from, to, onBack, onOpenMember }) {
     });
   }, []);
 
-  const allKeys = useMemo(() => groups.filter((g) => g.hasSubs).map((g) => g.key), [groups]);
+  const allKeys = useMemo(() => groups.map((g) => g.key), [groups]);
   const allOpen = allKeys.length > 0 && allKeys.every((k) => openKeys.has(k));
   const toggleAll = () => setOpenKeys(allOpen ? new Set() : new Set(allKeys));
 
   const exportCsv = () => {
-    const rows = tasks
-      .slice()
-      .sort((a, b) => new Date(b.completed_at) - new Date(a.completed_at))
-      .map((t) => [
-        t.parent_task_id ? t.parent_title : t.title,
-        t.parent_task_id ? t.title : '',
-        (t.assignees || []).map((a) => a.name).join('; '),
-        formatDayIso(t.completed_at),
-        isUnlogged(t) ? '' : minutesOf(t),
-        isUnlogged(t) ? '' : toHours(minutesOf(t)),
-        isUnlogged(t) ? 'Not logged' : '',
-        t.rework_count || 0,
-      ]);
+    const rows = entries.map((e) => [
+      formatDayIso(e.work_date),
+      e.member_name || '',
+      e.is_misc ? 'Miscellaneous' : 'Task',
+      e.parent_task_id ? e.parent_title : '',
+      e.task_title,
+      e.cluster_name || '',
+      minutesOf(e),
+      toHours(minutesOf(e)),
+    ]);
     downloadCsv(
       `time-log_${slug(project?.name)}_${fileSuffix(from, to)}.csv`,
-      ['Task', 'Sub task', 'Assignees', 'Completed (IST)', 'Minutes', 'Hours', 'Note', 'Reworks'],
+      ['Date (IST)', 'Member', 'Type', 'Main task', 'Task', 'Cluster', 'Minutes', 'Hours'],
       rows,
     );
   };
@@ -1191,13 +1448,15 @@ function ProjectDetailView({ projectId, from, to, onBack, onOpenMember }) {
                 Open project
               </Link>
             )}
-            <button type="button" className={cx(QUIET_BTN, FOCUS)} onClick={exportCsv} disabled={!tasks.length}>
+            <button type="button" className={cx(QUIET_BTN, FOCUS)} onClick={exportCsv} disabled={!entries.length}>
               <DownloadIcon /> Export CSV
             </button>
           </>
         }
         refreshing={refreshing && !loading}
       />
+
+      {noticeBar}
 
       {loading ? (
         <PageSkeleton />
@@ -1213,56 +1472,57 @@ function ProjectDetailView({ projectId, from, to, onBack, onOpenMember }) {
         >
           Check your connection and try again.
         </EmptyState>
-      ) : tasks.length === 0 ? (
-        <EmptyState title="No completed tasks in this period">
-          Pick a wider date range above, or check back once tasks in this project are marked Done.
+      ) : entries.length === 0 ? (
+        <EmptyState title="No time logged in this period">
+          Pick a wider date range above, or check back once members log time on this project.
         </EmptyState>
       ) : (
         <>
           <SummaryBand
             totalMinutes={totals.minutes}
-            taskCount={totals.count}
-            unlogged={totals.unlogged}
+            miscMinutes={totals.misc}
+            entryCount={totals.entries}
+            taskCount={totals.tasks}
             countLabel="Members"
             countValue={perMember.length}
-            segments={toSegments(perMember)}
+            segments={toSegments(perMember.map((m) => ({ id: String(m.id ?? 'none'), name: m.name, minutes: m.minutes })))}
             segmentsTitle="Time by member"
           />
 
-          <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_340px]">
-            <section className={cx(SURFACE, 'tl-rise overflow-hidden [animation-delay:60ms]')} aria-label="Completed tasks">
-              <SectionHead title="Completed tasks" count={groups.length}>
-                {allKeys.length > 0 && (
-                  <button type="button" className={cx(QUIET_BTN, FOCUS, '!h-8')} onClick={toggleAll}>
-                    {allOpen ? 'Collapse all' : 'Expand all'}
-                  </button>
-                )}
+          <div className="grid items-start gap-6 2xl:grid-cols-[minmax(0,1fr)_340px]">
+            <section className={cx(SURFACE, 'tl-rise overflow-hidden [animation-delay:60ms]')} aria-label="Tasks">
+              <SectionHead title="Tasks" count={groups.length}>
+                <button type="button" className={cx(QUIET_BTN, FOCUS, '!h-8')} onClick={toggleAll}>
+                  {allOpen ? 'Collapse all' : 'Show all entries'}
+                </button>
               </SectionHead>
-              <TaskHead />
+              <EntryHead first="Task" second="Members" third="Last logged" />
               <div className="divide-y divide-[color:var(--border)] border-t border-[color:var(--border)] md:border-t-0">
                 {groups.map((g) => (
-                  <MainTaskGroup
+                  <TaskGroup
                     key={g.key}
-                    projectId={projectId}
                     group={g}
                     open={openKeys.has(g.key)}
                     onToggle={toggle}
+                    onEdit={onEdit}
+                    onDelete={onDelete}
                   />
                 ))}
               </div>
             </section>
 
             {perMember.length > 0 && (
-              <aside className={cx(SURFACE, 'tl-rise overflow-hidden [animation-delay:120ms] xl:sticky xl:top-4')} aria-label="Time by member">
+              <aside className={cx(SURFACE, 'tl-rise overflow-hidden [animation-delay:120ms] 2xl:sticky 2xl:top-4')} aria-label="Time by member">
                 <SectionHead title="Members" count={perMember.length} />
                 <ul className="m-0 list-none p-0">
                   {perMember.map((m) => (
-                    <li key={m.id} className="border-b border-[color:var(--border)] last:border-b-0">
+                    <li key={String(m.id ?? 'none')} className="border-b border-[color:var(--border)] last:border-b-0">
                       <button
                         type="button"
-                        onClick={() => onOpenMember(m.id)}
+                        onClick={() => m.id != null && onOpenMember(m.id)}
+                        disabled={m.id == null}
                         className={cx(
-                          'group flex w-full cursor-pointer flex-col gap-2 border-0 bg-transparent px-4 py-3 text-left transition-colors duration-150 hover:bg-[color:color-mix(in_srgb,var(--bg-3)_70%,transparent)] motion-reduce:transition-none sm:px-5',
+                          'group flex w-full cursor-pointer flex-col gap-2 border-0 bg-transparent px-4 py-3 text-left transition-colors duration-150 hover:bg-[color:color-mix(in_srgb,var(--bg-3)_70%,transparent)] disabled:cursor-default motion-reduce:transition-none sm:px-5',
                           FOCUS_INSET,
                         )}
                       >
@@ -1271,10 +1531,7 @@ function ProjectDetailView({ projectId, from, to, onBack, onOpenMember }) {
                           <span className="min-w-0 flex-1">
                             <span className="block truncate text-[13px] font-medium text-[color:var(--text)]">{m.name}</span>
                             <span className="block text-[11px] tabular-nums text-[color:var(--text-3)]">
-                              {m.count} task{m.count !== 1 ? 's' : ''}
-                              {m.unlogged > 0 && (
-                                <span className="text-[color:color-mix(in_srgb,var(--warning)_85%,var(--text))]"> · {m.unlogged} not logged</span>
-                              )}
+                              {m.count} task{m.count !== 1 ? 's' : ''} · {m.entries} entr{m.entries !== 1 ? 'ies' : 'y'}
                             </span>
                           </span>
                           <Duration minutes={m.minutes} className="text-[13.5px] font-semibold text-[color:var(--text)]" />
@@ -1294,6 +1551,8 @@ function ProjectDetailView({ projectId, from, to, onBack, onOpenMember }) {
           </div>
         </>
       )}
+
+      {modals}
     </>
   );
 }
@@ -1302,7 +1561,7 @@ function ProjectDetailView({ projectId, from, to, onBack, onOpenMember }) {
 /* Member detail                                                              */
 /* -------------------------------------------------------------------------- */
 
-function MemberProjectGroup({ group, open, onToggle, max, total, onOpenProject, index }) {
+function MemberProjectGroup({ group, open, onToggle, max, total, onOpenProject, index, onEdit, onDelete }) {
   const panelId = `tl-mp-${group.key}`;
   return (
     <section className={cx(SURFACE, 'tl-rise overflow-hidden')} style={{ animationDelay: `${Math.min(index, 8) * 40}ms` }}>
@@ -1325,11 +1584,11 @@ function MemberProjectGroup({ group, open, onToggle, max, total, onOpenProject, 
                 {group.task_count} task{group.task_count !== 1 ? 's' : ''}
               </span>
               <Dot />
-              <span>last {formatDayShort(group.last_completed_at)}</span>
-              {group.unlogged_count > 0 && (
+              <span>last {formatDayShort(group.last_logged_on)}</span>
+              {group.misc_minutes > 0 && (
                 <>
                   <Dot />
-                  <UnloggedNote count={group.unlogged_count} />
+                  <span>{formatMinutes(group.misc_minutes)} misc</span>
                 </>
               )}
             </span>
@@ -1352,10 +1611,26 @@ function MemberProjectGroup({ group, open, onToggle, max, total, onOpenProject, 
 
       {open && (
         <div id={panelId}>
-          <TaskHead second="Main task" />
+          <EntryHead first="Task" second="Cluster" />
           <div className="divide-y divide-[color:var(--border)]">
-            {group.tasks.map((t) => (
-              <TaskRow key={t.id} projectId={group.id} task={t} secondary={t.parent_title || '—'} />
+            {group.entries.map((e) => (
+              <EntryRow
+                key={e.id}
+                entry={e}
+                main={
+                  <>
+                    <div>
+                      <TaskTitle item={e} />
+                    </div>
+                    {e.parent_task_id && e.parent_title && (
+                      <div className="mt-0.5 truncate text-[11.5px] text-[color:var(--text-3)]">sub task of {e.parent_title}</div>
+                    )}
+                  </>
+                }
+                secondary={e.cluster_name}
+                onEdit={onEdit}
+                onDelete={onDelete}
+              />
             ))}
           </div>
         </div>
@@ -1371,24 +1646,17 @@ function MemberDetailView({ memberId, from, to, onBack, onOpenProject }) {
     to,
   );
   useLiveRefetch(TASK_AND_PROJECT_EVENTS, refreshSilently);
+  const { onEdit, onDelete, modals, noticeBar } = useEntryActions(refreshSilently);
 
   const [openKeys, setOpenKeys] = useState(() => new Set());
 
-  const tasks = data?.tasks || [];
+  const entries = data?.entries || [];
   const member = data?.member;
 
   const { groups, totals } = useMemo(() => {
-    const g = groupByProject(tasks).sort((a, b) => b.total_minutes - a.total_minutes);
-    const t = g.reduce(
-      (acc, p) => ({
-        minutes: acc.minutes + p.total_minutes,
-        count: acc.count + p.task_count,
-        unlogged: acc.unlogged + p.unlogged_count,
-      }),
-      { minutes: 0, count: 0, unlogged: 0 },
-    );
-    return { groups: g, totals: t };
-  }, [tasks]);
+    const g = groupByProject(entries).sort((a, b) => b.total_minutes - a.total_minutes);
+    return { groups: g, totals: sumEntries(entries) };
+  }, [entries]);
 
   const toggle = useCallback((key) => {
     setOpenKeys((prev) => {
@@ -1403,23 +1671,23 @@ function MemberDetailView({ memberId, from, to, onBack, onOpenProject }) {
   const toggleAll = () => setOpenKeys(allOpen ? new Set() : new Set(groups.map((g) => g.key)));
 
   const exportCsv = () => {
-    const rows = tasks
+    const rows = entries
       .slice()
-      .sort((a, b) => String(a.project_name).localeCompare(String(b.project_name)) || new Date(b.completed_at) - new Date(a.completed_at))
-      .map((t) => [
-        t.project_name,
-        t.client_name || '',
-        t.parent_task_id ? t.parent_title : '',
-        t.title,
-        formatDayIso(t.completed_at),
-        isUnlogged(t) ? '' : minutesOf(t),
-        isUnlogged(t) ? '' : toHours(minutesOf(t)),
-        isUnlogged(t) ? 'Not logged' : '',
-        t.rework_count || 0,
+      .sort((a, b) => String(a.project_name).localeCompare(String(b.project_name)) || String(b.work_date).localeCompare(String(a.work_date)))
+      .map((e) => [
+        formatDayIso(e.work_date),
+        e.project_name,
+        e.client_name || '',
+        e.is_misc ? 'Miscellaneous' : 'Task',
+        e.parent_task_id ? e.parent_title : '',
+        e.task_title,
+        e.cluster_name || '',
+        minutesOf(e),
+        toHours(minutesOf(e)),
       ]);
     downloadCsv(
       `time-log_${slug(member?.name)}_${fileSuffix(from, to)}.csv`,
-      ['Project', 'Client', 'Main task', 'Task', 'Completed (IST)', 'Minutes', 'Hours', 'Note', 'Reworks'],
+      ['Date (IST)', 'Project', 'Client', 'Type', 'Main task', 'Task', 'Cluster', 'Minutes', 'Hours'],
       rows,
     );
   };
@@ -1434,12 +1702,14 @@ function MemberDetailView({ memberId, from, to, onBack, onOpenProject }) {
         subtitle={member?.email || ''}
         badge={member && !member.active ? 'inactive' : null}
         actions={
-          <button type="button" className={cx(QUIET_BTN, FOCUS)} onClick={exportCsv} disabled={!tasks.length}>
+          <button type="button" className={cx(QUIET_BTN, FOCUS)} onClick={exportCsv} disabled={!entries.length}>
             <DownloadIcon /> Export CSV
           </button>
         }
         refreshing={refreshing && !loading}
       />
+
+      {noticeBar}
 
       {loading ? (
         <PageSkeleton />
@@ -1455,16 +1725,17 @@ function MemberDetailView({ memberId, from, to, onBack, onOpenProject }) {
         >
           Check your connection and try again.
         </EmptyState>
-      ) : tasks.length === 0 ? (
-        <EmptyState title="No completed tasks in this period">
-          {member?.name || 'This member'} has no tasks marked Done in this date range. Try a wider range above.
+      ) : entries.length === 0 ? (
+        <EmptyState title="No time logged in this period">
+          {member?.name || 'This member'} hasn't logged any time in this date range. Try a wider range above.
         </EmptyState>
       ) : (
         <>
           <SummaryBand
             totalMinutes={totals.minutes}
-            taskCount={totals.count}
-            unlogged={totals.unlogged}
+            miscMinutes={totals.misc}
+            entryCount={totals.entries}
+            taskCount={totals.tasks}
             countLabel="Projects"
             countValue={groups.length}
             segments={toSegments(groups.map((g) => ({ id: g.key, name: g.name, minutes: g.total_minutes })))}
@@ -1487,11 +1758,15 @@ function MemberDetailView({ memberId, from, to, onBack, onOpenProject }) {
                 max={groups[0]?.total_minutes || 0}
                 total={totals.minutes}
                 onOpenProject={onOpenProject}
+                onEdit={onEdit}
+                onDelete={onDelete}
               />
             ))}
           </div>
         </>
       )}
+
+      {modals}
     </>
   );
 }
@@ -1598,10 +1873,11 @@ function ProjectsList({ from, to, query, sort, onOpen, setExport }) {
       all.reduce(
         (acc, p) => ({
           minutes: acc.minutes + p.total_minutes,
-          count: acc.count + p.task_count,
-          unlogged: acc.unlogged + p.unlogged_count,
+          misc: acc.misc + p.misc_minutes,
+          entries: acc.entries + p.entry_count,
+          tasks: acc.tasks + p.task_count,
         }),
-        { minutes: 0, count: 0, unlogged: 0 },
+        { minutes: 0, misc: 0, entries: 0, tasks: 0 },
       ),
     [all],
   );
@@ -1619,17 +1895,18 @@ function ProjectsList({ from, to, query, sort, onOpen, setExport }) {
         ? () =>
             downloadCsv(
               `time-log_projects_${fileSuffix(from, to)}.csv`,
-              ['Project', 'Client', 'Status', 'Tasks done', 'Members', 'Minutes', 'Hours', 'Not logged', 'Last completed (IST)'],
+              ['Project', 'Client', 'Status', 'Tasks', 'Entries', 'Members', 'Minutes', 'Hours', 'Misc minutes', 'Last logged (IST)'],
               visible.map((p) => [
                 p.name,
                 p.client_name || '',
                 p.status || '',
                 p.task_count,
+                p.entry_count,
                 p.member_count,
                 p.total_minutes,
                 toHours(p.total_minutes),
-                p.unlogged_count,
-                formatDayIso(p.last_completed_at),
+                p.misc_minutes,
+                formatDayIso(p.last_logged_on),
               ]),
             )
         : null,
@@ -1642,8 +1919,8 @@ function ProjectsList({ from, to, query, sort, onOpen, setExport }) {
   if (error) return <ListError retry={retry} />;
   if (all.length === 0) {
     return (
-      <EmptyState title="No completed tasks in this period">
-        Time shows up here once tasks are marked Done. Pick a wider date range above.
+      <EmptyState title="No time logged in this period">
+        Time shows up here once members log it from their Time Log page. Pick a wider date range above.
       </EmptyState>
     );
   }
@@ -1652,8 +1929,9 @@ function ProjectsList({ from, to, query, sort, onOpen, setExport }) {
     <>
       <SummaryBand
         totalMinutes={totals.minutes}
-        taskCount={totals.count}
-        unlogged={totals.unlogged}
+        miscMinutes={totals.misc}
+        entryCount={totals.entries}
+        taskCount={totals.tasks}
         countLabel="Projects"
         countValue={all.length}
         segments={toSegments(all.map((p) => ({ id: p.id, name: p.name, minutes: p.total_minutes })))}
@@ -1685,7 +1963,6 @@ function ProjectsList({ from, to, query, sort, onOpen, setExport }) {
               minutes={p.total_minutes}
               max={max}
               total={totals.minutes}
-              unlogged={p.unlogged_count}
               meta={
                 <>
                   <span>
@@ -1696,7 +1973,13 @@ function ProjectsList({ from, to, query, sort, onOpen, setExport }) {
                     {p.member_count} member{p.member_count !== 1 ? 's' : ''}
                   </span>
                   <Dot />
-                  <span>last {formatDayShort(p.last_completed_at)}</span>
+                  <span>last {formatDayShort(p.last_logged_on)}</span>
+                  {p.misc_minutes > 0 && (
+                    <>
+                      <Dot />
+                      <span>{formatMinutes(p.misc_minutes)} misc</span>
+                    </>
+                  )}
                 </>
               }
               onOpen={() => onOpen(p.id)}
@@ -1724,10 +2007,10 @@ function MembersList({ from, to, query, sort, onOpen, setExport }) {
       all.reduce(
         (acc, m) => ({
           minutes: acc.minutes + m.total_minutes,
-          count: acc.count + m.task_count,
-          unlogged: acc.unlogged + m.unlogged_count,
+          misc: acc.misc + m.misc_minutes,
+          entries: acc.entries + m.entry_count,
         }),
-        { minutes: 0, count: 0, unlogged: 0 },
+        { minutes: 0, misc: 0, entries: 0 },
       ),
     [all],
   );
@@ -1743,16 +2026,17 @@ function MembersList({ from, to, query, sort, onOpen, setExport }) {
         ? () =>
             downloadCsv(
               `time-log_members_${fileSuffix(from, to)}.csv`,
-              ['Member', 'Email', 'Projects', 'Tasks done', 'Minutes', 'Hours', 'Not logged', 'Last completed (IST)'],
+              ['Member', 'Email', 'Projects', 'Tasks', 'Entries', 'Minutes', 'Hours', 'Misc minutes', 'Last logged (IST)'],
               visible.map((m) => [
                 m.name,
                 m.email || '',
                 m.project_count,
                 m.task_count,
+                m.entry_count,
                 m.total_minutes,
                 toHours(m.total_minutes),
-                m.unlogged_count,
-                formatDayIso(m.last_completed_at),
+                m.misc_minutes,
+                formatDayIso(m.last_logged_on),
               ]),
             )
         : null,
@@ -1765,8 +2049,8 @@ function MembersList({ from, to, query, sort, onOpen, setExport }) {
   if (error) return <ListError retry={retry} />;
   if (all.length === 0) {
     return (
-      <EmptyState title="No completed tasks in this period">
-        Members show up here once tasks assigned to them are marked Done.
+      <EmptyState title="No time logged in this period">
+        Members show up here once they log time from their Time Log page.
       </EmptyState>
     );
   }
@@ -1775,8 +2059,9 @@ function MembersList({ from, to, query, sort, onOpen, setExport }) {
     <>
       <SummaryBand
         totalMinutes={totals.minutes}
-        taskCount={totals.count}
-        unlogged={totals.unlogged}
+        miscMinutes={totals.misc}
+        entryCount={totals.entries}
+        taskCount={all.reduce((n, m) => n + m.task_count, 0)}
         countLabel="Members"
         countValue={all.length}
         segments={toSegments(all.map((m) => ({ id: m.id, name: m.name, minutes: m.total_minutes })))}
@@ -1808,7 +2093,6 @@ function MembersList({ from, to, query, sort, onOpen, setExport }) {
               minutes={m.total_minutes}
               max={max}
               total={totals.minutes}
-              unlogged={m.unlogged_count}
               meta={
                 <>
                   <span>
@@ -1819,7 +2103,13 @@ function MembersList({ from, to, query, sort, onOpen, setExport }) {
                     {m.task_count} task{m.task_count !== 1 ? 's' : ''}
                   </span>
                   <Dot />
-                  <span>last {formatDayShort(m.last_completed_at)}</span>
+                  <span>last {formatDayShort(m.last_logged_on)}</span>
+                  {m.misc_minutes > 0 && (
+                    <>
+                      <Dot />
+                      <span>{formatMinutes(m.misc_minutes)} misc</span>
+                    </>
+                  )}
                 </>
               }
               onOpen={() => onOpen(m.id)}
@@ -1921,7 +2211,7 @@ export default function TimeLog() {
         <div>
           <h1 className="page-title !tracking-[-0.03em]">Time log</h1>
           <div className="page-subtitle">
-            Time spent on completed tasks
+            Time logged by members
             <span aria-hidden="true" className="mx-1.5 text-[color:var(--border-bright)]">/</span>
             <span className="font-medium text-[color:var(--text)]">{rangeLabel(from, to)}</span>
           </div>
@@ -2032,4 +2322,4 @@ export default function TimeLog() {
       </div>
     </>
   );
-}
+}

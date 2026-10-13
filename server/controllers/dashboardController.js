@@ -30,4 +30,11 @@ async function getMyTasks(req, res, next) {
   } catch (err) { next(err); }
 }
 
-module.exports = { getDashboard, getMemberTasks, getTasksList, getMyTasks };
+// Admin Members page: task progress for every active member.
+async function getTeamProgress(req, res, next) {
+  try {
+    res.json(await dashboardService.getTeamProgress());
+  } catch (err) { next(err); }
+}
+
+module.exports = { getDashboard, getMemberTasks, getTasksList, getMyTasks, getTeamProgress };
