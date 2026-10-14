@@ -12,7 +12,7 @@ const MAX_ATTACHMENTS = 3;
 const IMAGE_MIMES = ['image/jpeg', 'image/png', 'image/webp'];
 const DESIGN_MIMES = ['image/svg+xml', 'application/vnd.adobe.illustrator', 'image/vnd.adobe.illustrator', 'application/postscript', 'image/vnd.adobe.photoshop', 'application/vnd.adobe.photoshop'];
 const MIME_BY_EXTENSION = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', pdf: 'application/pdf', svg: 'image/svg+xml', ai: 'application/vnd.adobe.illustrator', psd: 'image/vnd.adobe.photoshop' };
-const VERIFIED_NAMES = ['mohamed asharaf', 'abhenav', 'abhinav', 'hari', 'kishor', 'subin'];
+const VERIFIED_NAMES = ['mohamed asharaf', 'abhenav', 'abhinav', 'hari', 'kishor', 'subin','rahul','sanesh'];
 const isVerifiedName = (name) => {
   const normalized = String(name || '').trim().toLowerCase().replace(/\s+/g, ' ');
   return VERIFIED_NAMES.some((verifiedName) => normalized === verifiedName || normalized.startsWith(`${verifiedName} `));
