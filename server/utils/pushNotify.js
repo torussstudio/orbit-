@@ -124,6 +124,15 @@ async function readPrefs(userId, type) {
  *   instead, so the notification is never lost.
  */
 function decideDelivery(type, prefs, pushConfigured = vapidConfigured) {
+  // Chat has its own inbox and unread badge. Never fall back to the project
+  // bell, even when push is unavailable; the message remains in that inbox.
+  if (type === 'message') {
+    if (prefs?.pause_all || prefs?.enabled === false || prefs?.delivery === 'in_app') {
+      return SEND_NOTHING;
+    }
+    return PUSH_ONLY;
+  }
+
   if (!prefs) return SEND_BOTH;
 
   if (!isSecurity(type) && (prefs.pause_all || prefs.enabled === false)) {
@@ -146,10 +155,10 @@ async function deliveryFor(userId, type) {
     return decideDelivery(type, await readPrefs(userId, type));
   } catch (err) {
     console.error(
-      '[pushNotify] reading notification preferences failed, sending as push + in-app:',
+      '[pushNotify] reading notification preferences failed, using default delivery:',
       err.message,
     );
-    return SEND_BOTH;
+    return decideDelivery(type, null);
   }
 }
 

@@ -8,6 +8,7 @@
 //   setRefreshToken,
 //   getSessionId,
 //   clearSession,
+//   setLogoutNotice,
 // } from "./tokenStore";
 
 // const api = axios.create({
@@ -76,8 +77,14 @@
 //     return null;
 //   }
 
+//   /*
+//    * No toast for background saves: auth, notifications,
+//    * and user preferences (theme switch). The Active sessions
+//    * card (auth/sessions, auth/logout-others) shows its own
+//    * messages.
+//    */
 //   if (
-//     /auth\/(login|refresh|logout|logout-all)|notifications/.test(
+//     /auth\/(login|refresh|logout|logout-all|sessions)|notifications|preferences/.test(
 //       path,
 //     )
 //   ) {
@@ -290,6 +297,29 @@
 
 //         return newAccessToken;
 //       })
+//       .catch((refreshError) => {
+//         /*
+//          * The server ended this session from
+//          * another device (signed out there, or
+//          * the password was changed there).
+//          *
+//          * Remember why, so the login screen can
+//          * say so. Normal expiry has no code and
+//          * leaves no notice. The error itself is
+//          * passed on unchanged: every caller
+//          * handles the 401 as before.
+//          */
+//         if (
+//           refreshError.response?.status ===
+//             401 &&
+//           refreshError.response?.data
+//             ?.code === "SESSION_REVOKED"
+//         ) {
+//           setLogoutNotice("revoked");
+//         }
+
+//         throw refreshError;
+//       })
 //       .finally(() => {
 //         refreshPromise = null;
 //       });
@@ -411,9 +441,18 @@
 //           "/auth/refresh",
 //         );
 
+//       /*
+//        * /auth/logout-others keeps this tab
+//        * signed in, so it is a normal request:
+//        * an expired access token is refreshed
+//        * and the call is tried again.
+//        */
 //       const isLogoutRequest =
 //         requestUrl.includes(
 //           "/auth/logout",
+//         ) &&
+//         !requestUrl.includes(
+//           "/auth/logout-others",
 //         );
 
 //       const isLoginRequest =
@@ -770,7 +809,7 @@
 //   },
 // );
 
-// export default api;
+// export default api;c
 
 
 import axios from "axios";
@@ -853,15 +892,25 @@ function mutationMessage(config) {
   }
 
   /*
+   * A caller can opt out with { silent: true } in the
+   * request config: no success or error toast.
+   */
+  if (config?.silent) {
+    return null;
+  }
+
+  /*
    * No toast for background saves: auth, notifications,
    * and user preferences (theme switch). The Active sessions
    * card (auth/sessions, auth/logout-others) shows its own
-   * messages.
+   * messages. Messages (chat) shows its own Sent / Failed
+   * state under each message.
    */
   if (
     /auth\/(login|refresh|logout|logout-all|sessions)|notifications|preferences/.test(
       path,
-    )
+    ) ||
+    /^\/?messages(\/|$)/.test(path)
   ) {
     return null;
   }

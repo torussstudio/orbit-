@@ -74,6 +74,7 @@ async function getNotifications(userId) {
     FROM notifications
     WHERE member_id = $1
       AND in_app = true
+      AND type IS DISTINCT FROM 'message'
     ORDER BY created_at DESC
     LIMIT 50
     `,
@@ -99,6 +100,7 @@ async function getUnreadCount(userId) {
     WHERE member_id = $1
       AND read = false
       AND in_app = true
+      AND type IS DISTINCT FROM 'message'
     `,
     [userId],
   );

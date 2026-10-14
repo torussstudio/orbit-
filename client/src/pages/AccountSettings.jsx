@@ -807,6 +807,13 @@ function NotificationsCard({ onDirtyChange }) {
               className={`py-5 transition-opacity duration-200 ${locked ? 'opacity-50' : ''}`}
             >
               <h3 className="text-[13px] font-semibold text-[color:var(--text)]">{group.label}</h3>
+              {group.id === 'messages' && (
+                <p className="mt-1 text-xs leading-relaxed text-[color:var(--text-3)]">
+                  Choose chat alerts for your account. Push sends a browser notification;
+                  in-app means your Messages inbox, never the project notification bell.
+                  Messages and unread badges remain available even when alerts are off.
+                </p>
+              )}
               <ul className="mt-1 divide-y divide-[color:var(--border)]">
                 {rows.map((row) => (
                   <li key={row.type} className="flex flex-col gap-2.5 py-3 sm:flex-row sm:items-center sm:gap-5">

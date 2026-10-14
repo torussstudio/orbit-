@@ -78,8 +78,8 @@ const sameId = (a, b) => a !== null && a !== undefined && String(a) === String(b
  * projects where they have an assigned task (stand-alone tasks can be given
  * to anyone). Archived and trashed projects are left out.
  *
- * Tasks: tasks and sub tasks assigned to the member that are not Done yet.
- * Once the manager marks a task Done it no longer shows up here.
+ * Tasks: tasks and sub tasks assigned to the member that are not Done or In Review.
+ * Once a task is submitted for review it no longer accepts additional time.
  *
  * Clusters: only clusters that hold at least one of those tasks. A sub task
  * belongs to its own cluster, or its main task's cluster.
@@ -99,7 +99,7 @@ async function getMemberOptions(memberId) {
       JOIN task_assignees ta ON ta.task_id = t.id AND ta.member_id::text = $1
       JOIN projects p ON p.id = t.project_id
       LEFT JOIN tasks pt ON pt.id = t.parent_task_id
-      WHERE lower(trim(coalesce(t.stage, ''))) <> 'done'
+      WHERE lower(trim(coalesce(t.stage, ''))) NOT IN ('done', 'in review')
         AND p.status <> 'archived'
         AND p.trashed_at IS NULL
       ORDER BY coalesce(pt.title, t.title), t.parent_task_id NULLS FIRST, t.title
@@ -170,7 +170,7 @@ async function createEntry(memberId, body = {}) {
     }
     const task = options.tasks.find((t) => sameId(t.id, body.task_id));
     if (!task || !sameId(task.project_id, project.id)) {
-      throw httpError(403, "This task isn't assigned to you, or it is already Done.");
+      throw httpError(403, "This task isn't assigned to you, or is already In Review or Done.");
     }
     taskId = task.id;
     clusterId = task.cluster_id ?? null;
@@ -266,6 +266,23 @@ async function getProjects({ from, to }) {
   );
 
   return { projects: rows };
+}
+
+async function getUnloggedDoneTasks() {
+  const { rows } = await db.query(
+    `
+      SELECT t.id, t.title, t.project_id, p.name AS project_name
+      FROM tasks t
+      JOIN projects p ON p.id = t.project_id
+      WHERE lower(trim(coalesce(t.stage, ''))) = 'done'
+        AND NOT EXISTS (
+          SELECT 1 FROM time_entries e WHERE e.task_id = t.id
+        )
+      ORDER BY lower(p.name), lower(t.title)
+    `,
+  );
+
+  return { tasks: rows };
 }
 
 async function getProjectDetail(projectId, { from, to }) {
@@ -387,6 +404,7 @@ module.exports = {
   getMemberOptions,
   createEntry,
   getProjects,
+  getUnloggedDoneTasks,
   getProjectDetail,
   getMembers,
   getMemberDetail,

@@ -9,8 +9,8 @@ import Loader from '../components/ui/Loader';
  * Member Time Log: log time spent on a task.
  *
  * Project, cluster (optional) and task lists only hold what is assigned to
- * this member, and tasks the manager has marked Done are left out (the
- * server builds these lists). A task can be logged as many times as needed.
+ * this member, and tasks the manager has marked Done or the member has sent
+ * for review are left out (the server builds these lists).
  *
  * "Miscellaneous" is for work that isn't a task in Orbit: pick one of your
  * projects and type the task name. It is saved only in the time log and
@@ -133,7 +133,7 @@ export default function MyTimeLog() {
     }
   }, []);
 
-  // Live: new assignments, tasks marked Done, projects added or removed.
+  // Live: assignments, task stage changes, and projects added or removed.
   useLiveRefetch(TASK_AND_PROJECT_EVENTS, load);
 
   useEffect(() => {
@@ -434,7 +434,7 @@ export default function MyTimeLog() {
                   <FieldError id={ids.taskError}>{errors.task_id}</FieldError>
                   {!errors.task_id && projectId && visibleTasks.length === 0 && (
                     <p className={hintCls}>
-                      Only your tasks that aren't Done show here. For other work, turn on Miscellaneous task.
+                      Only your assigned tasks that aren't Done or In Review show here. For other work, turn on Miscellaneous task.
                     </p>
                   )}
                 </div>

@@ -51,6 +51,25 @@ function assertDoneFromInReview(fromStage, toStage) {
   }
 }
 
+async function assertTasksHaveTimeLogs(taskIds) {
+  if (!taskIds.length) return;
+  const { rows } = await db.query(
+    `SELECT t.id
+     FROM tasks t
+     WHERE t.id = ANY($1)
+       AND lower(trim(coalesce(t.stage, ''))) <> 'in review'
+       AND NOT EXISTS (
+         SELECT 1 FROM time_entries e WHERE e.task_id = t.id
+       )`,
+    [taskIds],
+  );
+  if (rows.length) {
+    const err = new Error("You can only move a task to In Review after submitting a time log.");
+    err.status = 400;
+    throw err;
+  }
+}
+
 const ASSIGNEE_JOIN = `
   LEFT JOIN LATERAL (
     SELECT
@@ -224,6 +243,16 @@ async function reorderTasks(stage, orderedIds, user) {
   }
 
   await assertProjectAccess(user, taskProjects[0].project_id);
+
+  if (user.role === "member" && stage === "In Review") {
+    const { rows: tasksToReview } = await db.query(
+      `SELECT id FROM tasks
+       WHERE id = ANY($1)
+         AND lower(trim(coalesce(stage, ''))) <> 'in review'`,
+      [orderedIds],
+    );
+    await assertTasksHaveTimeLogs(tasksToReview.map((row) => row.id));
+  }
 
   // Dropping tasks into Done: every task that is moving must be In Review.
   if (stage === "Done") {
@@ -653,6 +682,8 @@ async function updateTask(taskId, data, user) {
      */
     const movedToInReview =
       existing.stage !== "In Review" && actualStage === "In Review";
+
+    if (movedToInReview) await assertTasksHaveTimeLogs([taskId]);
 
     // Members can't change due dates: data.new_due_date is ignored here
     // (only the manager review flow sets a new deadline).

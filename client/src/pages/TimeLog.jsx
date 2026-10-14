@@ -2127,6 +2127,22 @@ function MembersList({ from, to, query, sort, onOpen, setExport }) {
 
 export default function TimeLog() {
   const [params, setParams] = useSearchParams();
+  const [unloggedDoneTasks, setUnloggedDoneTasks] = useState([]);
+
+  const loadUnloggedDoneTasks = useCallback(async () => {
+    try {
+      const { data } = await api.get('/time-log/unlogged-done');
+      setUnloggedDoneTasks(data?.tasks || []);
+    } catch {
+      // Keep the time log page usable if the warning list cannot be refreshed.
+    }
+  }, []);
+
+  useEffect(() => {
+    loadUnloggedDoneTasks();
+  }, [loadUnloggedDoneTasks]);
+
+  useLiveRefetch(TIMELOG_EVENTS, loadUnloggedDoneTasks);
 
   const view = params.get('view') === 'members' ? 'members' : 'projects';
   const range = RANGES.some((r) => r.value === params.get('range')) ? params.get('range') : 'all';
@@ -2217,6 +2233,30 @@ export default function TimeLog() {
           </div>
         </div>
       </div>
+
+      {unloggedDoneTasks.length > 0 && (
+        <section
+          role="alert"
+          aria-labelledby="unlogged-done-heading"
+          className="mx-auto mb-5 w-full max-w-[1320px] rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-amber-950"
+        >
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 id="unlogged-done-heading" className="m-0 text-sm font-semibold">
+              {unloggedDoneTasks.length} completed {unloggedDoneTasks.length === 1 ? 'task has' : 'tasks have'} no time log
+            </h2>
+            <span className="rounded-full bg-amber-200 px-2.5 py-1 text-xs font-bold">Not logged</span>
+          </div>
+          <ul className="mt-2 max-h-52 divide-y divide-amber-200 overflow-y-auto p-0 text-sm">
+            {unloggedDoneTasks.map((task) => (
+              <li key={task.id} className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 py-2">
+                <span className="min-w-0 flex-1 font-medium">{task.title}</span>
+                <span className="text-xs text-amber-800">{task.project_name}</span>
+                <span className="text-xs font-semibold">Not logged</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       <div className="page-body mx-auto w-full max-w-[1320px]">
         {/* Controls */}

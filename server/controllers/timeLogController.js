@@ -38,6 +38,7 @@ module.exports = {
 
   // Manager
   getProjects: handle((req) => timeLogService.getProjects(readRange(req))),
+  getUnloggedDoneTasks: handle(() => timeLogService.getUnloggedDoneTasks()),
   getProjectDetail: handle((req) =>
     timeLogService.getProjectDetail(req.params.id, readRange(req)),
   ),
