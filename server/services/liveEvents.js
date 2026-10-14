@@ -457,6 +457,33 @@ function notificationCreated(userId) {
   }
 }
 
+// A time entry was added, edited or deleted. Notify active managers and the
+// member who made the change so their Time Log views refresh immediately.
+async function sendTimeLogEvent(projectId, memberId) {
+  const { rows } = await db.query(
+    `SELECT id FROM members WHERE role = 'manager' AND active = true`,
+  );
+  const recipients = [...rows.map((row) => row.id), memberId].filter((id) => id !== null && id !== undefined);
+  eventBus.publish(recipients, {
+    type: "timelog.changed",
+    taskId: null,
+    projectId,
+    at: new Date().toISOString(),
+  });
+}
+
+function timeLogChanged(projectId, memberId) {
+  try {
+    if (shouldSkip() || projectId === undefined || projectId === null) return;
+
+    sendTimeLogEvent(projectId, memberId).catch((err) => {
+      console.error("[liveEvents] time log event failed:", err?.message);
+    });
+  } catch (err) {
+    console.error("[liveEvents] time log event failed:", err?.message);
+  }
+}
+
 /*
  * Messages (shared inbox). A conversation belongs to one member; every
  * active manager can see it. Both events go to that member and every active
@@ -616,6 +643,7 @@ module.exports = {
   taskAudience,
   projectChanged,
   notificationCreated,
+  timeLogChanged,
   messageCreated,
   messageRead,
   directMessageCreated,
