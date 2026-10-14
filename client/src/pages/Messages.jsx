@@ -1233,7 +1233,7 @@ const GROUP_GAP_MS = 5 * 60 * 1000; // same sender within this = one group
 const COMPOSER_MAX_PX = 160;
 
 // UI only: people who get the verified badge. Matched by name (case-insensitive).
-const VERIFIED_NAMES = ['mohamed asharaf', 'abhinav'];
+const VERIFIED_NAMES = ['mohamed asharaf', 'abhenav', 'abhinav'];
 const isVerifiedName = (name) => {
   const n = String(name || '').trim().toLowerCase().replace(/\s+/g, ' ');
   return Boolean(n) && VERIFIED_NAMES.some((v) => n === v || n.startsWith(`${v} `));
