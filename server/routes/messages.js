@@ -24,7 +24,10 @@ router.post("/conversations", auth, managerOnly, messageController.startConversa
 router.get("/conversations/me", auth, messageController.myConversation);
 
 router.get("/conversations/:id/messages", auth, messageController.listMessages);
+router.post("/uploads/signature", auth, messageController.uploadSignature);
 router.post("/conversations/:id/messages", auth, messageController.sendMessage);
+router.delete("/conversations/:id/messages/:messageId", auth, messageController.deleteMessage);
+router.post("/conversations/:id/messages/:messageId/forward", auth, messageController.forwardMessage);
 router.post("/conversations/:id/read", auth, messageController.markRead);
 
 // One-to-one chats between active members. The service checks both roles
@@ -36,6 +39,8 @@ router.post("/direct/conversations", auth, directMessageController.start);
 router.post("/direct/uploads/signature", auth, directMessageController.uploadSignature);
 router.get("/direct/conversations/:id/messages", auth, directMessageController.list);
 router.post("/direct/conversations/:id/messages", auth, directMessageController.send);
+router.delete("/direct/conversations/:id/messages/:messageId", auth, directMessageController.deleteMessage);
+router.post("/direct/conversations/:id/messages/:messageId/forward", auth, directMessageController.forwardMessage);
 router.post("/direct/conversations/:id/read", auth, directMessageController.read);
 
 module.exports = router;

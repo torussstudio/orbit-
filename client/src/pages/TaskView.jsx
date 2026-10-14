@@ -289,6 +289,9 @@ const TaskRow = memo(function TaskRow({ task: t, locked, onStageSelect }) {
   const done = t.stage === "Done";
   const overdue = !done && isOverdue(t.due_date);
   const due = t.due_date ? dueChip(t.due_date, overdue, done) : null;
+  const loggedMinutes = Math.max(0, Number(t.logged_minutes) || 0);
+  const loggedHours = Math.floor(loggedMinutes / 60);
+  const remainingMinutes = loggedMinutes % 60;
 
   // The project's Milanote / Docs links, as returned with each task by
   // /dashboard/my-tasks (project_milanote_url, project_docs_url).
@@ -332,7 +335,14 @@ const TaskRow = memo(function TaskRow({ task: t, locked, onStageSelect }) {
               </Link>
             </h2>
           </div>
-          <StageDropdown task={t} onChange={onStageSelect} locked={locked} />
+          <div className="flex shrink-0 flex-col items-end gap-2">
+            <StageDropdown task={t} onChange={onStageSelect} locked={locked} />
+            {done && (
+              <span className="text-right text-[13px] font-semibold leading-tight text-[color:var(--text-2)] tabular-nums">
+                Completed · {loggedHours} {loggedHours === 1 ? "hour" : "hours"} {remainingMinutes} {remainingMinutes === 1 ? "minute" : "minutes"}
+              </span>
+            )}
+          </div>
         </div>
 
         <div className="mt-2.5 flex flex-wrap items-center gap-x-2.5 gap-y-2 text-[11px] text-[color:var(--text-3)]">

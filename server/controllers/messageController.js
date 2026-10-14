@@ -36,7 +36,20 @@ const listMessages = handle(async (req, res) => {
 
 // { body }
 const sendMessage = handle(async (req, res) => {
-  const message = await messageService.sendMessage(req.user, req.params.id, req.body?.body);
+  const message = await messageService.sendMessage(req.user, req.params.id, req.body?.body, req.body?.attachments, req.body?.reply_to_message_id);
+  res.status(201).json({ message });
+});
+
+const uploadSignature = handle(async (req, res) => {
+  res.json(await directMessageService.signUpload(req.user, req.body || {}));
+});
+
+const deleteMessage = handle(async (req, res) => {
+  res.json(await messageService.deleteMessage(req.user, req.params.id, req.params.messageId, req.body?.mode));
+});
+
+const forwardMessage = handle(async (req, res) => {
+  const message = await messageService.forwardMessage(req.user, req.params.id, req.params.messageId, req.body?.target_conversation_id);
   res.status(201).json({ message });
 });
 
@@ -56,6 +69,9 @@ module.exports = {
   myConversation,
   listMessages,
   sendMessage,
+  uploadSignature,
+  deleteMessage,
+  forwardMessage,
   markRead,
   unreadCount,
 };

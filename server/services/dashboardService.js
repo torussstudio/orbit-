@@ -300,12 +300,18 @@ async function getMyTasks(userId) {
       p.docs_url AS project_docs_url,
       pt.title AS parent_title,
       COALESCE(c.name, pc.name) AS cluster_name,
+      COALESCE(time_totals.logged_minutes, 0)::int AS logged_minutes,
       COUNT(*) OVER() AS ${TOTAL_COLUMN}
      FROM tasks t
      JOIN projects p ON t.project_id = p.id
      LEFT JOIN tasks pt ON pt.id = t.parent_task_id
      LEFT JOIN clusters c ON c.id = t.cluster_id
      LEFT JOIN clusters pc ON pc.id = pt.cluster_id
+     LEFT JOIN LATERAL (
+       SELECT SUM(e.minutes) AS logged_minutes
+       FROM time_entries e
+       WHERE e.task_id = t.id
+     ) time_totals ON true
      WHERE EXISTS (SELECT 1 FROM task_assignees ta WHERE ta.task_id=t.id AND ta.member_id=$1)
      ORDER BY t.due_date NULLS LAST
      LIMIT $2`,

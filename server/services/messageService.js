@@ -473,6 +473,7 @@
 const db = require("../db");
 const liveEvents = require("./liveEvents");
 const { createNotification } = require("../utils/pushNotify");
+const { validateAttachment } = require("./directMessageService");
 
 /*
  * Messages between members and the admin team.
@@ -496,6 +497,7 @@ const { createNotification } = require("../utils/pushNotify");
  */
 
 const MAX_BODY_LENGTH = 4000;
+const MAX_ATTACHMENTS = 3;
 const PAGE_SIZE = 30;
 const MAX_PAGE_SIZE = 100;
 const PREVIEW_LENGTH = 140;
@@ -634,15 +636,15 @@ const listConversations = async (user) => {
   const { rows } = await db.query(
     `SELECT m.id AS member_id, m.name, m.email, m.avatar_url,
             c.id AS conversation_id, c.last_message_at,
-            lm.body AS last_body, lm.sender_id AS last_sender_id,
+            lm.body AS last_body, lm.attachments AS last_attachments, lm.sender_id AS last_sender_id,
             lm.created_at AS last_created_at,
             COALESCE(u.unread, 0)::int AS unread
        FROM members m
        LEFT JOIN conversations c ON c.member_id = m.id
        LEFT JOIN LATERAL (
-         SELECT LEFT(x.body, ${PREVIEW_LENGTH}) AS body, x.sender_id, x.created_at
+         SELECT LEFT(x.body, ${PREVIEW_LENGTH}) AS body, x.attachments, x.sender_id, x.created_at
            FROM messages x
-          WHERE x.conversation_id = c.id
+          WHERE x.conversation_id = c.id AND x.deleted_at IS NULL AND NOT (x.hidden_by ? $1::text)
           ORDER BY x.created_at DESC, x.id DESC
           LIMIT 1
        ) lm ON true
@@ -653,6 +655,7 @@ const listConversations = async (user) => {
            FROM messages x
           WHERE x.conversation_id = c.id
             AND x.sender_id = c.member_id
+            AND x.deleted_at IS NULL AND NOT (x.hidden_by ? $1::text)
             AND x.created_at > COALESCE(r.last_read_at, '-infinity'::timestamptz)
        ) u ON true
       WHERE m.role = 'member' AND m.active = true
@@ -668,7 +671,7 @@ const listConversations = async (user) => {
     conversation_id: row.conversation_id,
     last_message_at: row.last_message_at,
     last_message: row.last_created_at
-      ? { body: row.last_body, sender_id: row.last_sender_id, created_at: row.last_created_at }
+      ? { body: row.last_body, attachments: row.last_attachments || [], sender_id: row.last_sender_id, created_at: row.last_created_at }
       : null,
     unread: row.unread,
   }));
@@ -733,14 +736,20 @@ const listMessages = async (user, conversationId, { before, after, limit } = {})
 
   params.push(size + 1);
   const { rows } = await query(
-    `SELECT msg.id, msg.conversation_id, msg.sender_id, msg.body, msg.created_at,
+    `SELECT msg.id, msg.conversation_id, msg.sender_id,
+            CASE WHEN msg.deleted_at IS NOT NULL THEN '' ELSE msg.body END AS body, msg.attachments, msg.created_at,
+            msg.reply_to_message_id, msg.forwarded_from_id, msg.deleted_at IS NOT NULL AS deleted,
+            rm.body AS reply_body, rs.name AS reply_sender_name,
             s.name AS sender_name, s.role AS sender_role
        FROM messages msg
        LEFT JOIN members s ON s.id = msg.sender_id
+       LEFT JOIN messages rm ON rm.id = msg.reply_to_message_id
+       LEFT JOIN members rs ON rs.id = rm.sender_id
       WHERE ${where}
+        AND NOT (msg.hidden_by ? $${params.length + 1})
       ORDER BY msg.created_at ${order}, msg.id ${order}
       LIMIT $${params.length}`,
-    params
+    [...params, String(user.id)]
   );
 
   const hasMore = rows.length > size;
@@ -754,14 +763,17 @@ const listMessages = async (user, conversationId, { before, after, limit } = {})
   };
 };
 
-const sendMessage = async (user, conversationId, rawBody) => {
+const sendMessage = async (user, conversationId, rawBody, rawAttachments = [], replyToId = null) => {
   const conversation = await getAccessibleConversation(user, conversationId);
 
   if (!conversation.member_active) {
     throw httpError(400, "This member is no longer active, so the conversation is read-only.");
   }
 
-  const body = cleanBody(rawBody);
+  const body = typeof rawBody === 'string' ? rawBody.replace(/\u0000/g, '').replace(/\r\n?/g, '\n').trim() : '';
+  if (body.length > MAX_BODY_LENGTH) throw httpError(400, `A message can be at most ${MAX_BODY_LENGTH} characters.`);
+  if (!Array.isArray(rawAttachments) || rawAttachments.length > MAX_ATTACHMENTS) throw httpError(400, 'A message can include up to 3 attachments.');
+  if (!body && rawAttachments.length === 0) throw httpError(400, 'Write a message or attach a file first.');
   checkRate(user.id);
 
   const client = await db.connect();
@@ -769,11 +781,31 @@ const sendMessage = async (user, conversationId, rawBody) => {
   try {
     await client.query("BEGIN");
 
+    if (replyToId) {
+      const reply = await client.query("SELECT id FROM messages WHERE id = $1 AND conversation_id = $2 AND deleted_at IS NULL", [replyToId, conversation.id]);
+      if (!reply.rows[0]) throw httpError(400, "The message you are replying to is unavailable.");
+    }
+
+    const used = new Set();
+    const attachments = [];
+    for (const item of rawAttachments) {
+      const publicId = String(item?.public_id || '');
+      if (!publicId || used.has(publicId)) throw httpError(400, 'Invalid or duplicate attachment.');
+      used.add(publicId);
+      const { rows: intents } = await client.query(
+        `SELECT public_id, mime_type, file_size, resource_type FROM direct_upload_intents
+          WHERE public_id = $1 AND member_id = $2 AND expires_at > NOW() FOR UPDATE`,
+        [publicId, user.id],
+      );
+      if (!intents[0]) throw httpError(400, 'The upload expired. Please attach the file again.');
+      attachments.push(validateAttachment(item, intents[0]));
+    }
+
     const { rows } = await client.query(
-      `INSERT INTO messages (conversation_id, sender_id, body)
-       VALUES ($1, $2, $3)
-       RETURNING id, conversation_id, sender_id, body, created_at`,
-      [conversation.id, user.id, body]
+      `INSERT INTO messages (conversation_id, sender_id, body, attachments, reply_to_message_id)
+       VALUES ($1, $2, $3, $4::jsonb, $5)
+       RETURNING id, conversation_id, sender_id, body, attachments, created_at, reply_to_message_id`,
+      [conversation.id, user.id, body, JSON.stringify(attachments), replyToId || null]
     );
     message = rows[0];
 
@@ -798,6 +830,8 @@ const sendMessage = async (user, conversationId, rawBody) => {
     message.sender_name = sender[0]?.name || null;
     message.sender_role = sender[0]?.role || user.role || null;
 
+    if (used.size) await client.query('DELETE FROM direct_upload_intents WHERE public_id = ANY($1::text[])', [[...used]]);
+
     await client.query("COMMIT");
   } catch (err) {
     await client.query("ROLLBACK").catch(() => {});
@@ -812,6 +846,35 @@ const sendMessage = async (user, conversationId, rawBody) => {
     console.error("[messages] push failed:", err?.message);
   });
 
+  return message;
+};
+
+const deleteMessage = async (user, conversationId, messageId, mode) => {
+  const conversation = await getAccessibleConversation(user, conversationId);
+  if (!['for-me', 'for-everyone'].includes(mode)) throw httpError(400, 'Choose whether to delete the message for you or everyone.');
+  const { rows } = await query('SELECT id, sender_id FROM messages WHERE id = $1 AND conversation_id = $2', [messageId, conversation.id]);
+  const message = rows[0];
+  if (!message) throw httpError(404, 'Message not found.');
+  if (mode === 'for-everyone' && !sameId(message.sender_id, user.id)) throw httpError(403, 'You can only delete your own message for everyone.');
+  if (mode === 'for-everyone') await query("UPDATE messages SET deleted_at = COALESCE(deleted_at, NOW()), body = 'This message was deleted', attachments = '[]'::jsonb WHERE id = $1", [messageId]);
+  else await query("UPDATE messages SET hidden_by = CASE WHEN hidden_by ? $2 THEN hidden_by ELSE hidden_by || to_jsonb($2::text) END WHERE id = $1", [messageId, String(user.id)]);
+  liveEvents.messageCreated(conversation);
+  return { success: true };
+};
+
+const forwardMessage = async (user, sourceConversationId, messageId, targetConversationId) => {
+  const source = await getAccessibleConversation(user, sourceConversationId);
+  const target = await getAccessibleConversation(user, targetConversationId);
+  const { rows } = await query('SELECT id, body, attachments, deleted_at FROM messages WHERE id = $1 AND conversation_id = $2', [messageId, source.id]);
+  const original = rows[0];
+  if (!original || original.deleted_at) throw httpError(404, 'Message not found or already deleted.');
+  const inserted = await query(`INSERT INTO messages (conversation_id, sender_id, body, attachments, forwarded_from_id)
+    VALUES ($1, $2, $3, $4::jsonb, $5) RETURNING id, conversation_id, sender_id, body, attachments, created_at, forwarded_from_id`,
+    [target.id, user.id, original.body, JSON.stringify(original.attachments || []), original.id]);
+  const message = inserted.rows[0];
+  await query('UPDATE conversations SET last_message_at = $2 WHERE id = $1', [target.id, message.created_at]);
+  liveEvents.messageCreated(target);
+  notifyRecipients(target, message).catch((err) => console.error('[messages] push failed:', err?.message));
   return message;
 };
 
@@ -839,7 +902,7 @@ async function notifyRecipients(conversation, message) {
     now - (viewing.get(`${conversation.id}:${id}`) || 0) < ACTIVE_READER_MS;
 
   const flat = message.body.replace(/\s+/g, " ");
-  const preview = flat.length > PUSH_PREVIEW_LENGTH
+  const preview = !flat && message.attachments?.length ? 'Sent an attachment' : flat.length > PUSH_PREVIEW_LENGTH
     ? `${flat.slice(0, PUSH_PREVIEW_LENGTH - 1)}…`
     : flat;
   const title = `Message from ${message.sender_name || (fromMember ? "a member" : "the admin team")}`;
@@ -912,6 +975,7 @@ const unreadCount = async (user) => {
            LEFT JOIN conversation_reads r
                   ON r.conversation_id = c.id AND r.member_id = $1
           WHERE x.sender_id = c.member_id
+            AND x.deleted_at IS NULL AND NOT (x.hidden_by ? $1::text)
             AND x.created_at > COALESCE(r.last_read_at, '-infinity'::timestamptz)`,
         [user.id]
       )
@@ -923,6 +987,7 @@ const unreadCount = async (user) => {
                   ON r.conversation_id = c.id AND r.member_id = $1
           WHERE c.member_id = $1
             AND x.sender_id IS DISTINCT FROM c.member_id
+            AND x.deleted_at IS NULL AND NOT (x.hidden_by ? $1::text)
             AND x.created_at > COALESCE(r.last_read_at, '-infinity'::timestamptz)`,
         [user.id]
       );
@@ -937,6 +1002,8 @@ module.exports = {
   myConversation,
   listMessages,
   sendMessage,
+  deleteMessage,
+  forwardMessage,
   markRead,
   unreadCount,
 };

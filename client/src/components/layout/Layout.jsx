@@ -1,4 +1,4 @@
-// import { useState, useEffect, useRef } from 'react';
+// import { useState, useEffect, useRef, useCallback } from 'react';
 // import { Outlet, NavLink, useNavigate, Link, useLocation } from 'react-router-dom';
 // import { useAuth } from '../../context/AuthContext';
 // import NotificationBell from '../ui/NotificationBell';
@@ -8,6 +8,7 @@
 // import Loader from '../ui/Loader';
 // import ErrorBoundary from '../ui/ErrorBoundary';
 // import { useTheme, useThemeForUser } from '../../utils/theme';
+// import { useLiveRefetch, MESSAGE_EVENTS, DIRECT_MESSAGE_EVENTS } from '../../hooks/useLiveEvents';
 
 // /* ------------------------------------------------------------------ */
 // /* Shared bits                                                         */
@@ -35,6 +36,8 @@
 //   sheet: 'M3 3h18v18H3zM3 9h18M3 15h18M9 3v18',
 //   // Inbox tray: Task Request
 //   inbox: 'M22 12h-6l-2 3h-4l-2-3H2M5.45 5.11L2 12v6a2 2 0 002 2h16a2 2 0 002-2v-6l-3.45-6.89A2 2 0 0016.76 4H7.24a2 2 0 00-1.79 1.11z',
+//   // Speech bubble: Messages (members <-> admin team)
+//   chat: 'M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z',
 //   // Clock: Time Log (managers: everyone's time, members: log time)
 //   clock: 'M12 22a10 10 0 100-20 10 10 0 000 20zM12 6v6l4 2',
 //   search: 'M21 21l-4.35-4.35M19 11a8 8 0 11-16 0 8 8 0 0116 0z',
@@ -575,7 +578,8 @@
 //   const [newRequests, setNewRequests] = useState(0);
 //   const [newReviews, setNewReviews] = useState(0);
 //   const [newAssigned, setNewAssigned] = useState(0);
-//   const totalNew = newRequests + newReviews + newAssigned;
+//   const [unreadMessages, setUnreadMessages] = useState(0);
+//   const totalNew = newRequests + newReviews + newAssigned + unreadMessages;
 //   const mainRef = useRef(null);
 
 //   // Each user has their own theme, saved on their account.
@@ -761,6 +765,40 @@
 //     };
 //   }, [isManager, user?.id, onTaskViewPage]);
 
+//   // Messages badge (everyone): unread messages, straight from the server.
+//   // Unlike the badges above it is not "new since you looked": it drops when
+//   // the conversation is actually read (the Messages page marks it read, and
+//   // the "message.read" live event refreshes this count).
+//   const checkMessages = useCallback(async () => {
+//     if (!user?.id) return;
+//     try {
+//       const { data } = await api.get('/messages/unread-count');
+//       setUnreadMessages(Number(data?.count) || 0);
+//     } catch {
+//       /* keep the last known count; try again on the next tick */
+//     }
+//   }, [user?.id]);
+
+//   useEffect(() => {
+//     if (!user?.id) {
+//       setUnreadMessages(0);
+//       return undefined;
+//     }
+
+//     checkMessages();
+//     // Fallback when live events are off; skipped in background tabs.
+//     const timer = setInterval(() => { if (!document.hidden) checkMessages(); }, REQUESTS_POLL_MS);
+//     const stopTabReturn = subscribeTabReturn(checkMessages);
+
+//     return () => {
+//       clearInterval(timer);
+//       stopTabReturn();
+//     };
+//   }, [user?.id, checkMessages]);
+
+//   useLiveRefetch(MESSAGE_EVENTS, checkMessages, { delay: 400, enabled: Boolean(user?.id) });
+//   useLiveRefetch(DIRECT_MESSAGE_EVENTS, checkMessages, { delay: 400, enabled: Boolean(user?.id) });
+
 //   // Close drawer on Escape, and lock body scroll while it is open
 //   useEffect(() => {
 //     if (!mobileOpen) return undefined;
@@ -829,6 +867,7 @@
 //           items: [
 //             { to: '/', end: true, icon: ICONS.home, label: 'Dashboard' },
 //             { to: '/calendar', icon: ICONS.calendar, label: 'Calendar' },
+//             { to: '/messages', icon: ICONS.chat, label: 'Messages', badge: unreadMessages },
 //           ],
 //         },
 //         {
@@ -853,6 +892,7 @@
 //           items: [
 //             { to: '/', end: true, icon: ICONS.home, label: 'Dashboard' },
 //             { to: '/calendar', icon: ICONS.calendar, label: 'Calendar' },
+//             { to: '/messages/people', icon: ICONS.chat, label: 'Messages', badge: unreadMessages },
 //           ],
 //         },
 //         {
@@ -1103,6 +1143,7 @@
 //             newRequests > 0 && `${newRequests} new task ${newRequests === 1 ? 'request' : 'requests'}`,
 //             newReviews > 0 && `${newReviews} ${newReviews === 1 ? 'task' : 'tasks'} waiting for review`,
 //             newAssigned > 0 && `${newAssigned} new ${newAssigned === 1 ? 'task' : 'tasks'} for you`,
+//             unreadMessages > 0 && `${unreadMessages} unread ${unreadMessages === 1 ? 'message' : 'messages'}`,
 //           ].filter(Boolean).join('. ')}
 //         </div>
 
@@ -1131,6 +1172,8 @@
 //     </div>
 //   );
 // }
+
+
 
 
 
@@ -1401,6 +1444,23 @@ const writeTaskSeen = (userId, ids) => {
   try { localStorage.setItem(tasksKey(userId), JSON.stringify(ids)); } catch { /* storage unavailable */ }
 };
 
+// Messages tab: a plain red dot (no count). It shows while there is more unread than the person
+// has already acknowledged by opening Messages. New messages bring the dot back.
+const messagesSeenKey = (userId) => `orbit_messages_seen_${userId}`;
+
+const readMessagesSeen = (userId) => {
+  try {
+    const n = Number(localStorage.getItem(messagesSeenKey(userId)));
+    return Number.isFinite(n) ? n : 0;
+  } catch {
+    return 0;
+  }
+};
+
+const writeMessagesSeen = (userId, n) => {
+  try { localStorage.setItem(messagesSeenKey(userId), String(n)); } catch { /* storage unavailable */ }
+};
+
 const BADGE_STYLES = {
   // Expanded sidebar / mobile drawer: count pill at the right end of the row
   pill: 'ml-auto h-5 min-w-[20px] shrink-0 px-1.5 text-[11px]',
@@ -1408,6 +1468,10 @@ const BADGE_STYLES = {
   corner: 'absolute -right-2 -top-2 h-4 min-w-[16px] px-1 text-[10px] ring-2 ring-[var(--bg-2)]',
   // Mobile hamburger: just a dot, the drawer is closed
   dot: 'absolute right-0.5 top-0.5 h-2.5 w-2.5 ring-2 ring-[var(--bg-2)]',
+  // Expanded sidebar / mobile drawer: dot at the right end of the row
+  rowDot: 'ml-auto h-2.5 w-2.5 shrink-0',
+  // Collapsed sidebar: dot on the icon corner
+  iconDot: 'absolute -right-1 -top-1 h-2.5 w-2.5 ring-2 ring-[var(--bg-2)]',
 };
 
 const prefersReducedMotion = () =>
@@ -1417,6 +1481,7 @@ const prefersReducedMotion = () =>
 function NavBadge({ count, variant = 'pill', className = '' }) {
   const ref = useRef(null);
   const prev = useRef(0);
+  const isDot = variant === 'dot' || variant === 'rowDot' || variant === 'iconDot';
 
   useEffect(() => {
     if (count > prev.current && ref.current && !prefersReducedMotion()) {
@@ -1435,10 +1500,10 @@ function NavBadge({ count, variant = 'pill', className = '' }) {
   return (
     <span
       ref={ref}
-      aria-hidden={variant === 'dot' ? 'true' : undefined}
+      aria-hidden={isDot ? 'true' : undefined}
       className={`inline-flex items-center justify-center rounded-full bg-[var(--danger)] font-semibold leading-none tabular-nums text-white ${BADGE_STYLES[variant]} ${className}`}
     >
-      {variant !== 'dot' && (
+      {!isDot && (
         <>
           <span aria-hidden="true">{count > 99 ? '99+' : count}</span>
           <span className="sr-only">{count} new</span>
@@ -1715,7 +1780,10 @@ export default function Layout() {
   const [newReviews, setNewReviews] = useState(0);
   const [newAssigned, setNewAssigned] = useState(0);
   const [unreadMessages, setUnreadMessages] = useState(0);
-  const totalNew = newRequests + newReviews + newAssigned + unreadMessages;
+  const [messagesSeen, setMessagesSeen] = useState(0);
+  const [messagesReady, setMessagesReady] = useState(false);
+  const hasNewMessages = messagesReady && unreadMessages > messagesSeen;
+  const totalNew = newRequests + newReviews + newAssigned + (hasNewMessages ? 1 : 0);
   const mainRef = useRef(null);
 
   // Each user has their own theme, saved on their account.
@@ -1724,6 +1792,7 @@ export default function Layout() {
   const onRequestsPage = location.pathname.startsWith(REQUESTS_PATH);
   const onReviewPage = location.pathname.startsWith(REVIEW_PATH);
   const onTaskViewPage = location.pathname.startsWith(TASKS_PATH);
+  const onMessagesPage = location.pathname.startsWith('/messages');
 
   const toggleCollapsed = () => {
     setSidebarCollapsed((prev) => {
@@ -1905,22 +1974,39 @@ export default function Layout() {
   // Unlike the badges above it is not "new since you looked": it drops when
   // the conversation is actually read (the Messages page marks it read, and
   // the "message.read" live event refreshes this count).
+  //
+  // Members have two inboxes: the admin team thread (/messages/unread-count)
+  // and private chats with other members. The private chats carry their own
+  // `unread` number on the conversation list, so those are added on top.
   const checkMessages = useCallback(async () => {
     if (!user?.id) return;
     try {
-      const { data } = await api.get('/messages/unread-count');
-      setUnreadMessages(Number(data?.count) || 0);
+      const requests = [api.get('/messages/unread-count')];
+      if (!isManager) requests.push(api.get('/messages/direct/conversations'));
+      const results = await Promise.allSettled(requests);
+      // A failed request would make the badge flicker to a wrong number: keep the last known one.
+      if (results.some((r) => r.status === 'rejected')) return;
+
+      const [team, direct] = results;
+      const teamCount = Number(team.value?.data?.count) || 0;
+      const directCount = direct
+        ? (direct.value?.data?.conversations || []).reduce((sum, c) => sum + (Number(c.unread) || 0), 0)
+        : 0;
+      setUnreadMessages(teamCount + directCount);
+      setMessagesReady(true);
     } catch {
       /* keep the last known count; try again on the next tick */
     }
-  }, [user?.id]);
+  }, [user?.id, isManager]);
 
   useEffect(() => {
     if (!user?.id) {
       setUnreadMessages(0);
+      setMessagesReady(false);
       return undefined;
     }
 
+    setMessagesSeen(readMessagesSeen(user.id));
     checkMessages();
     // Fallback when live events are off; skipped in background tabs.
     const timer = setInterval(() => { if (!document.hidden) checkMessages(); }, REQUESTS_POLL_MS);
@@ -1931,6 +2017,24 @@ export default function Layout() {
       stopTabReturn();
     };
   }, [user?.id, checkMessages]);
+
+  // Opening Messages acknowledges everything unread right now, so the dot goes away.
+  // If the unread number later drops (chats were read), the marker follows it down,
+  // so the next new message brings the dot back.
+  useEffect(() => {
+    if (!user?.id || !messagesReady) return;
+    const shouldSync = onMessagesPage ? unreadMessages !== messagesSeen : unreadMessages < messagesSeen;
+    if (!shouldSync) return;
+    setMessagesSeen(unreadMessages);
+    writeMessagesSeen(user.id, unreadMessages);
+  }, [user?.id, messagesReady, onMessagesPage, unreadMessages, messagesSeen]);
+
+  // Opening a chat marks it read a moment after the page loads: refresh the count once that has happened.
+  useEffect(() => {
+    if (!location.pathname.startsWith('/messages')) return undefined;
+    const timer = setTimeout(checkMessages, 1000);
+    return () => clearTimeout(timer);
+  }, [location.pathname, checkMessages]);
 
   useLiveRefetch(MESSAGE_EVENTS, checkMessages, { delay: 400, enabled: Boolean(user?.id) });
   useLiveRefetch(DIRECT_MESSAGE_EVENTS, checkMessages, { delay: 400, enabled: Boolean(user?.id) });
@@ -2003,7 +2107,7 @@ export default function Layout() {
           items: [
             { to: '/', end: true, icon: ICONS.home, label: 'Dashboard' },
             { to: '/calendar', icon: ICONS.calendar, label: 'Calendar' },
-            { to: '/messages', icon: ICONS.chat, label: 'Messages', badge: unreadMessages },
+            { to: '/messages', icon: ICONS.chat, label: 'Messages', dot: hasNewMessages },
           ],
         },
         {
@@ -2028,7 +2132,7 @@ export default function Layout() {
           items: [
             { to: '/', end: true, icon: ICONS.home, label: 'Dashboard' },
             { to: '/calendar', icon: ICONS.calendar, label: 'Calendar' },
-            { to: '/messages', icon: ICONS.chat, label: 'Messages', badge: unreadMessages },
+            { to: '/messages/people', icon: ICONS.chat, label: 'Messages', dot: hasNewMessages },
           ],
         },
         {
@@ -2128,7 +2232,7 @@ export default function Layout() {
                   <NavLink
                     to={item.to}
                     end={item.end}
-                    title={item.badge > 0 ? `${item.label} (${item.badge} new)` : item.label}
+                    title={item.badge > 0 ? `${item.label} (${item.badge} new)` : item.dot ? `${item.label} (new)` : item.label}
                     onClick={() => setMobileOpen(false)}
                     className={({ isActive }) => [
                       'group relative flex items-center gap-2.5 rounded-lg px-3 py-2.5 text-[14px] font-medium no-underline md:py-2 md:text-[13.5px] max-[640px]:min-h-10',
@@ -2153,10 +2257,14 @@ export default function Layout() {
                           {item.badge > 0 && sidebarCollapsed && (
                             <NavBadge count={item.badge} variant="corner" className="hidden md:inline-flex" />
                           )}
+                          {item.dot && sidebarCollapsed && (
+                            <NavBadge count={1} variant="iconDot" className="hidden md:inline-flex" />
+                          )}
                         </span>
                         <span className={`truncate ${labelClass}`}>{item.label}</span>
                         {/* Expanded sidebar / mobile drawer: red count pill, inline */}
                         {item.badge > 0 && <NavBadge count={item.badge} className={labelClass} />}
+                        {item.dot && <NavBadge count={1} variant="rowDot" className={labelClass} />}
                       </>
                     )}
                   </NavLink>
@@ -2279,7 +2387,7 @@ export default function Layout() {
             newRequests > 0 && `${newRequests} new task ${newRequests === 1 ? 'request' : 'requests'}`,
             newReviews > 0 && `${newReviews} ${newReviews === 1 ? 'task' : 'tasks'} waiting for review`,
             newAssigned > 0 && `${newAssigned} new ${newAssigned === 1 ? 'task' : 'tasks'} for you`,
-            unreadMessages > 0 && `${unreadMessages} unread ${unreadMessages === 1 ? 'message' : 'messages'}`,
+            hasNewMessages && 'You have new messages',
           ].filter(Boolean).join('. ')}
         </div>
 

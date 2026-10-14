@@ -271,13 +271,28 @@ async function getProjects({ from, to }) {
 async function getUnloggedDoneTasks() {
   const { rows } = await db.query(
     `
-      SELECT t.id, t.title, t.project_id, p.name AS project_name
+      SELECT t.id, t.title, t.project_id, p.name AS project_name,
+             t.parent_task_id, pt.title AS parent_title,
+             COALESCE(c.name, pc.name) AS cluster_name
       FROM tasks t
       JOIN projects p ON p.id = t.project_id
+      LEFT JOIN tasks pt ON pt.id = t.parent_task_id
+      LEFT JOIN clusters c ON c.id = t.cluster_id
+      LEFT JOIN clusters pc ON pc.id = pt.cluster_id
+      LEFT JOIN LATERAL (
+        SELECT MAX(a.created_at) AS completed_at
+        FROM task_activity a
+        WHERE a.task_id = t.id AND a.meta->>'to' = 'Done'
+      ) done_activity ON true
       WHERE lower(trim(coalesce(t.stage, ''))) = 'done'
+        AND p.trashed_at IS NULL
         AND NOT EXISTS (
           SELECT 1 FROM time_entries e WHERE e.task_id = t.id
         )
+        AND COALESCE(done_activity.completed_at, t.updated_at)
+          >= (date_trunc('month', NOW() AT TIME ZONE 'Asia/Kolkata') AT TIME ZONE 'Asia/Kolkata')
+        AND COALESCE(done_activity.completed_at, t.updated_at)
+          < ((date_trunc('month', NOW() AT TIME ZONE 'Asia/Kolkata') + INTERVAL '1 month') AT TIME ZONE 'Asia/Kolkata')
       ORDER BY lower(p.name), lower(t.title)
     `,
   );

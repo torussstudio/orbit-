@@ -583,7 +583,32 @@ function passwordChanged(userId, revokedSessionIds) {
   sessionsRevoked(revokedSessionIds, "password changed");
 }
 
+async function sendMemberEvent(memberId) {
+  const { rows } = await db.query("SELECT id FROM members WHERE role = 'manager' AND active = true");
+
+  eventBus.publish([...rows.map((row) => row.id), memberId], {
+    type: "member.changed",
+    taskId: null,
+    projectId: null,
+    at: new Date().toISOString(),
+  });
+}
+
+function memberChanged(memberId) {
+  try {
+    if (shouldSkip() || memberId === undefined || memberId === null) {
+      return;
+    }
+
+    sendMemberEvent(memberId).catch((err) => {
+      console.error("[liveEvents] member event failed:", err?.message);
+    });
+  } catch (err) {
+    console.error("[liveEvents] member event failed:", err?.message);
+  }
+}
 module.exports = {
+  memberChanged,
   accessChanged,
   sessionsRevoked,
   passwordChanged,

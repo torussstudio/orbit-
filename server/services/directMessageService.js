@@ -9,6 +9,15 @@ const MAX_BODY = 4000;
 const MAX_ATTACHMENTS = 3;
 const IMAGE_LIMIT = 10 * 1024 * 1024;
 const PDF_LIMIT = 50 * 1024 * 1024;
+const DESIGN_FILE_LIMIT = 50 * 1024 * 1024;
+const RAW_EXTENSIONS = {
+  'application/pdf': 'pdf',
+  'application/vnd.adobe.illustrator': 'ai',
+  'image/vnd.adobe.illustrator': 'ai',
+  'application/postscript': 'ai',
+  'image/vnd.adobe.photoshop': 'psd',
+  'application/vnd.adobe.photoshop': 'psd',
+};
 const RATE_WINDOW_MS = 10_000;
 const RATE_MAX = 20;
 const recentSends = new Map();
@@ -39,25 +48,35 @@ function filePolicy(mime, size) {
     if (!Number.isInteger(size) || size < 1 || size > PDF_LIMIT) throw fail(400, 'PDF files must be 50 MB or smaller.');
     return { resourceType: 'raw', preset: process.env.CLOUDINARY_CHAT_PDF_PRESET };
   }
-  throw fail(400, 'Only JPG, PNG, WebP images and PDF files can be attached.');
+  if (RAW_EXTENSIONS[mime] && RAW_EXTENSIONS[mime] !== 'pdf') {
+    if (!Number.isInteger(size) || size < 1 || size > DESIGN_FILE_LIMIT) throw fail(400, 'AI and PSD files must be 50 MB or smaller.');
+    return { resourceType: 'image', preset: null };
+  }
+  if (mime === 'image/svg+xml') {
+    if (!Number.isInteger(size) || size < 1 || size > DESIGN_FILE_LIMIT) throw fail(400, 'SVG files must be 50 MB or smaller.');
+    return { resourceType: 'image', preset: null };
+  }
+  throw fail(400, 'Attach JPG, PNG, WebP, SVG, AI, PSD, or PDF files.');
 }
 
 async function signUpload(user, { mime_type: mime, size }) {
-  requireMember(user);
+  if (!['manager', 'member'].includes(user?.role)) throw fail(403, 'Sign in to upload chat files.');
   checkRate(user.id);
   const policy = filePolicy(mime, size);
   const cloudName = process.env.CLOUDINARY_CLOUD_NAME;
   const apiKey = process.env.CLOUDINARY_API_KEY;
   const apiSecret = process.env.CLOUDINARY_API_SECRET;
-  if (!cloudName || !apiKey || !apiSecret || !policy.preset) {
+  if (!cloudName || !apiKey || !apiSecret || (mime === 'application/pdf' && !policy.preset)) {
     throw fail(503, 'Chat file uploads are not configured yet.');
   }
 
   const timestamp = Math.floor(Date.now() / 1000);
   await db.query('DELETE FROM direct_upload_intents WHERE expires_at < NOW()');
   const folder = `orbit-chat/${user.id}`;
-  const publicId = `${folder}/${crypto.randomUUID()}${policy.resourceType === 'raw' ? '.pdf' : ''}`;
-  const params = { public_id: publicId, timestamp, upload_preset: policy.preset };
+  const rawExtension = RAW_EXTENSIONS[mime];
+  const publicId = `${folder}/${crypto.randomUUID()}${policy.resourceType === 'raw' ? `.${rawExtension}` : ''}`;
+  const params = { public_id: publicId, timestamp };
+  if (policy.preset) params.upload_preset = policy.preset;
   const toSign = Object.keys(params).sort().map((key) => `${key}=${params[key]}`).join('&');
   const signature = crypto.createHash('sha1').update(`${toSign}${apiSecret}`).digest('hex');
   await db.query(
@@ -72,7 +91,7 @@ async function signUpload(user, { mime_type: mime, size }) {
     timestamp,
     signature,
     public_id: publicId,
-    upload_preset: policy.preset,
+    upload_preset: policy.preset || null,
     resource_type: policy.resourceType,
     upload_url: `https://api.cloudinary.com/v1_1/${cloudName}/${policy.resourceType}/upload`,
   };
@@ -128,12 +147,14 @@ async function listConversations(user) {
        JOIN members p ON p.id = CASE WHEN c.member_one_id = $1 THEN c.member_two_id ELSE c.member_one_id END
        LEFT JOIN LATERAL (
          SELECT body, created_at, sender_id FROM direct_messages
-          WHERE direct_conversation_id = c.id ORDER BY created_at DESC, id DESC LIMIT 1
+          WHERE direct_conversation_id = c.id AND deleted_at IS NULL AND NOT (hidden_by ? $1::text)
+          ORDER BY created_at DESC, id DESC LIMIT 1
        ) lm ON true
        LEFT JOIN direct_conversation_reads r ON r.direct_conversation_id = c.id AND r.member_id = $1
        LEFT JOIN LATERAL (
          SELECT COUNT(*) AS count FROM direct_messages m
           WHERE m.direct_conversation_id = c.id AND m.sender_id = p.id
+            AND m.deleted_at IS NULL AND NOT (m.hidden_by ? $1::text)
             AND m.created_at > COALESCE(r.last_read_at, '-infinity'::timestamptz)
        ) unread ON true
       WHERE c.member_one_id = $1 OR c.member_two_id = $1
@@ -167,20 +188,30 @@ async function listMessages(user, conversationId, { before, after, limit } = {})
   const conversation = await accessible(user, conversationId);
   const size = Math.min(100, Math.max(1, Number.parseInt(limit, 10) || 30));
   const params = [conversation.id];
-  let where = 'direct_conversation_id = $1';
+  let where = 'm.direct_conversation_id = $1';
   let order = 'DESC';
   if (after || before) {
     params.push(after || before);
-    where += ` AND (created_at, id) ${after ? '>' : '<'} (
+    where += ` AND (m.created_at, m.id) ${after ? '>' : '<'} (
       SELECT created_at, id FROM direct_messages WHERE id = $2 AND direct_conversation_id = $1
     )`;
     if (after) order = 'ASC';
   }
   params.push(size + 1);
   const { rows } = await db.query(
-    `SELECT id, direct_conversation_id AS conversation_id, sender_id, body, attachments, created_at
-       FROM direct_messages WHERE ${where} ORDER BY created_at ${order}, id ${order} LIMIT $${params.length}`,
-    params,
+    `SELECT m.id, m.direct_conversation_id AS conversation_id, m.sender_id,
+            CASE WHEN m.deleted_at IS NOT NULL THEN '' ELSE m.body END AS body,
+            m.attachments, m.created_at, m.reply_to_message_id,
+            m.forwarded_from_id, m.deleted_at IS NOT NULL AS deleted,
+            rm.body AS reply_body, rm.sender_id AS reply_sender_id,
+            rs.name AS reply_sender_name
+       FROM direct_messages m
+       LEFT JOIN direct_messages rm ON rm.id = m.reply_to_message_id
+       LEFT JOIN members rs ON rs.id = rm.sender_id
+      WHERE ${where}
+        AND NOT (m.hidden_by ? $${params.length + 1})
+      ORDER BY m.created_at ${order}, m.id ${order} LIMIT $${params.length}`,
+    [...params, String(user.id)],
   );
   const page = rows.slice(0, size);
   const read = await db.query(
@@ -207,7 +238,7 @@ function validateAttachment(item, intent) {
       !url.pathname.startsWith(`/${cloud}/${expectedResource}/upload/`) ||
       item.resource_type !== expectedResource || item.public_id !== intent.public_id ||
       !Number.isInteger(Number(item.bytes)) || Number(item.bytes) !== Number(intent.file_size) ||
-      !['jpg', 'jpeg', 'png', 'webp', 'pdf'].includes(format) ||
+      !['jpg', 'jpeg', 'png', 'webp', 'svg', 'pdf', 'ai', 'psd'].includes(format) ||
       (expectedResource !== policy.resourceType)) {
     throw fail(400, 'The uploaded file could not be verified. Please try again.');
   }
@@ -222,7 +253,7 @@ function validateAttachment(item, intent) {
   };
 }
 
-async function sendMessage(user, conversationId, rawBody, rawAttachments = []) {
+async function sendMessage(user, conversationId, rawBody, rawAttachments = [], replyToId = null) {
   const conversation = await accessible(user, conversationId);
   if (!conversation.peer_active) throw fail(400, 'This member is no longer active, so the conversation is read-only.');
   const body = typeof rawBody === 'string' ? rawBody.replace(/\u0000/g, '').replace(/\r\n?/g, '\n').trim() : '';
@@ -236,6 +267,10 @@ async function sendMessage(user, conversationId, rawBody, rawAttachments = []) {
   let attachments = [];
   try {
     await client.query('BEGIN');
+    if (replyToId) {
+      const reply = await client.query(`SELECT id FROM direct_messages WHERE id = $1 AND direct_conversation_id = $2 AND deleted_at IS NULL`, [replyToId, conversation.id]);
+      if (!reply.rows[0]) throw fail(400, 'The message you are replying to is unavailable.');
+    }
     const used = new Set();
     for (const item of rawAttachments) {
       const publicId = String(item?.public_id || '');
@@ -250,10 +285,10 @@ async function sendMessage(user, conversationId, rawBody, rawAttachments = []) {
       attachments.push(validateAttachment(item, rows[0]));
     }
     const inserted = await client.query(
-      `INSERT INTO direct_messages (direct_conversation_id, sender_id, body, attachments)
-       VALUES ($1, $2, $3, $4::jsonb)
+      `INSERT INTO direct_messages (direct_conversation_id, sender_id, body, attachments, reply_to_message_id)
+       VALUES ($1, $2, $3, $4::jsonb, $5)
        RETURNING id, direct_conversation_id AS conversation_id, sender_id, body, attachments, created_at`,
-      [conversation.id, user.id, body, JSON.stringify(attachments)],
+      [conversation.id, user.id, body, JSON.stringify(attachments), replyToId || null],
     );
     message = inserted.rows[0];
     const sender = await client.query('SELECT name FROM members WHERE id = $1', [user.id]);
@@ -279,6 +314,34 @@ async function sendMessage(user, conversationId, rawBody, rawAttachments = []) {
   const eventConversation = { id: conversation.id, member_one_id: conversation.member_one_id, member_two_id: conversation.member_two_id };
   liveEvents.directMessageCreated(eventConversation);
   notifyDirectRecipient(conversation, message).catch((err) => console.error('[direct messages] push failed:', err?.message));
+  return message;
+}
+
+async function deleteMessage(user, conversationId, messageId, mode) {
+  const conversation = await accessible(user, conversationId);
+  if (!['for-me', 'for-everyone'].includes(mode)) throw fail(400, 'Choose whether to delete the message for you or everyone.');
+  const { rows } = await db.query(`SELECT id, sender_id FROM direct_messages WHERE id = $1 AND direct_conversation_id = $2`, [messageId, conversation.id]);
+  const message = rows[0];
+  if (!message) throw fail(404, 'Message not found.');
+  if (mode === 'for-everyone' && !sameId(message.sender_id, user.id)) throw fail(403, 'You can only delete your own message for everyone.');
+  if (mode === 'for-everyone') await db.query(`UPDATE direct_messages SET deleted_at = COALESCE(deleted_at, NOW()), body = '', attachments = '[]'::jsonb WHERE id = $1`, [messageId]);
+  else await db.query(`UPDATE direct_messages SET hidden_by = CASE WHEN hidden_by ? $2 THEN hidden_by ELSE hidden_by || to_jsonb($2::text) END WHERE id = $1`, [messageId, String(user.id)]);
+  liveEvents.directMessageCreated(conversation);
+  return { success: true };
+}
+
+async function forwardMessage(user, sourceConversationId, messageId, targetConversationId) {
+  const source = await accessible(user, sourceConversationId);
+  const target = await accessible(user, targetConversationId);
+  if (!target.peer_active) throw fail(400, 'This member is no longer active.');
+  const { rows } = await db.query(`SELECT id, body, attachments, deleted_at FROM direct_messages WHERE id = $1 AND direct_conversation_id = $2`, [messageId, source.id]);
+  const original = rows[0];
+  if (!original || original.deleted_at) throw fail(404, 'Message not found or already deleted.');
+  const inserted = await db.query(`INSERT INTO direct_messages (direct_conversation_id, sender_id, body, attachments, forwarded_from_id) VALUES ($1, $2, $3, $4::jsonb, $5) RETURNING id, direct_conversation_id AS conversation_id, sender_id, body, attachments, created_at, forwarded_from_id`, [target.id, user.id, original.body, JSON.stringify(original.attachments || []), original.id]);
+  const message = inserted.rows[0];
+  await db.query('UPDATE direct_conversations SET last_message_at = $2 WHERE id = $1', [target.id, message.created_at]);
+  liveEvents.directMessageCreated(target);
+  notifyDirectRecipient(target, message).catch((err) => console.error('[direct messages] push failed:', err?.message));
   return message;
 }
 
@@ -318,10 +381,11 @@ async function unreadCount(user) {
        JOIN direct_conversations c ON c.id = m.direct_conversation_id
        LEFT JOIN direct_conversation_reads r ON r.direct_conversation_id = c.id AND r.member_id = $1
       WHERE (c.member_one_id = $1 OR c.member_two_id = $1)
-        AND m.sender_id <> $1 AND m.created_at > COALESCE(r.last_read_at, '-infinity'::timestamptz)`,
+        AND m.sender_id <> $1 AND m.deleted_at IS NULL AND NOT (m.hidden_by ? $1::text)
+        AND m.created_at > COALESCE(r.last_read_at, '-infinity'::timestamptz)`,
     [user.id],
   );
   return Number(rows[0]?.count || 0);
 }
 
-module.exports = { listMembers, listConversations, startConversation, listMessages, sendMessage, markRead, unreadCount, signUpload };
+module.exports = { listMembers, listConversations, startConversation, listMessages, sendMessage, deleteMessage, forwardMessage, markRead, unreadCount, signUpload, validateAttachment };

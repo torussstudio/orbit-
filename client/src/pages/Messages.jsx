@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import api from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { useLiveRefetch, MESSAGE_EVENTS } from '../hooks/useLiveEvents';
+import { ChatAttachmentCard, ChatMediaPreview } from '../components/messages/ChatMediaPreview';
 
 /*
  * Messages: members <-> admin team (shared inbox).
@@ -23,6 +24,18 @@ import { useLiveRefetch, MESSAGE_EVENTS } from '../hooks/useLiveEvents';
 /* -------------------------------------------------------------------------- */
 
 const MAX_LEN = 4000; // same as the server and the DB check
+const IMAGE_LIMIT = 10 * 1024 * 1024;
+const PDF_LIMIT = 50 * 1024 * 1024;
+const DESIGN_FILE_LIMIT = 50 * 1024 * 1024;
+const MAX_ATTACHMENTS = 3;
+const DESIGN_MIMES = ['image/svg+xml', 'application/vnd.adobe.illustrator', 'image/vnd.adobe.illustrator', 'application/postscript', 'image/vnd.adobe.photoshop', 'application/vnd.adobe.photoshop'];
+const fileMime = (file) => {
+  const mime = String(file?.type || '').toLowerCase();
+  const ext = String(file?.name || '').split('.').pop().toLowerCase();
+  if (['image/jpeg', 'image/png', 'image/webp', 'image/svg+xml', 'application/pdf', ...DESIGN_MIMES].includes(mime)) return mime;
+  return ({ jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', pdf: 'application/pdf', svg: 'image/svg+xml', ai: 'application/vnd.adobe.illustrator', psd: 'image/vnd.adobe.photoshop' })[ext] || mime;
+};
+const hasDraggedFiles = (event) => Array.from(event.dataTransfer?.types || []).includes('Files');
 const WARN_LEN = 3600; // counter appears from here
 const READ_PING_MS = 45000; // "still reading" while a thread is open
 const NEAR_BOTTOM_PX = 120;
@@ -86,20 +99,26 @@ const ICON_PATHS = {
   alert: <><circle cx="12" cy="12" r="9" /><path d="M12 7.5v5M12 16.2v.1" /></>,
   team: <><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75" /></>,
   lock: <><rect x="5" y="11" width="14" height="9" rx="2" /><path d="M8 11V8a4 4 0 018 0v3" /></>,
+  clip: <path d="M21 11l-8.6 8.6a5 5 0 01-7.1-7.1l8.6-8.6a3.3 3.3 0 014.7 4.7l-8.6 8.6a1.7 1.7 0 01-2.4-2.4l7.9-7.9" />,
+  close: <path d="M6 6l12 12M18 6L6 18" />,
+  reply: <><path d="M9 14L4 9l5-5" /><path d="M4 9h10a6 6 0 016 6v3" /></>,
+  forward: <><path d="M15 14l5-5-5-5" /><path d="M20 9H10a6 6 0 00-6 6v3" /></>,
+  trash: <><path d="M4 7h16" /><path d="M10 11v6M14 11v6" /><path d="M6 7l1 12a1 1 0 001 1h8a1 1 0 001-1l1-12" /><path d="M9 7V4h6v3" /></>,
+  file: <><path d="M14 3H7a1 1 0 00-1 1v16a1 1 0 001 1h10a1 1 0 001-1V7l-4-4z" /><path d="M14 3v4h4" /></>,
 };
 
 function Icon({ name, className = 'h-4 w-4' }) {
   return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <svg className={`shrink-0 ${className}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       {ICON_PATHS[name]}
     </svg>
   );
 }
 
 function Avatar({ name, url, size = 'md' }) {
-  const box = size === 'sm' ? 'h-7 w-7 text-[11px]' : size === 'lg' ? 'h-9 w-9 text-[13px]' : 'h-9 w-9 text-[13px]';
+  const box = size === 'sm' ? 'h-7 w-7 text-[11px]' : 'h-10 w-10 text-sm';
   return (
-    <span className={`${box} flex shrink-0 items-center justify-center overflow-hidden rounded-full bg-[var(--accent-light)] font-semibold text-[color:var(--accent)] ring-1 ring-inset ring-[color:var(--border)]`}>
+    <span className={`${box} grid shrink-0 place-items-center overflow-hidden rounded-xl bg-[var(--accent-light)] font-semibold text-[color:var(--accent)]`}>
       {url ? (
         <img src={url} alt="" loading="lazy" decoding="async" className="h-full w-full object-cover" />
       ) : (
@@ -133,10 +152,10 @@ function Linkified({ text }) {
 function Notice({ icon = 'alert', title, children, action }) {
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-2 px-6 py-16 text-center">
-      <span className="mb-1 grid h-12 w-12 place-items-center rounded-2xl bg-[var(--bg-3)] text-[color:var(--text-3)]">
-        <Icon name={icon} className="h-5 w-5" />
+      <span className="mb-1 grid h-14 w-14 place-items-center rounded-2xl bg-[var(--accent-light)] text-[color:var(--accent)] shadow-[0_14px_30px_-16px_var(--accent)]">
+        <Icon name={icon} className="h-6 w-6" />
       </span>
-      <h2 className="text-[14px] font-semibold text-[color:var(--text)]">{title}</h2>
+      <h2 className="text-base font-semibold tracking-tight text-[color:var(--text)]">{title}</h2>
       {children && (
         <p className="max-w-[40ch] text-[13px] leading-relaxed text-[color:var(--text-3)] [text-wrap:pretty]">{children}</p>
       )}
@@ -146,7 +165,19 @@ function Notice({ icon = 'alert', title, children, action }) {
 }
 
 const BTN_NEUTRAL =
-  `inline-flex items-center justify-center gap-1.5 rounded-lg border border-[color:var(--border)] bg-[var(--bg-3)] px-3.5 py-2 text-xs font-semibold text-[color:var(--text-2)] transition duration-200 hover:text-[color:var(--text)] active:scale-[0.98] ${FOCUS_RING}`;
+  `inline-flex items-center justify-center gap-1.5 rounded-xl border border-[color:var(--border)] bg-[var(--bg-3)] px-3.5 py-2 text-xs font-semibold text-[color:var(--text-2)] transition duration-200 hover:-translate-y-px hover:text-[color:var(--text)] active:translate-y-0 active:scale-[0.98] ${FOCUS_RING}`;
+
+const MessageAction = ({ icon, title, text, danger, onClick }) => (
+  <button
+    type="button"
+    title={title}
+    aria-label={title}
+    onClick={onClick}
+    className={`inline-flex h-7 items-center gap-1 rounded-md px-1.5 text-[10px] font-medium transition duration-200 hover:bg-black/10 active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-current ${danger ? 'md:hover:text-red-500' : ''}`}
+  >
+    <Icon name={icon} className="h-3.5 w-3.5" />{text}
+  </button>
+);
 
 function ThreadSkeleton() {
   const rows = [
@@ -156,7 +187,7 @@ function ThreadSkeleton() {
     <div className="flex flex-1 flex-col justify-end gap-3 px-4 py-6 sm:px-6" aria-hidden="true">
       {rows.map(([w, right], i) => (
         <div key={i} className={`flex ${right ? 'justify-end' : ''}`}>
-          <div className={`h-9 ${w} animate-pulse rounded-2xl bg-[var(--bg-3)] motion-reduce:animate-none`} />
+          <div className={`h-10 ${w} animate-pulse rounded-2xl bg-[var(--bg-3)] motion-reduce:animate-none`} />
         </div>
       ))}
     </div>
@@ -175,7 +206,7 @@ function ThreadSkeleton() {
  * onBack          phone "back to inbox" (managers)
  * onActivity      something was sent or read (manager inbox refreshes)
  */
-function Thread({ conversationId, memberId, header, onBack, onActivity }) {
+function Thread({ conversationId, memberId, header, onBack, onActivity, forwardTargets = [] }) {
   const { user, isManager } = useAuth();
 
   const [messages, setMessages] = useState([]);
@@ -188,9 +219,19 @@ function Thread({ conversationId, memberId, header, onBack, onActivity }) {
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [showJump, setShowJump] = useState(false);
   const [draft, setDraft] = useState('');
+  const [files, setFiles] = useState([]);
+  const [uploading, setUploading] = useState(false);
+  const [dragging, setDragging] = useState(false);
+  const [replyTo, setReplyTo] = useState(null);
+  const [forwarding, setForwarding] = useState(null);
+  const [forwardTarget, setForwardTarget] = useState('');
+  const [previewAttachment, setPreviewAttachment] = useState(null);
+  const [profileOpen, setProfileOpen] = useState(false);
 
   const scrollRef = useRef(null);
   const textareaRef = useRef(null);
+  const fileInputRef = useRef(null);
+  const dragDepthRef = useRef(0);
   const stickRef = useRef(true); // keep the view pinned to the newest message
   const restoreRef = useRef(null); // scroll position to keep after loading older
   const cidRef = useRef(conversationId);
@@ -198,8 +239,6 @@ function Thread({ conversationId, memberId, header, onBack, onActivity }) {
   const lastSeenIdRef = useRef(null);
   cidRef.current = conversationId;
   messagesRef.current = messages;
-
-  const base = `/messages/conversations/${conversationId}`;
 
   // The other side of the conversation is "theirs". For a manager that is the
   // member; for a member that is the whole admin team.
@@ -228,7 +267,7 @@ function Thread({ conversationId, memberId, header, onBack, onActivity }) {
       setError('');
     }
     try {
-      const { data } = await api.get(`/messages/conversations/${cid}/messages`);
+      const { data } = await api.get(`/messages/conversations/${cid}/messages`, { params: { limit: 100 } });
       if (cidRef.current !== cid) return;
       stickRef.current = true;
       setMessages(data.messages || []);
@@ -247,33 +286,8 @@ function Thread({ conversationId, memberId, header, onBack, onActivity }) {
 
   // Only what is newer than the newest message on screen.
   const fetchNew = useCallback(async () => {
-    const cid = conversationId;
-    const current = messagesRef.current;
-    if (!current.length) {
-      await loadLatest({ silent: true });
-      return;
-    }
-
-    let after = current[current.length - 1].id;
-    try {
-      // A burst of messages: a few pages at most, then the rest next time.
-      for (let i = 0; i < 5; i += 1) {
-        const { data } = await api.get(`/messages/conversations/${cid}/messages`, { params: { after } });
-        if (cidRef.current !== cid) return;
-        setOtherReadAt(data.other_read_at || null);
-        setReadOnly(data.conversation?.member_active === false);
-        const list = data.messages || [];
-        if (list.length) {
-          if (scrollRef.current) stickRef.current = isNearBottom(scrollRef.current);
-          setMessages((prev) => mergeMessages(prev, list));
-          after = list[list.length - 1].id;
-        }
-        if (!data.has_more) break;
-      }
-    } catch {
-      /* the next event or poll tries again */
-    }
-  }, [conversationId, loadLatest]);
+    await loadLatest({ silent: true });
+  }, [loadLatest]);
 
   // New thread: start clean.
   useEffect(() => {
@@ -284,6 +298,7 @@ function Thread({ conversationId, memberId, header, onBack, onActivity }) {
     setReadOnly(false);
     setShowJump(false);
     setDraft('');
+    setFiles([]);
     lastSeenIdRef.current = null;
     stickRef.current = true;
     loadLatest();
@@ -307,6 +322,14 @@ function Thread({ conversationId, memberId, header, onBack, onActivity }) {
       document.removeEventListener('visibilitychange', onVisible);
     };
   }, [markRead]);
+
+  // Escape closes the profile dialog.
+  useEffect(() => {
+    if (!profileOpen) return undefined;
+    const onKey = (event) => { if (event.key === 'Escape') setProfileOpen(false); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [profileOpen]);
 
   // A new message from the other side: mark read, or offer "New messages".
   useEffect(() => {
@@ -371,15 +394,45 @@ function Thread({ conversationId, memberId, header, onBack, onActivity }) {
 
   /* ---------- sending ---------- */
 
+  const addFiles = useCallback((incoming) => {
+    const next = [...files];
+    let validationError = '';
+    for (const file of Array.from(incoming || [])) {
+      if (next.length >= MAX_ATTACHMENTS) { validationError = 'A message can include up to 3 attachments.'; break; }
+      const mime = fileMime(file);
+      const image = ['image/jpeg', 'image/png', 'image/webp'].includes(mime);
+      const designFile = DESIGN_MIMES.includes(mime);
+      if (!image && !designFile && mime !== 'image/svg+xml' && mime !== 'application/pdf') { validationError = 'Attach JPG, PNG, WebP, SVG, AI, PSD, or PDF files.'; continue; }
+      const limit = image ? IMAGE_LIMIT : mime === 'application/pdf' ? PDF_LIMIT : DESIGN_FILE_LIMIT;
+      if (file.size > limit) { validationError = `${image ? 'Images' : mime === 'application/pdf' ? 'PDF files' : 'SVG, AI, and PSD files'} must be ${limit / (1024 * 1024)} MB or smaller.`; continue; }
+      if (!next.some((item) => item.name === file.name && item.size === file.size)) next.push(file);
+    }
+    setFiles(next);
+    setError(validationError);
+  }, [files]);
+
+  const uploadFile = useCallback(async (file) => {
+    const { data: signed } = await api.post('/messages/uploads/signature', { mime_type: fileMime(file), size: file.size });
+    const form = new FormData();
+    for (const key of ['api_key', 'timestamp', 'signature', 'public_id', 'upload_preset']) if (signed[key] != null) form.append(key, String(signed[key]));
+    form.append('file', file);
+    const response = await fetch(signed.upload_url, { method: 'POST', body: form });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result?.error?.message || 'Cloudinary upload failed.');
+    return { public_id: result.public_id, secure_url: result.secure_url, resource_type: result.resource_type, format: result.format, bytes: result.bytes, original_filename: file.name };
+  }, []);
+
   const send = useCallback(async (retry) => {
+    setError('');
     const body = (retry ? retry.body : draft).trim();
-    if (!body || readOnly || body.length > MAX_LEN) return;
+    const outgoingFiles = retry?.files || files;
+    if ((!body && !outgoingFiles.length) || readOnly || body.length > MAX_LEN || uploading) return;
 
     const tempId = retry?.tempId || `tmp-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     if (retry) {
       setPending((p) => p.map((x) => (x.tempId === tempId ? { ...x, status: 'sending', error: '' } : x)));
     } else {
-      setPending((p) => [...p, { tempId, body, status: 'sending', error: '', created_at: new Date().toISOString() }]);
+      setPending((p) => [...p, { tempId, body, displayBody: body || outgoingFiles.map((file) => file.name).join(', '), files: outgoingFiles, status: 'sending', error: '', created_at: new Date().toISOString() }]);
       setDraft('');
     }
     stickRef.current = true;
@@ -387,11 +440,16 @@ function Thread({ conversationId, memberId, header, onBack, onActivity }) {
     textareaRef.current?.focus();
 
     const cid = conversationId;
+    setUploading(true);
     try {
-      const { data } = await api.post(`/messages/conversations/${cid}/messages`, { body }, { silent: true });
+      const attachments = [];
+      for (const file of outgoingFiles) attachments.push(await uploadFile(file));
+      const { data } = await api.post(`/messages/conversations/${cid}/messages`, { body, attachments, reply_to_message_id: replyTo?.id || null }, { silent: true });
       if (cidRef.current !== cid) return;
       setPending((p) => p.filter((x) => x.tempId !== tempId));
       if (data?.message) setMessages((prev) => mergeMessages(prev, [data.message]));
+      setReplyTo(null);
+      setFiles([]);
       onActivity?.();
     } catch (err) {
       if (cidRef.current !== cid) return;
@@ -400,8 +458,28 @@ function Thread({ conversationId, memberId, header, onBack, onActivity }) {
           x.tempId === tempId ? { ...x, status: 'failed', error: apiError(err, 'Not sent.') } : x,
         ),
       );
+    } finally {
+      setUploading(false);
     }
-  }, [conversationId, draft, onActivity, readOnly]);
+  }, [conversationId, draft, files, onActivity, readOnly, replyTo, uploadFile, uploading]);
+
+  const deleteMessage = useCallback(async (message, mode) => {
+    if (!window.confirm(mode === 'for-everyone' ? 'Delete this message for everyone?' : 'Delete this message for you?')) return;
+    try {
+      await api.delete(`/messages/conversations/${conversationId}/messages/${message.id}`, { data: { mode } });
+      if (mode === 'for-me') setMessages((old) => old.filter((item) => !sameId(item.id, message.id)));
+      else setMessages((old) => old.map((item) => sameId(item.id, message.id) ? { ...item, body: 'This message was deleted', deleted: true } : item));
+    } catch (err) { setError(apiError(err, 'Could not delete this message.')); }
+  }, [conversationId]);
+
+  const forwardMessage = useCallback(async () => {
+    if (!forwarding || !forwardTarget) return;
+    try {
+      await api.post(`/messages/conversations/${conversationId}/messages/${forwarding.id}/forward`, { target_conversation_id: forwardTarget });
+      setForwarding(null);
+      setForwardTarget('');
+    } catch (err) { setError(apiError(err, 'Could not forward this message.')); }
+  }, [conversationId, forwarding, forwardTarget]);
 
   const discard = (tempId) => setPending((p) => p.filter((x) => x.tempId !== tempId));
 
@@ -420,6 +498,30 @@ function Thread({ conversationId, memberId, header, onBack, onActivity }) {
     }
   };
 
+  const onDragEnter = (e) => {
+    if (!hasDraggedFiles(e)) return;
+    e.preventDefault();
+    dragDepthRef.current += 1;
+    setDragging(true);
+  };
+  const onDragOver = (e) => {
+    if (!hasDraggedFiles(e)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+  };
+  const onDragLeave = (e) => {
+    if (!hasDraggedFiles(e)) return;
+    dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
+    if (!dragDepthRef.current) setDragging(false);
+  };
+  const onDrop = (e) => {
+    if (!hasDraggedFiles(e)) return;
+    e.preventDefault();
+    dragDepthRef.current = 0;
+    setDragging(false);
+    addFiles(e.dataTransfer.files);
+  };
+
   /* ---------- rows ---------- */
 
   const rows = useMemo(() => {
@@ -430,7 +532,7 @@ function Thread({ conversationId, memberId, header, onBack, onActivity }) {
         key: p.tempId,
         sender_id: user?.id,
         sender_name: user?.name,
-        body: p.body,
+        body: p.displayBody ?? p.body,
         created_at: p.created_at,
         pending: p,
       })),
@@ -480,34 +582,39 @@ function Thread({ conversationId, memberId, header, onBack, onActivity }) {
   const remaining = MAX_LEN - draft.length;
 
   return (
-    <section className="flex h-full min-h-0 min-w-0 w-full flex-1 flex-col overflow-hidden bg-[var(--bg-2)]" aria-label={`Conversation: ${header.title}`}>
+    <section
+      className="relative flex h-full min-h-0 min-w-0 w-full flex-1 flex-col overflow-hidden bg-[var(--bg-2)]"
+      aria-label={`Conversation: ${header.title}`}
+      onDragEnter={onDragEnter}
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
+    >
       {/* Header */}
-      <header className="flex min-w-0 shrink-0 items-center gap-2 border-b border-[color:var(--border)] px-3 py-2.5 sm:gap-2.5 sm:px-4 sm:py-2.5">
+      <header className="flex min-w-0 shrink-0 items-center gap-2.5 border-b border-[color:var(--border)] bg-[var(--bg-2)] px-3 py-3 sm:px-5">
         {onBack && (
           <button
             type="button"
             onClick={onBack}
             aria-label="Back to inbox"
-            className={`-ml-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[color:var(--text-2)] transition-colors hover:bg-[var(--bg-3)] hover:text-[color:var(--text)] md:hidden ${FOCUS_RING}`}
+            className={`-ml-1 grid h-9 w-9 shrink-0 place-items-center rounded-xl text-[color:var(--text-2)] transition duration-200 hover:bg-[var(--bg-3)] hover:text-[color:var(--text)] active:scale-95 md:hidden ${FOCUS_RING}`}
           >
-            <Icon name="back" />
+            <Icon name="back" className="h-5 w-5" />
           </button>
         )}
         {header.team ? (
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[var(--accent-light)] text-[color:var(--accent)]">
-            <Icon name="team" className="h-[18px] w-[18px]" />
+          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-[var(--accent-light)] text-[color:var(--accent)]">
+            <Icon name="team" className="h-5 w-5" />
           </span>
         ) : (
-          <Avatar name={header.avatarName} url={header.avatarUrl} size="lg" />
+          <button type="button" onClick={() => setProfileOpen(true)} aria-label={`View ${header.title} profile`} className={`shrink-0 rounded-xl transition duration-200 hover:ring-2 hover:ring-[color:var(--accent)] ${FOCUS_RING}`}>
+            <Avatar name={header.avatarName} url={header.avatarUrl} />
+          </button>
         )}
-        <div className="min-w-0 flex-1">
-          <h2 className="truncate text-sm font-semibold leading-tight tracking-[-0.01em] text-[color:var(--text)]">
-            {header.title}
-          </h2>
-          {header.subtitle && (
-            <p className="mt-0.5 truncate text-[11px] text-[color:var(--text-3)]">{header.subtitle}</p>
-          )}
-        </div>
+        <button type="button" disabled={header.team} onClick={() => setProfileOpen(true)} className={`min-w-0 flex-1 rounded-lg text-left disabled:cursor-default ${FOCUS_RING}`}>
+          <h2 className="truncate text-sm font-semibold leading-tight tracking-tight text-[color:var(--text)]">{header.title}</h2>
+          {header.subtitle && <p className="mt-0.5 truncate text-[11px] text-[color:var(--text-3)]">{header.subtitle}</p>}
+        </button>
         {header.action && <div className="ml-auto shrink-0">{header.action}</div>}
       </header>
 
@@ -516,7 +623,7 @@ function Thread({ conversationId, memberId, header, onBack, onActivity }) {
         <div
           ref={scrollRef}
           onScroll={onScroll}
-          className="h-full min-w-0 max-w-full overflow-x-hidden overflow-y-auto overscroll-contain px-3 py-3 sm:px-5 sm:py-3"
+          className="h-full min-w-0 max-w-full overflow-x-hidden overflow-y-auto overscroll-contain bg-[var(--bg)] bg-[radial-gradient(45%_35%_at_100%_0%,var(--accent-light),transparent)] px-3 py-4 sm:px-5"
           role="log"
           aria-live="polite"
           aria-relevant="additions"
@@ -549,9 +656,9 @@ function Thread({ conversationId, memberId, header, onBack, onActivity }) {
 
               {rows.map((row) =>
                 row.type === 'day' ? (
-                  <li key={row.key} className="my-3 flex items-center gap-3 first:mt-0" aria-label={row.label}>
+                  <li key={row.key} className="my-4 flex items-center gap-3 first:mt-0" aria-label={row.label}>
                     <span className="h-px flex-1 bg-[var(--border)]" aria-hidden="true" />
-                    <span className="text-[11px] font-medium text-[color:var(--text-3)]">{row.label}</span>
+                    <span className="rounded-full bg-[var(--bg-3)] px-2.5 py-0.5 text-[11px] font-medium text-[color:var(--text-3)]">{row.label}</span>
                     <span className="h-px flex-1 bg-[var(--border)]" aria-hidden="true" />
                   </li>
                 ) : (
@@ -567,6 +674,11 @@ function Thread({ conversationId, memberId, header, onBack, onActivity }) {
                     }
                     onRetry={send}
                     onDiscard={discard}
+                    onReply={(message) => { setReplyTo(message); textareaRef.current?.focus(); }}
+                    onDelete={deleteMessage}
+                    onForward={(message) => { setForwarding(message); setForwardTarget(''); }}
+                    onOpenAttachment={setPreviewAttachment}
+                    canForward={Boolean(isManager)}
                   />
                 ),
               )}
@@ -578,7 +690,7 @@ function Thread({ conversationId, memberId, header, onBack, onActivity }) {
           <button
             type="button"
             onClick={jumpToBottom}
-            className={`absolute bottom-3 left-1/2 flex -translate-x-1/2 items-center gap-1.5 rounded-full bg-[var(--accent)] px-3.5 py-1.5 text-xs font-semibold text-white shadow-[0_10px_24px_-10px_rgba(15,23,42,0.5)] transition-transform hover:brightness-110 active:scale-95 ${FOCUS_RING}`}
+            className={`absolute bottom-3 left-1/2 flex -translate-x-1/2 items-center gap-1.5 rounded-full bg-[var(--accent)] px-3.5 py-1.5 text-xs font-semibold text-white shadow-[0_10px_24px_-10px_var(--accent)] transition duration-200 hover:brightness-110 active:scale-95 ${FOCUS_RING}`}
           >
             New messages
             <Icon name="down" className="h-3.5 w-3.5" />
@@ -587,10 +699,27 @@ function Thread({ conversationId, memberId, header, onBack, onActivity }) {
       </div>
 
       {/* Composer */}
-      <div className="shrink-0 border-t border-[color:var(--border)] px-3 py-2 sm:px-4 sm:py-2">
+      <div className="relative shrink-0 border-t border-[color:var(--border)] bg-[var(--bg-2)] px-3 pb-2.5 pt-3 sm:px-5">
+        {replyTo && (
+          <div className="mb-2 flex items-center justify-between gap-3 rounded-xl border-l-2 border-[color:var(--accent)] bg-[var(--accent-light)] px-3 py-2 text-xs text-[color:var(--text-2)]">
+            <span className="truncate">Replying to {replyTo.sender_name || 'message'}: {replyTo.body}</span>
+            <button type="button" onClick={() => setReplyTo(null)} aria-label="Cancel reply" className={`grid h-6 w-6 shrink-0 place-items-center rounded-md transition duration-200 hover:bg-black/10 ${FOCUS_RING}`}><Icon name="close" className="h-3.5 w-3.5" /></button>
+          </div>
+        )}
+        {forwarding && (
+          <div className="mb-2 flex flex-wrap items-center gap-2 rounded-xl bg-[var(--accent-light)] p-2.5">
+            <span className="text-xs font-medium text-[color:var(--text-2)]">Forward to member</span>
+            <select value={forwardTarget} onChange={(e) => setForwardTarget(e.target.value)} className="min-w-0 flex-1 rounded-lg border border-[color:var(--border)] bg-[var(--bg-2)] px-2 py-1.5 text-xs text-[color:var(--text)] outline-none focus:border-[color:var(--accent)]">
+              <option value="">Choose a conversation</option>
+              {forwardTargets.filter((item) => !sameId(item.conversation_id, conversationId)).map((item) => <option key={item.member_id} value={item.conversation_id}>{item.name}</option>)}
+            </select>
+            <button type="button" disabled={!forwardTarget} onClick={forwardMessage} className={`rounded-lg bg-[var(--accent)] px-3 py-1.5 text-xs font-semibold text-white transition duration-200 hover:brightness-110 active:scale-95 disabled:opacity-50 ${FOCUS_RING}`}>Forward</button>
+            <button type="button" onClick={() => setForwarding(null)} className={`rounded-lg px-2 py-1.5 text-xs text-[color:var(--text-2)] transition duration-200 hover:bg-black/10 ${FOCUS_RING}`}>Cancel</button>
+          </div>
+        )}
         {readOnly ? (
-          <p className="flex items-center gap-2 rounded-lg bg-[var(--bg-3)] px-3 py-2 text-xs text-[color:var(--text-3)]">
-            <Icon name="lock" className="h-3.5 w-3.5 shrink-0" />
+          <p className="flex items-center gap-2 rounded-xl bg-[var(--bg-3)] px-3.5 py-2.5 text-xs text-[color:var(--text-3)]">
+            <Icon name="lock" className="h-3.5 w-3.5" />
             This member is no longer active. The conversation is read-only.
           </p>
         ) : (
@@ -599,8 +728,30 @@ function Thread({ conversationId, memberId, header, onBack, onActivity }) {
               e.preventDefault();
               send();
             }}
-            className="flex min-w-0 items-end gap-2"
+            className="flex min-w-0 items-end gap-1 rounded-2xl border border-[color:var(--border)] bg-[var(--bg-3)] p-1.5 transition duration-200 focus-within:border-[color:var(--accent)] focus-within:ring-4 focus-within:ring-[color:var(--accent-light)]"
           >
+            <input ref={fileInputRef} type="file" multiple accept="image/jpeg,image/png,image/webp,image/svg+xml,application/pdf,.ai,.psd,.svg" onChange={(e) => { addFiles(e.target.files); e.target.value = ''; }} className="hidden" />
+            {files.length > 0 && (
+              <div className="absolute inset-x-3 bottom-full mb-2 flex flex-wrap gap-1.5 rounded-xl border border-[color:var(--border)] bg-[var(--bg-2)] p-2 shadow-[0_18px_40px_-24px_rgba(15,23,42,0.5)] sm:inset-x-5">
+                {files.map((file, index) => (
+                  <span key={`${file.name}-${index}`} className="flex max-w-56 items-center gap-1.5 rounded-lg border border-[color:var(--border)] bg-[var(--bg-3)] py-1 pl-2 pr-1 text-[11px] font-medium text-[color:var(--text-2)]">
+                    <Icon name="file" className="h-3.5 w-3.5" />
+                    <span className="truncate">{file.name}</span>
+                    <button type="button" aria-label={`Remove ${file.name}`} onClick={() => setFiles((old) => old.filter((_, i) => i !== index))} className={`grid h-5 w-5 place-items-center rounded-md transition duration-200 hover:bg-black/10 ${FOCUS_RING}`}><Icon name="close" className="h-3 w-3" /></button>
+                  </span>
+                ))}
+              </div>
+            )}
+            <button
+              type="button"
+              title="Attach image or PDF"
+              aria-label="Attach image or PDF"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={files.length >= MAX_ATTACHMENTS || uploading}
+              className={`grid h-9 w-9 shrink-0 place-items-center rounded-xl text-[color:var(--text-2)] transition duration-200 hover:bg-[var(--bg-2)] hover:text-[color:var(--text)] active:scale-95 disabled:opacity-40 ${FOCUS_RING}`}
+            >
+              <Icon name="clip" className="h-[18px] w-[18px]" />
+            </button>
             <label htmlFor={`composer-${conversationId}`} className="sr-only">
               Message
             </label>
@@ -614,21 +765,21 @@ function Thread({ conversationId, memberId, header, onBack, onActivity }) {
               onChange={(e) => setDraft(e.target.value)}
               onKeyDown={onComposerKey}
               placeholder={isManager ? `Message ${header.title}` : 'Message the admin team'}
-              className="min-h-10 min-w-0 flex-1 resize-none rounded-xl border border-[color:var(--border)] bg-[var(--bg-3)] px-3 py-2 text-[16px] leading-snug text-[color:var(--text)] outline-none transition-[border-color,box-shadow] duration-200 placeholder:text-[color:var(--text-3)] focus:border-[color:var(--accent)] focus:[box-shadow:0_0_0_3px_color-mix(in_srgb,var(--accent)_16%,transparent)] disabled:opacity-60 sm:text-[13px]"
+              className="min-h-9 min-w-0 flex-1 resize-none bg-transparent px-1.5 py-2 text-[16px] leading-5 text-[color:var(--text)] outline-none placeholder:text-[color:var(--text-3)] disabled:opacity-60 sm:text-sm"
             />
             <button
               type="submit"
-              disabled={!draft.trim() || loading || Boolean(error)}
+              disabled={(!draft.trim() && !files.length) || loading || Boolean(error) || uploading}
               aria-label="Send message"
-              className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[var(--accent)] text-white transition duration-200 hover:brightness-110 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40 ${FOCUS_RING}`}
+              className={`grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-[var(--accent)] text-white shadow-[0_8px_18px_-8px_var(--accent)] transition duration-200 hover:brightness-110 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none ${FOCUS_RING}`}
             >
-              <Icon name="send" className="h-[17px] w-[17px]" />
+              {uploading ? <span className="animate-pulse text-xs">…</span> : <Icon name="send" className="h-[18px] w-[18px]" />}
             </button>
           </form>
         )}
         {!readOnly && (
           <div className="mt-1.5 flex items-center justify-between gap-3 px-1 text-[11px] text-[color:var(--text-3)]">
-            <span className="hidden sm:inline">Enter to send · Shift + Enter for a new line</span>
+            <span className="truncate text-[10px]"><span className="sm:hidden">Images 10 MB · files 50 MB</span><span className="hidden sm:inline">Images 10 MB · PDFs, SVG, AI and PSD 50 MB · Enter to send · Shift + Enter for a new line</span></span>
             {draft.length >= WARN_LEN && (
               <span className={`ml-auto tabular-nums ${remaining <= 0 ? 'text-[color:var(--danger)]' : ''}`}>
                 {remaining} characters left
@@ -637,33 +788,78 @@ function Thread({ conversationId, memberId, header, onBack, onActivity }) {
           </div>
         )}
       </div>
+
+      {dragging && (
+        <div className="pointer-events-none absolute inset-3 z-20 grid place-items-center rounded-2xl border-2 border-dashed border-[color:var(--accent)] bg-[var(--bg-2)]" aria-hidden="true">
+          <div className="flex items-center gap-2 rounded-xl bg-[var(--accent-light)] px-5 py-3 text-sm font-semibold text-[color:var(--accent)]"><Icon name="clip" className="h-4 w-4" />Drop images or PDFs to attach</div>
+        </div>
+      )}
+
+      <ChatMediaPreview file={previewAttachment} onClose={() => setPreviewAttachment(null)} />
+
+      {profileOpen && !header.team && (
+        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setProfileOpen(false); }}>
+          <section role="dialog" aria-modal="true" aria-label={`${header.title} profile`} className="w-full max-w-sm overflow-hidden rounded-3xl border border-[color:var(--border)] bg-[var(--bg-2)] shadow-[0_40px_90px_-30px_rgba(0,0,0,0.6)]">
+            <div className="relative grid min-h-56 place-items-center bg-[var(--bg-3)] bg-[radial-gradient(70%_80%_at_50%_0%,var(--accent-light),transparent)] p-6">
+              <button type="button" aria-label="Close profile" onClick={() => setProfileOpen(false)} className={`absolute right-3 top-3 grid h-9 w-9 place-items-center rounded-xl bg-black/35 text-white transition duration-200 hover:bg-black/50 active:scale-95 ${FOCUS_RING}`}><Icon name="close" className="h-4 w-4" /></button>
+              {header.avatarUrl
+                ? <img src={header.avatarUrl} alt={`${header.title} profile`} className="h-40 w-40 rounded-[2rem] object-cover shadow-[0_24px_50px_-20px_rgba(0,0,0,0.55)]" />
+                : <span className="grid h-40 w-40 place-items-center rounded-[2rem] bg-[var(--accent-light)] text-5xl font-semibold text-[color:var(--accent)]">{(header.avatarName || header.title || '?').slice(0, 1).toUpperCase()}</span>}
+            </div>
+            <div className="p-6">
+              <h2 className="text-xl font-semibold tracking-tight text-[color:var(--text)]">{header.title}</h2>
+              <p className="mt-1 text-sm text-[color:var(--text-3)]">Member · Orbit</p>
+              {header.subtitle && <p className="mt-4 rounded-xl bg-[var(--bg-3)] px-3.5 py-3 text-xs leading-relaxed text-[color:var(--text-2)]">{header.subtitle}</p>}
+              <button type="button" onClick={() => setProfileOpen(false)} className={`mt-5 w-full rounded-xl bg-[var(--accent)] px-4 py-2.5 text-sm font-semibold text-white shadow-[0_10px_22px_-10px_var(--accent)] transition duration-200 hover:brightness-110 active:scale-[0.98] ${FOCUS_RING}`}>Back to chat</button>
+            </div>
+          </section>
+        </div>
+      )}
     </section>
   );
 }
 
-const MessageRow = memo(function MessageRow({ row, status, onRetry, onDiscard }) {
+const MessageRow = memo(function MessageRow({ row, status, onRetry, onDiscard, onReply, onDelete, onForward, onOpenAttachment, canForward }) {
   const { m, right, mine, grouped, name } = row;
   const p = m.pending;
+  const [showActions, setShowActions] = useState(false);
 
   const bubble = right
     ? mine
-      ? 'bg-[var(--accent)] text-white'
+      ? 'rounded-br-md bg-[var(--accent)] text-white shadow-[0_10px_24px_-14px_var(--accent)]'
       : // Another admin's reply on a manager's screen: team side, softer.
-        'bg-[var(--accent-light)] text-[color:var(--text)]'
-    : 'bg-[var(--bg-3)] text-[color:var(--text)]';
+        'rounded-br-md bg-[var(--accent-light)] text-[color:var(--text)]'
+    : 'rounded-bl-md border border-[color:var(--border)] bg-[var(--bg-2)] text-[color:var(--text)] shadow-[0_8px_20px_-16px_rgba(15,23,42,0.5)]';
 
   return (
-    <li className={`flex w-full min-w-0 flex-col ${right ? 'items-end' : 'items-start'} ${grouped ? 'mt-0.5' : 'mt-2 first:mt-0'}`}>
+    <li className={`group flex w-full min-w-0 flex-col ${right ? 'items-end' : 'items-start'} ${grouped ? 'mt-0.5' : 'mt-3 first:mt-0'}`}>
       {name && <span className="mb-1 px-1 text-[11px] font-medium text-[color:var(--text-3)]">{name}</span>}
       <div
-        className={`max-w-[88%] whitespace-pre-wrap break-words rounded-2xl px-3 py-1.5 text-[13px] leading-relaxed [overflow-wrap:anywhere] sm:max-w-[min(78%,560px)] ${bubble} ${
-          right ? 'rounded-br-md' : 'rounded-bl-md'
-        } ${p?.status === 'failed' ? 'opacity-70 ring-1 ring-[color:var(--danger)]' : ''} ${p?.status === 'sending' ? 'opacity-70' : ''}`}
+        onClick={() => { if (!p && !m.deleted) setShowActions((v) => !v); }}
+        className={`relative max-w-[88%] whitespace-pre-wrap break-words rounded-2xl px-3.5 py-2 text-[13.5px] leading-relaxed [overflow-wrap:anywhere] sm:max-w-[min(72%,560px)] ${bubble} ${
+          p?.status === 'failed' ? 'opacity-70 ring-1 ring-[color:var(--danger)]' : ''
+        } ${p?.status === 'sending' ? 'opacity-70' : ''}`}
       >
-        <Linkified text={m.body} />
+        {m.forwarded_from_id && <p className="mb-1 flex items-center gap-1 text-[10px] font-medium italic opacity-75"><Icon name="forward" className="h-3 w-3" />Forwarded</p>}
+        {m.reply_to_message_id && (
+          <div className={`mb-1.5 rounded-lg border-l-2 bg-black/10 px-2.5 py-1.5 text-[11px] ${mine ? 'border-white/60' : 'border-[color:var(--accent)]'}`}>
+            <span className="font-semibold">{m.reply_sender_name || 'Reply'}</span>
+            <p className="truncate opacity-80">{m.reply_body || 'Message'}</p>
+          </div>
+        )}
+        {m.deleted ? <span className="italic opacity-70">This message was deleted</span> : <Linkified text={m.body || ''} />}
+        {!m.deleted && m.attachments?.map((file) => <ChatAttachmentCard key={file.public_id} file={file} onOpen={onOpenAttachment} />)}
+        {!p && !m.deleted && (
+          <div className={`${showActions ? 'mt-2 flex' : 'hidden'} items-center gap-0.5 whitespace-normal rounded-lg bg-black/10 p-0.5 md:absolute md:-top-4 ${right ? 'md:right-2' : 'md:left-2'} md:z-10 md:mt-0 md:flex md:border md:border-[color:var(--border)] md:bg-[var(--bg-2)] md:text-[color:var(--text-2)] md:opacity-0 md:shadow-[0_8px_20px_-12px_rgba(15,23,42,0.5)] md:transition-opacity md:duration-200 md:focus-within:opacity-100 md:group-hover:opacity-100`}>
+            <MessageAction icon="reply" title="Reply" onClick={() => onReply(m)} />
+            {canForward && <MessageAction icon="forward" title="Forward" onClick={() => onForward(m)} />}
+            <MessageAction icon="trash" title="Delete for me" text="For me" onClick={() => onDelete(m, 'for-me')} />
+            {mine && <MessageAction icon="trash" title="Delete for everyone" text="Everyone" danger onClick={() => onDelete(m, 'for-everyone')} />}
+          </div>
+        )}
       </div>
 
-      <div className="mt-0.5 flex items-center gap-2 px-1 text-[10px] tabular-nums text-[color:var(--text-3)]">
+      <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 px-1 text-[10px] tabular-nums text-[color:var(--text-3)]">
         {p?.status === 'sending' && <span>Sending…</span>}
         {p?.status === 'failed' && (
           <span role="alert" className="flex items-center gap-2 text-[color:var(--danger)]">
@@ -693,8 +889,9 @@ const MessageRow = memo(function MessageRow({ row, status, onRetry, onDiscard })
 
 function InboxRow({ row, active, meId, onOpen }) {
   const last = row.last_message;
+  const bodyPreview = last ? (last.body || (last.attachments?.length ? 'Attachment' : '')) : '';
   const preview = last
-    ? `${sameId(last.sender_id, meId) ? 'You: ' : !sameId(last.sender_id, row.member_id) ? 'Admin: ' : ''}${last.body}`
+    ? `${sameId(last.sender_id, meId) ? 'You: ' : !sameId(last.sender_id, row.member_id) ? 'Admin: ' : ''}${bodyPreview}`
     : 'No messages yet';
 
   return (
@@ -703,14 +900,16 @@ function InboxRow({ row, active, meId, onOpen }) {
         type="button"
         onClick={() => onOpen(row.member_id)}
         aria-current={active ? 'true' : undefined}
-        className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors duration-150 ${FOCUS_RING} ${
-          active ? 'bg-[var(--accent-light)]' : 'hover:bg-[var(--bg-3)]'
+        className={`relative flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition duration-200 active:scale-[0.99] ${FOCUS_RING} ${
+          active
+            ? 'bg-[var(--bg-3)] before:absolute before:bottom-3 before:left-0 before:top-3 before:w-[3px] before:rounded-full before:bg-[var(--accent)]'
+            : 'hover:bg-[var(--bg-3)]'
         }`}
       >
         <Avatar name={row.name} url={row.avatar_url} />
         <span className="min-w-0 flex-1">
           <span className="flex items-baseline justify-between gap-2">
-            <span className={`truncate text-[13px] ${row.unread ? 'font-semibold text-[color:var(--text)]' : 'font-medium text-[color:var(--text)]'}`}>
+            <span className={`truncate text-[13px] tracking-tight text-[color:var(--text)] ${row.unread ? 'font-semibold' : 'font-medium'}`}>
               {row.name}
             </span>
             {last && (
@@ -724,7 +923,7 @@ function InboxRow({ row, active, meId, onOpen }) {
               {preview}
             </span>
             {row.unread > 0 && (
-              <span className="flex h-5 min-w-[20px] shrink-0 items-center justify-center rounded-full bg-[var(--accent)] px-1.5 text-[11px] font-semibold tabular-nums text-white">
+              <span className="flex h-5 min-w-[20px] shrink-0 items-center justify-center rounded-md bg-[var(--accent)] px-1.5 text-[11px] font-semibold tabular-nums text-white">
                 <span aria-hidden="true">{row.unread > 99 ? '99+' : row.unread}</span>
                 <span className="sr-only">{row.unread} unread</span>
               </span>
@@ -822,24 +1021,24 @@ function ManagerInbox() {
   const back = useCallback(() => navigate('/messages'), [navigate]);
 
   return (
-    <div className="flex h-full min-h-0 bg-[var(--bg)] md:p-5 lg:p-6">
-      <div className="flex min-h-0 flex-1 overflow-hidden bg-[var(--bg-2)] md:rounded-2xl md:border md:border-[color:var(--border)]">
+    <div className="flex h-full min-h-0 bg-[var(--bg)] md:p-5 lg:p-8">
+      <div className="mx-auto flex min-h-0 w-full max-w-[1400px] flex-1 overflow-hidden bg-[var(--bg-2)] md:rounded-3xl md:border md:border-[color:var(--border)] md:shadow-[0_30px_70px_-35px_rgba(15,23,42,0.45)]">
         {/* Inbox */}
         <aside
-          className={`${memberId ? 'hidden md:flex' : 'flex'} w-full shrink-0 flex-col border-[color:var(--border)] md:w-[320px] md:border-r lg:w-[340px]`}
+          className={`${memberId ? 'hidden md:flex' : 'flex'} w-full shrink-0 flex-col border-[color:var(--border)] md:w-[330px] md:border-r lg:w-[360px]`}
           aria-label="Inbox"
         >
-          <div className="shrink-0 px-3 pb-2.5 pt-3">
+          <div className="shrink-0 px-4 pb-3 pt-4">
             <div className="flex items-baseline justify-between gap-2">
-              <h1 className="text-base font-semibold tracking-[-0.02em] text-[color:var(--text)]">Messages</h1>
+              <h1 className="text-[17px] font-semibold tracking-tight text-[color:var(--text)]">Messages</h1>
               {totalUnread > 0 && (
-                <span className="text-xs font-medium tabular-nums text-[color:var(--accent)]">{totalUnread} unread</span>
+                <span className="rounded-md bg-[var(--accent-light)] px-2 py-0.5 text-[11px] font-semibold tabular-nums text-[color:var(--accent)]">{totalUnread} unread</span>
               )}
             </div>
-            <p className="mt-0.5 text-[11px] text-[color:var(--text-3)]">Shared inbox. Every admin sees these.</p>
-            <label className="relative mt-2.5 block">
+            <p className="mt-0.5 text-xs text-[color:var(--text-3)]">Shared inbox. Every admin sees these.</p>
+            <label className="relative mt-3 block">
               <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[color:var(--text-3)]">
-                <Icon name="search" className="h-[15px] w-[15px]" />
+                <Icon name="search" className="h-4 w-4" />
               </span>
               <input
                 type="search"
@@ -847,7 +1046,7 @@ function ManagerInbox() {
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="Search members"
                 aria-label="Search members"
-                className="h-9 w-full rounded-lg border border-[color:var(--border)] bg-[var(--bg-3)] pl-9 pr-3 text-[16px] text-[color:var(--text)] outline-none transition-colors placeholder:text-[color:var(--text-3)] focus:border-[color:var(--accent)] sm:text-[13px]"
+                className="h-10 w-full rounded-xl border border-[color:var(--border)] bg-[var(--bg-3)] pl-9 pr-3 text-[16px] text-[color:var(--text)] outline-none transition duration-200 placeholder:text-[color:var(--text-3)] focus:border-[color:var(--accent)] focus:ring-4 focus:ring-[color:var(--accent-light)] sm:text-sm"
               />
             </label>
           </div>
@@ -857,7 +1056,7 @@ function ManagerInbox() {
               <ul className="m-0 list-none space-y-1 p-0" aria-hidden="true">
                 {[0, 1, 2, 3, 4].map((i) => (
                   <li key={i} className="flex items-center gap-3 px-3 py-2.5">
-                    <span className="h-9 w-9 animate-pulse rounded-full bg-[var(--bg-3)] motion-reduce:animate-none" />
+                    <span className="h-10 w-10 animate-pulse rounded-xl bg-[var(--bg-3)] motion-reduce:animate-none" />
                     <span className="flex-1 space-y-2">
                       <span className="block h-3 w-1/2 animate-pulse rounded bg-[var(--bg-3)] motion-reduce:animate-none" />
                       <span className="block h-2.5 w-3/4 animate-pulse rounded bg-[var(--bg-3)] motion-reduce:animate-none" />
@@ -893,7 +1092,7 @@ function ManagerInbox() {
         </aside>
 
         {/* Thread */}
-        <div className={`${memberId ? 'flex' : 'hidden md:flex'} min-w-0 flex-1 flex-col`}>
+        <div className={`${memberId ? 'flex' : 'hidden md:flex'} min-w-0 flex-1 flex-col bg-[var(--bg)]`}>
           {!memberId ? (
             <Notice icon="chat" title="Choose a member">
               Pick someone from the inbox to read and reply. Members can only message the admin team.
@@ -919,6 +1118,7 @@ function ManagerInbox() {
               }}
               onBack={back}
               onActivity={loadList}
+              forwardTargets={rows.filter((row) => row.conversation_id)}
             />
           )}
         </div>
@@ -951,8 +1151,8 @@ function MemberThread() {
   }, [load]);
 
   return (
-    <div className="flex h-full min-h-0 min-w-0 w-full bg-[var(--bg)] md:p-5 lg:p-6">
-      <div className="mx-auto flex min-h-0 min-w-0 w-full max-w-[920px] flex-1 overflow-hidden bg-[var(--bg-2)] md:rounded-2xl md:border md:border-[color:var(--border)]">
+    <div className="flex h-full min-h-0 min-w-0 w-full bg-[var(--bg)] md:p-5 lg:p-8">
+      <div className="mx-auto flex min-h-0 min-w-0 w-full max-w-[920px] flex-1 overflow-hidden bg-[var(--bg-2)] md:rounded-3xl md:border md:border-[color:var(--border)] md:shadow-[0_30px_70px_-35px_rgba(15,23,42,0.45)]">
         {error ? (
           <Notice title="We couldn't open your messages" action={<button type="button" onClick={load} className={BTN_NEUTRAL}>Try again</button>}>
             {error}
@@ -967,8 +1167,9 @@ function MemberThread() {
               title: 'Admin team',
               subtitle: 'Your messages go to every admin. Any of them can reply.',
               team: true,
-              action: <Link to="/messages/people" className="rounded-lg border border-[color:var(--border)] px-3 py-2 text-xs font-semibold text-[color:var(--text-2)] hover:bg-[var(--bg-3)]">Member chats</Link>,
+              action: <Link to="/messages/people" className={`inline-flex items-center rounded-xl border border-[color:var(--border)] px-3 py-2 text-xs font-semibold text-[color:var(--text-2)] transition duration-200 hover:bg-[var(--bg-3)] hover:text-[color:var(--text)] active:scale-[0.98] ${FOCUS_RING}`}>Member chats</Link>,
             }}
+            forwardTargets={[]}
           />
         )}
       </div>

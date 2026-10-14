@@ -1297,27 +1297,31 @@ function TaskGroup({ group, open, onToggle, onEdit, onDelete }) {
     <div>
       <div className={cx(ENTRY_ROW, open && 'bg-[color:color-mix(in_srgb,var(--accent)_4%,transparent)]')}>
         <div className="flex min-w-0 items-start gap-2 max-md:col-span-2">
-          <button
-            type="button"
-            onClick={() => onToggle(group.key)}
-            aria-expanded={open}
-            aria-controls={panelId}
-            aria-label={`${open ? 'Hide' : 'Show'} entries for ${group.title}`}
-            className={cx(
-              '-ml-1 mt-px flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md border-0 bg-transparent transition-colors hover:bg-[color:var(--bg-3)] max-[640px]:size-9',
-              FOCUS,
-            )}
-          >
-            <Chevron open={open} />
-          </button>
+          {count > 0 ? (
+            <button
+              type="button"
+              onClick={() => onToggle(group.key)}
+              aria-expanded={open}
+              aria-controls={panelId}
+              aria-label={`${open ? 'Hide' : 'Show'} entries for ${group.title}`}
+              className={cx(
+                '-ml-1 mt-px flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md border-0 bg-transparent transition-colors hover:bg-[color:var(--bg-3)] max-[640px]:size-9',
+                FOCUS,
+              )}
+            >
+              <Chevron open={open} />
+            </button>
+          ) : <span className="size-6 shrink-0" aria-hidden="true" />}
           <div className="min-w-0">
             <div>
               <TaskTitle item={group} className="font-semibold" />
             </div>
             <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[11.5px] tabular-nums text-[color:var(--text-3)]">
-              <span>
-                {count} entr{count !== 1 ? 'ies' : 'y'}
-              </span>
+              {group.is_unlogged ? (
+                <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10.5px] font-semibold text-amber-800">Not logged</span>
+              ) : (
+                <span>{count} entr{count !== 1 ? 'ies' : 'y'}</span>
+              )}
               {group.parent_title && (
                 <>
                   <Dot />
@@ -1366,7 +1370,7 @@ function TaskGroup({ group, open, onToggle, onEdit, onDelete }) {
   );
 }
 
-function ProjectDetailView({ projectId, from, to, onBack, onOpenMember }) {
+function ProjectDetailView({ projectId, from, to, onBack, onOpenMember, unloggedDoneTasks = [] }) {
   const { data, loading, error, refreshing, refreshSilently, retry } = useTimeLogData(
     `/time-log/projects/${projectId}`,
     from,
@@ -1381,6 +1385,10 @@ function ProjectDetailView({ projectId, from, to, onBack, onOpenMember }) {
 
   const entries = data?.entries || [];
   const project = data?.project;
+  const projectUnloggedTasks = useMemo(
+    () => unloggedDoneTasks.filter((task) => String(task.project_id) === String(projectId)),
+    [unloggedDoneTasks, projectId],
+  );
 
   const { groups, totals, perMember } = useMemo(() => {
     const pm = new Map();
@@ -1392,12 +1400,32 @@ function ProjectDetailView({ projectId, from, to, onBack, onOpenMember }) {
       row.tasks.add(taskKeyOf(e));
       pm.set(k, row);
     }
+    const taskGroups = groupByTask(entries);
+    const existingTaskIds = new Set(taskGroups.filter((group) => group.task_id != null).map((group) => String(group.task_id)));
+    for (const task of projectUnloggedTasks) {
+      if (existingTaskIds.has(String(task.id))) continue;
+      taskGroups.push({
+        key: `task:${task.id}`,
+        task_id: task.id,
+        project_id: task.project_id,
+        title: task.title || 'Untitled',
+        parent_title: task.parent_title || null,
+        cluster_name: task.cluster_name || null,
+        task_stage: 'Done',
+        entries: [],
+        total: 0,
+        last: null,
+        memberNames: [],
+        is_unlogged: true,
+      });
+    }
+    taskGroups.sort((a, b) => Number(Boolean(b.is_unlogged)) - Number(Boolean(a.is_unlogged)) || String(b.last || '').localeCompare(String(a.last || '')) || b.total - a.total);
     return {
-      groups: groupByTask(entries),
+      groups: taskGroups,
       totals: sumEntries(entries),
       perMember: [...pm.values()].map((m) => ({ ...m, count: m.tasks.size })).sort((a, b) => b.minutes - a.minutes),
     };
-  }, [entries]);
+  }, [entries, projectUnloggedTasks]);
 
   const toggle = useCallback((key) => {
     setOpenKeys((prev) => {
@@ -1408,7 +1436,7 @@ function ProjectDetailView({ projectId, from, to, onBack, onOpenMember }) {
     });
   }, []);
 
-  const allKeys = useMemo(() => groups.map((g) => g.key), [groups]);
+  const allKeys = useMemo(() => groups.filter((g) => g.entries.length > 0).map((g) => g.key), [groups]);
   const allOpen = allKeys.length > 0 && allKeys.every((k) => openKeys.has(k));
   const toggleAll = () => setOpenKeys(allOpen ? new Set() : new Set(allKeys));
 
@@ -1472,13 +1500,13 @@ function ProjectDetailView({ projectId, from, to, onBack, onOpenMember }) {
         >
           Check your connection and try again.
         </EmptyState>
-      ) : entries.length === 0 ? (
+      ) : entries.length === 0 && projectUnloggedTasks.length === 0 ? (
         <EmptyState title="No time logged in this period">
           Pick a wider date range above, or check back once members log time on this project.
         </EmptyState>
       ) : (
         <>
-          <SummaryBand
+          {entries.length > 0 && <SummaryBand
             totalMinutes={totals.minutes}
             miscMinutes={totals.misc}
             entryCount={totals.entries}
@@ -1487,14 +1515,16 @@ function ProjectDetailView({ projectId, from, to, onBack, onOpenMember }) {
             countValue={perMember.length}
             segments={toSegments(perMember.map((m) => ({ id: String(m.id ?? 'none'), name: m.name, minutes: m.minutes })))}
             segmentsTitle="Time by member"
-          />
+          />}
 
-          <div className="grid items-start gap-6 2xl:grid-cols-[minmax(0,1fr)_340px]">
+          <div className={cx('grid items-start gap-6', perMember.length > 0 && '2xl:grid-cols-[minmax(0,1fr)_340px]')}>
             <section className={cx(SURFACE, 'tl-rise overflow-hidden [animation-delay:60ms]')} aria-label="Tasks">
               <SectionHead title="Tasks" count={groups.length}>
-                <button type="button" className={cx(QUIET_BTN, FOCUS, '!h-8')} onClick={toggleAll}>
-                  {allOpen ? 'Collapse all' : 'Show all entries'}
-                </button>
+                {allKeys.length > 0 && (
+                  <button type="button" className={cx(QUIET_BTN, FOCUS, '!h-8')} onClick={toggleAll}>
+                    {allOpen ? 'Collapse all' : 'Show all entries'}
+                  </button>
+                )}
               </SectionHead>
               <EntryHead first="Task" second="Members" third="Last logged" />
               <div className="divide-y divide-[color:var(--border)] border-t border-[color:var(--border)] md:border-t-0">
@@ -2234,30 +2264,6 @@ export default function TimeLog() {
         </div>
       </div>
 
-      {unloggedDoneTasks.length > 0 && (
-        <section
-          role="alert"
-          aria-labelledby="unlogged-done-heading"
-          className="mx-auto mb-5 w-full max-w-[1320px] rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-amber-950"
-        >
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <h2 id="unlogged-done-heading" className="m-0 text-sm font-semibold">
-              {unloggedDoneTasks.length} completed {unloggedDoneTasks.length === 1 ? 'task has' : 'tasks have'} no time log
-            </h2>
-            <span className="rounded-full bg-amber-200 px-2.5 py-1 text-xs font-bold">Not logged</span>
-          </div>
-          <ul className="mt-2 max-h-52 divide-y divide-amber-200 overflow-y-auto p-0 text-sm">
-            {unloggedDoneTasks.map((task) => (
-              <li key={task.id} className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 py-2">
-                <span className="min-w-0 flex-1 font-medium">{task.title}</span>
-                <span className="text-xs text-amber-800">{task.project_name}</span>
-                <span className="text-xs font-semibold">Not logged</span>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
-
       <div className="page-body mx-auto w-full max-w-[1320px]">
         {/* Controls */}
         <div className="mb-6 flex flex-col gap-4">
@@ -2344,6 +2350,7 @@ export default function TimeLog() {
             to={to}
             onBack={backToList}
             onOpenMember={openMember}
+            unloggedDoneTasks={unloggedDoneTasks}
           />
         ) : memberId ? (
           <MemberDetailView
