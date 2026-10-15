@@ -19,7 +19,7 @@ function Icon({ name, className = 'h-4 w-4' }) {
 export function ChatAttachmentCard({ file, onOpen }) {
   const image = ['image/jpeg', 'image/png', 'image/webp', 'image/svg+xml'].includes(file?.mime_type) || (!file?.mime_type && ['jpg', 'jpeg', 'png', 'webp', 'svg'].includes(file?.format));
   const pdf = file?.mime_type === 'application/pdf' || file?.format === 'pdf';
-  const name = file?.original_filename || (image ? 'Chat image' : 'PDF file');
+  const name = file?.original_filename || (image ? 'Chat image' : pdf ? 'PDF file' : 'Attachment');
   return (
     <div className="mt-2 w-[min(68vw,248px)] overflow-hidden rounded-xl border border-black/10 bg-black/10">
       <button
@@ -87,7 +87,7 @@ export function ChatMediaPreview({ file, onClose }) {
   if (!file) return null;
   const image = ['image/jpeg', 'image/png', 'image/webp', 'image/svg+xml'].includes(file.mime_type) || (!file.mime_type && ['jpg', 'jpeg', 'png', 'webp', 'svg'].includes(file.format));
   const pdf = file.mime_type === 'application/pdf' || (!file.mime_type && file.format === 'pdf');
-  const name = file.original_filename || (image ? 'Chat image' : 'PDF file');
+  const name = file.original_filename || (image ? 'Chat image' : pdf ? 'PDF file' : 'Attachment');
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 p-3 backdrop-blur-sm sm:p-6" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
       <section role="dialog" aria-modal="true" aria-label={`Preview ${name}`} className="flex max-h-[92dvh] w-full max-w-5xl flex-col overflow-hidden rounded-3xl border border-[color:var(--border)] bg-[var(--bg-2)] shadow-[0_40px_90px_-30px_rgba(0,0,0,0.7)]">
@@ -116,7 +116,7 @@ export function ChatMediaPreview({ file, onClose }) {
             ? <img src={file.secure_url} alt={name} className="max-h-[calc(92dvh-90px)] max-w-full rounded-lg object-contain" />
             : pdf
               ? <iframe title={name} src={file.secure_url} className="h-[78dvh] w-full max-w-4xl rounded-xl bg-white" />
-              : <div className="flex max-w-sm flex-col items-center gap-3 rounded-2xl bg-[var(--bg-2)] p-8 text-center text-[color:var(--text)]"><Icon name="file" className="h-12 w-12 text-[color:var(--accent)]" /><h2 className="break-all font-semibold">{name}</h2><p className="text-sm text-[color:var(--text-3)]">This design file needs a compatible app to open. Download it to view or edit.</p></div>}
+              : <div className="flex max-w-sm flex-col items-center gap-3 rounded-2xl bg-[var(--bg-2)] p-8 text-center text-[color:var(--text)]"><Icon name="file" className="h-12 w-12 text-[color:var(--accent)]" /><h2 className="break-all font-semibold">{name}</h2><p className="text-sm text-[color:var(--text-3)]">This file needs a compatible app to open. Download it to view or edit.</p></div>}
         </div>
       </section>
     </div>

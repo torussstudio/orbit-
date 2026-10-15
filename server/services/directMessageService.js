@@ -8,10 +8,12 @@ const { createNotification } = require('../utils/pushNotify');
 const MAX_BODY = 4000;
 const MAX_ATTACHMENTS = 3;
 const IMAGE_LIMIT = 10 * 1024 * 1024;
-const PDF_LIMIT = 50 * 1024 * 1024;
-const DESIGN_FILE_LIMIT = 50 * 1024 * 1024;
+const PDF_LIMIT = 100 * 1024 * 1024;
+const DESIGN_FILE_LIMIT = 100 * 1024 * 1024;
 const RAW_EXTENSIONS = {
   'application/pdf': 'pdf',
+  'application/zip': 'zip',
+  'application/x-zip-compressed': 'zip',
   'application/vnd.adobe.illustrator': 'ai',
   'image/vnd.adobe.illustrator': 'ai',
   'application/postscript': 'ai',
@@ -45,18 +47,22 @@ function filePolicy(mime, size) {
     return { resourceType: 'image', preset: process.env.CLOUDINARY_CHAT_IMAGE_PRESET };
   }
   if (mime === 'application/pdf') {
-    if (!Number.isInteger(size) || size < 1 || size > PDF_LIMIT) throw fail(400, 'PDF files must be 50 MB or smaller.');
+    if (!Number.isInteger(size) || size < 1 || size > PDF_LIMIT) throw fail(400, 'PDF files must be 100 MB or smaller.');
     return { resourceType: 'raw', preset: process.env.CLOUDINARY_CHAT_PDF_PRESET };
   }
+  if (mime === 'application/zip' || mime === 'application/x-zip-compressed') {
+    if (!Number.isInteger(size) || size < 1 || size > DESIGN_FILE_LIMIT) throw fail(400, 'ZIP files must be 100 MB or smaller.');
+    return { resourceType: 'raw', preset: null };
+  }
   if (RAW_EXTENSIONS[mime] && RAW_EXTENSIONS[mime] !== 'pdf') {
-    if (!Number.isInteger(size) || size < 1 || size > DESIGN_FILE_LIMIT) throw fail(400, 'AI and PSD files must be 50 MB or smaller.');
+    if (!Number.isInteger(size) || size < 1 || size > DESIGN_FILE_LIMIT) throw fail(400, 'AI and PSD files must be 100 MB or smaller.');
     return { resourceType: 'image', preset: null };
   }
   if (mime === 'image/svg+xml') {
-    if (!Number.isInteger(size) || size < 1 || size > DESIGN_FILE_LIMIT) throw fail(400, 'SVG files must be 50 MB or smaller.');
+    if (!Number.isInteger(size) || size < 1 || size > DESIGN_FILE_LIMIT) throw fail(400, 'SVG files must be 100 MB or smaller.');
     return { resourceType: 'image', preset: null };
   }
-  throw fail(400, 'Attach JPG, PNG, WebP, SVG, AI, PSD, or PDF files.');
+  throw fail(400, 'Attach JPG, PNG, WebP, SVG, AI, PSD, PDF, or ZIP files.');
 }
 
 async function signUpload(user, { mime_type: mime, size }) {
@@ -231,14 +237,14 @@ function validateAttachment(item, intent) {
   const policy = filePolicy(intent.mime_type, Number(intent.file_size));
   const cloud = process.env.CLOUDINARY_CLOUD_NAME;
   const expectedResource = intent.resource_type;
-  const format = String(item.format || (intent.mime_type === 'application/pdf' && expectedResource === 'raw' ? 'pdf' : '')).toLowerCase();
+  const format = String(item.format || (expectedResource === 'raw' ? RAW_EXTENSIONS[intent.mime_type] : '') || '').toLowerCase();
   let url;
   try { url = new URL(item.secure_url); } catch { throw fail(400, 'Invalid Cloudinary file URL.'); }
   if (url.protocol !== 'https:' || url.hostname !== `res.cloudinary.com` ||
       !url.pathname.startsWith(`/${cloud}/${expectedResource}/upload/`) ||
       item.resource_type !== expectedResource || item.public_id !== intent.public_id ||
       !Number.isInteger(Number(item.bytes)) || Number(item.bytes) !== Number(intent.file_size) ||
-      !['jpg', 'jpeg', 'png', 'webp', 'svg', 'pdf', 'ai', 'psd'].includes(format) ||
+      !['jpg', 'jpeg', 'png', 'webp', 'svg', 'pdf', 'ai', 'psd', 'zip'].includes(format) ||
       (expectedResource !== policy.resourceType)) {
     throw fail(400, 'The uploaded file could not be verified. Please try again.');
   }

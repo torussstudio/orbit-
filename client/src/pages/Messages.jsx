@@ -25,15 +25,16 @@ import { ChatAttachmentCard, ChatMediaPreview, PendingChatAttachment } from '../
 
 const MAX_LEN = 4000; // same as the server and the DB check
 const IMAGE_LIMIT = 10 * 1024 * 1024;
-const PDF_LIMIT = 50 * 1024 * 1024;
-const DESIGN_FILE_LIMIT = 50 * 1024 * 1024;
+const PDF_LIMIT = 100 * 1024 * 1024;
+const DESIGN_FILE_LIMIT = 100 * 1024 * 1024;
 const MAX_ATTACHMENTS = 3;
+const ZIP_MIMES = ['application/zip', 'application/x-zip-compressed'];
 const DESIGN_MIMES = ['image/svg+xml', 'application/vnd.adobe.illustrator', 'image/vnd.adobe.illustrator', 'application/postscript', 'image/vnd.adobe.photoshop', 'application/vnd.adobe.photoshop'];
 const fileMime = (file) => {
   const mime = String(file?.type || '').toLowerCase();
   const ext = String(file?.name || '').split('.').pop().toLowerCase();
-  if (['image/jpeg', 'image/png', 'image/webp', 'image/svg+xml', 'application/pdf', ...DESIGN_MIMES].includes(mime)) return mime;
-  return ({ jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', pdf: 'application/pdf', svg: 'image/svg+xml', ai: 'application/vnd.adobe.illustrator', psd: 'image/vnd.adobe.photoshop' })[ext] || mime;
+  if (['image/jpeg', 'image/png', 'image/webp', 'image/svg+xml', 'application/pdf', ...ZIP_MIMES, ...DESIGN_MIMES].includes(mime)) return mime;
+  return ({ jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', pdf: 'application/pdf', zip: 'application/zip', svg: 'image/svg+xml', ai: 'application/vnd.adobe.illustrator', psd: 'image/vnd.adobe.photoshop' })[ext] || mime;
 };
 const hasDraggedFiles = (event) => Array.from(event.dataTransfer?.types || []).includes('Files');
 const WARN_LEN = 3600; // counter appears from here
@@ -424,9 +425,10 @@ function Thread({ conversationId, memberId, header, onBack, onActivity, forwardT
       const mime = fileMime(file);
       const image = ['image/jpeg', 'image/png', 'image/webp'].includes(mime);
       const designFile = DESIGN_MIMES.includes(mime);
-      if (!image && !designFile && mime !== 'image/svg+xml' && mime !== 'application/pdf') { validationError = 'Attach JPG, PNG, WebP, SVG, AI, PSD, or PDF files.'; continue; }
+      const zip = ZIP_MIMES.includes(mime);
+      if (!image && !designFile && mime !== 'image/svg+xml' && mime !== 'application/pdf' && !zip) { validationError = 'Attach JPG, PNG, WebP, SVG, AI, PSD, PDF, or ZIP files.'; continue; }
       const limit = image ? IMAGE_LIMIT : mime === 'application/pdf' ? PDF_LIMIT : DESIGN_FILE_LIMIT;
-      if (file.size > limit) { validationError = `${image ? 'Images' : mime === 'application/pdf' ? 'PDF files' : 'SVG, AI, and PSD files'} must be ${limit / (1024 * 1024)} MB or smaller.`; continue; }
+      if (file.size > limit) { validationError = `${image ? 'Images' : zip ? 'ZIP files' : mime === 'application/pdf' ? 'PDF files' : 'SVG, AI, and PSD files'} must be ${limit / (1024 * 1024)} MB or smaller.`; continue; }
       if (!next.some((item) => item.name === file.name && item.size === file.size)) next.push(file);
     }
     setFiles(next);
@@ -758,7 +760,7 @@ function Thread({ conversationId, memberId, header, onBack, onActivity, forwardT
             }}
             className="flex min-w-0 items-end gap-1 rounded-2xl border border-[color:var(--border)] bg-[var(--bg-3)] p-1.5 transition duration-200 focus-within:border-[color:var(--accent)] focus-within:ring-4 focus-within:ring-[color:var(--accent-light)]"
           >
-            <input ref={fileInputRef} type="file" multiple accept="image/jpeg,image/png,image/webp,image/svg+xml,application/pdf,.ai,.psd,.svg" onChange={(e) => { addFiles(e.target.files); e.target.value = ''; }} className="hidden" />
+            <input ref={fileInputRef} type="file" multiple accept="image/jpeg,image/png,image/webp,image/svg+xml,application/pdf,application/zip,.ai,.psd,.svg,.zip" onChange={(e) => { addFiles(e.target.files); e.target.value = ''; }} className="hidden" />
             {files.length > 0 && (
               <div className="absolute inset-x-3 bottom-full mb-2 flex flex-wrap gap-1.5 rounded-xl border border-[color:var(--border)] bg-[var(--bg-2)] p-2 shadow-[0_18px_40px_-24px_rgba(15,23,42,0.5)] sm:inset-x-5">
                 {files.map((file, index) => (
@@ -772,8 +774,8 @@ function Thread({ conversationId, memberId, header, onBack, onActivity, forwardT
             )}
             <button
               type="button"
-              title="Attach image or PDF"
-              aria-label="Attach image or PDF"
+              title="Attach a file"
+              aria-label="Attach a file"
               onClick={() => fileInputRef.current?.click()}
               disabled={files.length >= MAX_ATTACHMENTS || uploading}
               className={`grid h-9 w-9 shrink-0 place-items-center rounded-xl text-[color:var(--text-2)] transition duration-200 hover:bg-[var(--bg-2)] hover:text-[color:var(--text)] active:scale-95 disabled:opacity-40 ${FOCUS_RING}`}
@@ -807,7 +809,7 @@ function Thread({ conversationId, memberId, header, onBack, onActivity, forwardT
         )}
         {!readOnly && (
           <div className="mt-1.5 flex items-center justify-between gap-3 px-1 text-[11px] text-[color:var(--text-3)]">
-            <span className="truncate text-[10px]"><span className="sm:hidden">Images 10 MB · files 50 MB</span><span className="hidden sm:inline">Images 10 MB · PDFs, SVG, AI and PSD 50 MB · Enter to send · Shift + Enter for a new line</span></span>
+            <span className="truncate text-[10px]"><span className="sm:hidden">Images 10 MB · files 100 MB</span><span className="hidden sm:inline">Images 10 MB · PDFs, SVG, AI, PSD and ZIP up to 100 MB · Enter to send · Shift + Enter for a new line</span></span>
             {draft.length >= WARN_LEN && (
               <span className={`ml-auto tabular-nums ${remaining <= 0 ? 'text-[color:var(--danger)]' : ''}`}>
                 {remaining} characters left
@@ -819,7 +821,7 @@ function Thread({ conversationId, memberId, header, onBack, onActivity, forwardT
 
       {dragging && (
         <div className="pointer-events-none absolute inset-3 z-20 grid place-items-center rounded-2xl border-2 border-dashed border-[color:var(--accent)] bg-[var(--bg-2)]" aria-hidden="true">
-          <div className="flex items-center gap-2 rounded-xl bg-[var(--accent-light)] px-5 py-3 text-sm font-semibold text-[color:var(--accent)]"><Icon name="clip" className="h-4 w-4" />Drop images or PDFs to attach</div>
+          <div className="flex items-center gap-2 rounded-xl bg-[var(--accent-light)] px-5 py-3 text-sm font-semibold text-[color:var(--accent)]"><Icon name="clip" className="h-4 w-4" />Drop files to attach</div>
         </div>
       )}
 

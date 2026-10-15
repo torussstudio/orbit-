@@ -6,12 +6,13 @@ import { useLiveRefetch, DIRECT_MESSAGE_EVENTS } from '../hooks/useLiveEvents';
 import { ChatAttachmentCard, ChatMediaPreview, PendingChatAttachment } from '../components/messages/ChatMediaPreview';
 
 const IMAGE_LIMIT = 10 * 1024 * 1024;
-const PDF_LIMIT = 50 * 1024 * 1024;
-const DESIGN_FILE_LIMIT = 50 * 1024 * 1024;
+const PDF_LIMIT = 100 * 1024 * 1024;
+const DESIGN_FILE_LIMIT = 100 * 1024 * 1024;
 const MAX_ATTACHMENTS = 3;
 const IMAGE_MIMES = ['image/jpeg', 'image/png', 'image/webp'];
 const DESIGN_MIMES = ['image/svg+xml', 'application/vnd.adobe.illustrator', 'image/vnd.adobe.illustrator', 'application/postscript', 'image/vnd.adobe.photoshop', 'application/vnd.adobe.photoshop'];
-const MIME_BY_EXTENSION = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', pdf: 'application/pdf', svg: 'image/svg+xml', ai: 'application/vnd.adobe.illustrator', psd: 'image/vnd.adobe.photoshop' };
+const ZIP_MIMES = ['application/zip', 'application/x-zip-compressed'];
+const MIME_BY_EXTENSION = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', pdf: 'application/pdf', zip: 'application/zip', svg: 'image/svg+xml', ai: 'application/vnd.adobe.illustrator', psd: 'image/vnd.adobe.photoshop' };
 const VERIFIED_NAMES = ['mohamed asharaf', 'abhenav', 'abhinav', 'hari', 'kishor', 'subin','rahul','sanesh'];
 const isVerifiedName = (name) => {
   const normalized = String(name || '').trim().toLowerCase().replace(/\s+/g, ' ');
@@ -30,7 +31,7 @@ function VerifiedBadge({ className = 'h-4 w-4' }) {
 const fileMime = (file) => {
   const mime = String(file?.type || '').toLowerCase();
   const extension = String(file?.name || '').split('.').pop().toLowerCase();
-  if (IMAGE_MIMES.includes(mime) || mime === 'application/pdf' || DESIGN_MIMES.includes(mime)) return mime;
+  if (IMAGE_MIMES.includes(mime) || mime === 'application/pdf' || ZIP_MIMES.includes(mime) || DESIGN_MIMES.includes(mime)) return mime;
   return MIME_BY_EXTENSION[extension] || mime;
 };
 const hasDraggedFiles = (event) => Array.from(event.dataTransfer?.types || []).includes('Files');
@@ -312,9 +313,10 @@ export default function DirectMessages() {
         const mime = fileMime(file);
         const image = IMAGE_MIMES.includes(mime) || mime === 'image/svg+xml';
         const designFile = DESIGN_MIMES.includes(mime);
-        if (!image && !designFile && mime !== 'application/pdf') { setError('Attach JPG, PNG, WebP, SVG, AI, PSD, or PDF files.'); continue; }
+        const zip = ZIP_MIMES.includes(mime);
+        if (!image && !designFile && mime !== 'application/pdf' && !zip) { setError('Attach JPG, PNG, WebP, SVG, AI, PSD, PDF, or ZIP files.'); continue; }
         const limit = image && mime !== 'image/svg+xml' ? IMAGE_LIMIT : mime === 'application/pdf' ? PDF_LIMIT : DESIGN_FILE_LIMIT;
-        if (file.size > limit) { setError(`${image && mime !== 'image/svg+xml' ? 'Images' : mime === 'application/pdf' ? 'PDF files' : 'SVG, AI, and PSD files'} must be ${limit / (1024 * 1024)} MB or smaller.`); continue; }
+        if (file.size > limit) { setError(`${image && mime !== 'image/svg+xml' ? 'Images' : zip ? 'ZIP files' : mime === 'application/pdf' ? 'PDF files' : 'SVG, AI, and PSD files'} must be ${limit / (1024 * 1024)} MB or smaller.`); continue; }
         if (!next.some((item) => item.name === file.name && item.size === file.size)) next.push(file);
       }
       return next;
@@ -630,9 +632,9 @@ export default function DirectMessages() {
                   </div>
                 </div>
               )}
-                <input ref={fileInput} type="file" multiple accept="image/jpeg,image/png,image/webp,image/svg+xml,application/pdf,.ai,.psd,.svg" onChange={chooseFiles} className="hidden" />
+                <input ref={fileInput} type="file" multiple accept="image/jpeg,image/png,image/webp,image/svg+xml,application/pdf,application/zip,.ai,.psd,.svg,.zip" onChange={chooseFiles} className="hidden" />
               <div className="flex items-end gap-1 rounded-2xl border border-[color:var(--border)] bg-[var(--bg-3)] p-1.5 transition duration-200 focus-within:border-[color:var(--accent)] focus-within:ring-4 focus-within:ring-[color:var(--accent-light)]">
-                <button type="button" title="Attach image or PDF" aria-label="Attach image or PDF" onClick={() => fileInput.current?.click()} disabled={sending || files.length >= MAX_ATTACHMENTS} className={`grid h-9 w-9 shrink-0 place-items-center rounded-xl text-[color:var(--text-2)] transition duration-200 hover:bg-[var(--bg-2)] hover:text-[color:var(--text)] active:scale-95 disabled:opacity-40 ${focusRing}`}><Icon name="clip" className="h-[18px] w-[18px]" /></button>
+                <button type="button" title="Attach a file" aria-label="Attach a file" onClick={() => fileInput.current?.click()} disabled={sending || files.length >= MAX_ATTACHMENTS} className={`grid h-9 w-9 shrink-0 place-items-center rounded-xl text-[color:var(--text-2)] transition duration-200 hover:bg-[var(--bg-2)] hover:text-[color:var(--text)] active:scale-95 disabled:opacity-40 ${focusRing}`}><Icon name="clip" className="h-[18px] w-[18px]" /></button>
                 <button type="button" title="Add emoji" aria-label="Add emoji" aria-pressed={emojiOpen} onClick={() => setEmojiOpen((v) => !v)} className={`grid h-9 w-9 shrink-0 place-items-center rounded-xl transition duration-200 hover:bg-[var(--bg-2)] active:scale-95 ${focusRing} ${emojiOpen ? 'bg-[var(--bg-2)] text-[color:var(--accent)]' : 'text-[color:var(--text-2)]'}`}><Icon name="smile" className="h-[18px] w-[18px]" /></button>
                 <textarea
                   ref={input}
@@ -647,12 +649,12 @@ export default function DirectMessages() {
                 />
                 <button type="submit" disabled={sending || (!draft.trim() && !files.length)} aria-label={sending ? 'Sending' : 'Send message'} className={`grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-[var(--accent)] text-white shadow-[0_8px_18px_-8px_var(--accent)] transition duration-200 hover:brightness-110 active:scale-95 disabled:opacity-40 disabled:shadow-none ${focusRing} ${sending ? 'animate-pulse' : ''}`}><Icon name="send" className="h-[18px] w-[18px]" /></button>
               </div>
-              <p className="mt-1.5 truncate pl-1 text-[10px] text-[color:var(--text-3)]"><span className="sm:hidden">Images 10 MB · files 50 MB</span><span className="hidden sm:inline">Images up to 10 MB · PDFs, SVG, AI and PSD up to 50 MB · drag files here</span></p>
+              <p className="mt-1.5 truncate pl-1 text-[10px] text-[color:var(--text-3)]"><span className="sm:hidden">Images 10 MB · files 100 MB</span><span className="hidden sm:inline">Images up to 10 MB · PDFs, SVG, AI, PSD and ZIP up to 100 MB · drag files here</span></p>
             </form>
 
             {dragging && (
               <div className="pointer-events-none absolute inset-3 z-20 grid place-items-center rounded-2xl border-2 border-dashed border-[color:var(--accent)] bg-[var(--bg-2)]" aria-hidden="true">
-                <div className="flex items-center gap-2 rounded-xl bg-[var(--accent-light)] px-5 py-3 text-sm font-semibold text-[color:var(--accent)]"><Icon name="clip" className="h-4 w-4" />Drop images or PDFs to attach</div>
+                <div className="flex items-center gap-2 rounded-xl bg-[var(--accent-light)] px-5 py-3 text-sm font-semibold text-[color:var(--accent)]"><Icon name="clip" className="h-4 w-4" />Drop files to attach</div>
               </div>
             )}
           </>}
