@@ -285,7 +285,7 @@ const INBOX_ICON = (
   </svg>
 );
 
-const TaskRow = memo(function TaskRow({ task: t, locked, onStageSelect }) {
+const TaskRow = memo(function TaskRow({ task: t, locked, onStageSelect, canLogTime }) {
   const done = t.stage === "Done";
   const overdue = !done && isOverdue(t.due_date);
   const due = t.due_date ? dueChip(t.due_date, overdue, done) : null;
@@ -355,6 +355,24 @@ const TaskRow = memo(function TaskRow({ task: t, locked, onStageSelect }) {
             <span className="truncate">{t.project_name}</span>
           </span>
           {t.cluster_name && <span className="truncate">{t.cluster_name}</span>}
+          {Number(t.my_logged_minutes) > 0 && (
+            <span className="relative z-[2] inline-flex items-center rounded-full bg-[color:var(--accent-glow)] px-2 py-0.5 text-[10px] font-semibold text-[color:var(--accent)]">
+              Logged
+            </span>
+          )}
+          {canLogTime && (
+            <Link
+              to={`/time-log?project_id=${encodeURIComponent(t.project_id)}&task_id=${encodeURIComponent(t.id)}`}
+              aria-label={`Log time for ${t.title}`}
+              className={`relative z-[2] inline-flex min-h-7 items-center gap-1 rounded-full border border-[color:var(--border)] bg-[color:var(--bg-2)] px-2.5 py-1 text-[10px] font-semibold text-[color:var(--text-2)] no-underline transition-colors hover:border-[color:var(--accent)] hover:text-[color:var(--accent)] ${FOCUS}`}
+            >
+              <svg aria-hidden="true" className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="9" />
+                <path d="M12 7v5l3 2" />
+              </svg>
+              Log time
+            </Link>
+          )}
           {due && (
             <>
               {t.cluster_name && (
@@ -673,6 +691,7 @@ export default function TaskView() {
                       key={t.id}
                       task={t}
                       locked={t.stage === "Done" && !isManager}
+                      canLogTime={!isManager && !["Done", "In Review"].includes(t.stage)}
                       onStageSelect={handleStageSelect}
                     />
                   ))}

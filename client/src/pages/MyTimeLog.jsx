@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import api from '../api/client';
 import { useLiveRefetch, TASK_AND_PROJECT_EVENTS } from '../hooks/useLiveEvents';
 import Select from '../components/ui/Select';
@@ -89,6 +90,9 @@ const sameId = (a, b) => a !== null && a !== undefined && a !== '' && String(a) 
 const EMPTY_WORK = { cluster_id: '', task_id: '', task_name: '', hours: '', mins: '' };
 
 export default function MyTimeLog() {
+  const [searchParams] = useSearchParams();
+  const requestedProjectId = searchParams.get('project_id') || '';
+  const requestedTaskId = searchParams.get('task_id') || '';
   const uid = useId();
   const ids = {
     misc: `${uid}-misc`,
@@ -119,6 +123,7 @@ export default function MyTimeLog() {
 
   const taskNameRef = useRef(null);
   const hoursRef = useRef(null);
+  const preselectionHandled = useRef(false);
 
   const hasOptions = useRef(false);
   const load = useCallback(async () => {
@@ -142,6 +147,33 @@ export default function MyTimeLog() {
 
   const projects = options?.projects || [];
   const today = options?.today || istToday();
+
+  // Task-view shortcuts pass the project and task in the URL. Apply them only
+  // after the member's eligible options have loaded, then put focus on time.
+  useEffect(() => {
+    if (!options || preselectionHandled.current) return;
+    preselectionHandled.current = true;
+
+    const selectedTask = requestedTaskId
+      ? (options.tasks || []).find((task) => sameId(task.id, requestedTaskId))
+      : null;
+
+    if (selectedTask) {
+      setIsMisc(false);
+      setProjectId(String(selectedTask.project_id));
+      setWork({
+        ...EMPTY_WORK,
+        cluster_id: selectedTask.cluster_id == null ? '' : String(selectedTask.cluster_id),
+        task_id: String(selectedTask.id),
+      });
+      window.requestAnimationFrame(() => hoursRef.current?.focus());
+      return;
+    }
+
+    if (requestedProjectId && projects.some((project) => sameId(project.id, requestedProjectId))) {
+      setProjectId(String(requestedProjectId));
+    }
+  }, [options, projects, requestedProjectId, requestedTaskId]);
 
   // Lists for the selected project only.
   const projectTasks = useMemo(
