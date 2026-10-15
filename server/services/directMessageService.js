@@ -101,7 +101,7 @@ async function activePeer(user, peerId) {
   requireMember(user);
   if (peerId == null || sameId(peerId, user.id)) throw fail(400, 'Choose another member to chat with.');
   const { rows } = await db.query(
-    `SELECT id, name, avatar_url FROM members WHERE id = $1 AND role = 'member' AND active = true`,
+    `SELECT id, name, avatar_url, bio FROM members WHERE id = $1 AND role = 'member' AND active = true`,
     [peerId],
   );
   if (!rows[0]) throw fail(404, 'Member not found.');
@@ -127,7 +127,7 @@ async function listMembers(user, search = '') {
   requireMember(user);
   const q = String(search || '').trim().slice(0, 80);
   const { rows } = await db.query(
-    `SELECT id, name, avatar_url FROM members
+    `SELECT id, name, avatar_url, bio FROM members
       WHERE role = 'member' AND active = true AND id <> $1
         AND ($2 = '' OR name ILIKE $3 OR email ILIKE $3)
       ORDER BY name ASC LIMIT 50`,
@@ -139,7 +139,7 @@ async function listMembers(user, search = '') {
 async function listConversations(user) {
   requireMember(user);
   const { rows } = await db.query(
-    `SELECT c.id, c.last_message_at, p.id AS peer_id, p.name AS peer_name, p.avatar_url AS peer_avatar_url,
+    `SELECT c.id, c.last_message_at, p.id AS peer_id, p.name AS peer_name, p.avatar_url AS peer_avatar_url, p.bio AS peer_bio,
             lm.body AS last_body, lm.created_at AS last_created_at,
             lm.sender_id AS last_sender_id,
             COALESCE(unread.count, 0)::int AS unread
@@ -163,7 +163,7 @@ async function listConversations(user) {
   );
   return rows.map((row) => ({
     id: row.id,
-    peer: { id: row.peer_id, name: row.peer_name, avatar_url: row.peer_avatar_url },
+    peer: { id: row.peer_id, name: row.peer_name, avatar_url: row.peer_avatar_url, bio: row.peer_bio },
     last_message_at: row.last_message_at,
     last_message: row.last_created_at ? { body: row.last_body, sender_id: row.last_sender_id, created_at: row.last_created_at } : null,
     unread: row.unread,
@@ -174,7 +174,7 @@ async function accessible(user, conversationId) {
   requireMember(user);
   const { rows } = await db.query(
     `SELECT c.id, c.member_one_id, c.member_two_id, c.last_message_at,
-            p.id AS peer_id, p.name AS peer_name, p.avatar_url AS peer_avatar_url, p.active AS peer_active
+            p.id AS peer_id, p.name AS peer_name, p.avatar_url AS peer_avatar_url, p.bio AS peer_bio, p.active AS peer_active
        FROM direct_conversations c
        JOIN members p ON p.id = CASE WHEN c.member_one_id = $2 THEN c.member_two_id ELSE c.member_one_id END
       WHERE c.id = $1 AND (c.member_one_id = $2 OR c.member_two_id = $2)`,
@@ -219,7 +219,7 @@ async function listMessages(user, conversationId, { before, after, limit } = {})
     [conversation.id, conversation.peer_id],
   );
   return {
-    conversation: { id: conversation.id, peer: { id: conversation.peer_id, name: conversation.peer_name, avatar_url: conversation.peer_avatar_url, active: conversation.peer_active } },
+    conversation: { id: conversation.id, peer: { id: conversation.peer_id, name: conversation.peer_name, avatar_url: conversation.peer_avatar_url, bio: conversation.peer_bio, active: conversation.peer_active } },
     messages: order === 'DESC' ? page.reverse() : page,
     has_more: rows.length > size,
     other_read_at: read.rows[0]?.last_read_at || null,

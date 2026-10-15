@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import api from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { useLiveRefetch, DIRECT_MESSAGE_EVENTS } from '../hooks/useLiveEvents';
-import { ChatAttachmentCard, ChatMediaPreview } from '../components/messages/ChatMediaPreview';
+import { ChatAttachmentCard, ChatMediaPreview, PendingChatAttachment } from '../components/messages/ChatMediaPreview';
 
 const IMAGE_LIMIT = 10 * 1024 * 1024;
 const PDF_LIMIT = 50 * 1024 * 1024;
@@ -162,6 +162,7 @@ export default function DirectMessages() {
   const [search, setSearch] = useState('');
   const [selected, setSelected] = useState(null);
   const [messages, setMessages] = useState([]);
+  const [pendingUploads, setPendingUploads] = useState([]);
   const [draft, setDraft] = useState('');
   const [files, setFiles] = useState([]);
   const [error, setError] = useState('');
@@ -177,6 +178,7 @@ export default function DirectMessages() {
   const [previewAttachment, setPreviewAttachment] = useState(null);
   const [activeMessageId, setActiveMessageId] = useState(null);
   const [deleteMenuId, setDeleteMenuId] = useState(null);
+  const [deleteConfirmation, setDeleteConfirmation] = useState(null);
   const tail = useRef(null);
   const messageScroll = useRef(null);
   const messageContent = useRef(null);
@@ -373,24 +375,37 @@ export default function DirectMessages() {
   const send = async (event) => {
     event.preventDefault();
     if (sending || (!draft.trim() && !files.length) || !conversationId) return;
+    const body = draft.trim();
+    const outgoingFiles = [...files];
+    const pendingId = `pending-${Date.now()}`;
     setSending(true);
     setError('');
+    setPendingUploads((old) => [...old, { id: pendingId, conversationId, body, files: outgoingFiles, created_at: new Date().toISOString() }]);
+    setDraft('');
+    setFiles([]);
     try {
       const attachments = [];
-      for (const file of files) attachments.push(await upload(file));
-      const { data } = await api.post(`/messages/direct/conversations/${conversationId}/messages`, { body: draft, attachments, reply_to_message_id: replyTo?.id || null });
+      for (const file of outgoingFiles) attachments.push(await upload(file));
+      const { data } = await api.post(`/messages/direct/conversations/${conversationId}/messages`, { body, attachments, reply_to_message_id: replyTo?.id || null });
+      setPendingUploads((old) => old.filter((item) => item.id !== pendingId));
       setMessages((old) => [...old, data.message]);
-      setDraft('');
-      setFiles([]);
       setReplyTo(null);
       await loadConversations();
       input.current?.focus();
-    } catch (e) { setError(errorText(e) === 'Something went wrong. Please try again.' ? e.message : errorText(e)); }
+    } catch (e) {
+      setPendingUploads((old) => old.filter((item) => item.id !== pendingId));
+      setFiles((old) => old.length ? old : outgoingFiles);
+      setDraft((old) => old || body);
+      setError(errorText(e) === 'Something went wrong. Please try again.' ? e.message : errorText(e));
+    }
     finally { setSending(false); }
   };
 
-  const deleteMessage = async (message, mode) => {
-    if (mode === 'for-everyone' && !window.confirm('Delete this message for everyone?')) return;
+  const deleteMessage = async (message, mode, confirmed = false) => {
+    if (mode === 'for-everyone' && !confirmed) {
+      setDeleteConfirmation(message);
+      return;
+    }
     try {
       await api.delete(`/messages/direct/conversations/${conversationId}/messages/${message.id}`, { data: { mode } });
       if (mode === 'for-me') setMessages((old) => old.filter((item) => !same(item.id, message.id)));
@@ -558,6 +573,15 @@ export default function DirectMessages() {
                     </div>
                   );
                 })}
+                {pendingUploads.filter((pending) => same(pending.conversationId, conversationId)).map((pending) => (
+                  <div key={pending.id} className="mb-3 flex justify-end">
+                    <div className="max-w-[88%] rounded-2xl rounded-br-md bg-[var(--accent)] px-3.5 py-2.5 text-white opacity-90 sm:max-w-[68%]">
+                      {pending.body && <p className="whitespace-pre-wrap break-words text-[13.5px] leading-relaxed">{pending.body}</p>}
+                      {pending.files.map((file, index) => <PendingChatAttachment key={`${pending.id}-${index}`} file={file} />)}
+                      <p className="mt-1 text-right text-[10px] text-white/70">Sending…</p>
+                    </div>
+                  </div>
+                ))}
                 <div ref={tail} />
               </div>
             </div>
@@ -649,8 +673,23 @@ export default function DirectMessages() {
             <div className="p-6">
               <h2 className="flex items-center gap-2 text-xl font-semibold tracking-tight text-[color:var(--text)]">{peer.name || 'Member'}{isVerifiedName(peer.name) && <VerifiedBadge className="h-5 w-5" />}</h2>
               <p className="mt-1 text-sm text-[color:var(--text-3)]">Member · Orbit</p>
-              <p className="mt-4 flex items-start gap-2 rounded-xl bg-[var(--bg-3)] px-3.5 py-3 text-xs leading-relaxed text-[color:var(--text-2)]"><Icon name="lock" className="mt-0.5 h-3.5 w-3.5" />Private chat between you and {peer.name || 'this member'}.</p>
+              <p className="mt-4 text-[11px] font-semibold uppercase tracking-wide text-[color:var(--text-3)]">About</p>
+              <p className="mt-1 whitespace-pre-wrap break-words rounded-xl bg-[var(--bg-3)] px-3.5 py-3 text-sm leading-relaxed text-[color:var(--text-2)]">{peer.bio?.trim() || 'No description added yet.'}</p>
+              <p className="mt-3 flex items-start gap-2 text-xs leading-relaxed text-[color:var(--text-3)]"><Icon name="lock" className="mt-0.5 h-3.5 w-3.5 shrink-0" />Private chat between you and {peer.name || 'this member'}.</p>
               <button type="button" onClick={() => setProfileOpen(false)} className={`mt-5 w-full rounded-xl bg-[var(--accent)] px-4 py-2.5 text-sm font-semibold text-white shadow-[0_10px_22px_-10px_var(--accent)] transition duration-200 hover:brightness-110 active:scale-[0.98] ${focusRing}`}>Back to chat</button>
+            </div>
+          </section>
+        </div>
+      )}
+
+      {deleteConfirmation && (
+        <div className="fixed inset-0 z-[110] grid place-items-center bg-black/55 p-4 backdrop-blur-sm" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setDeleteConfirmation(null); }}>
+          <section role="alertdialog" aria-modal="true" aria-labelledby="delete-message-title" aria-describedby="delete-message-description" className="w-full max-w-sm rounded-2xl border border-[color:var(--border)] bg-[var(--bg-2)] p-5 shadow-[0_30px_80px_-24px_rgba(0,0,0,0.55)]">
+            <h2 id="delete-message-title" className="text-base font-semibold text-[color:var(--text)]">Delete for everyone?</h2>
+            <p id="delete-message-description" className="mt-2 text-sm leading-relaxed text-[color:var(--text-2)]">This message will be removed for everyone in this chat.</p>
+            <div className="mt-5 flex justify-end gap-2">
+              <button type="button" onClick={() => setDeleteConfirmation(null)} className={`rounded-xl border border-[color:var(--border)] px-4 py-2 text-sm font-medium text-[color:var(--text-2)] hover:bg-[var(--bg-3)] ${focusRing}`}>Cancel</button>
+              <button type="button" onClick={() => { const message = deleteConfirmation; setDeleteConfirmation(null); deleteMessage(message, 'for-everyone', true); }} className={`rounded-xl bg-[var(--danger)] px-4 py-2 text-sm font-semibold text-white transition hover:brightness-110 active:scale-[0.98] ${focusRing}`}>Delete for everyone</button>
             </div>
           </section>
         </div>

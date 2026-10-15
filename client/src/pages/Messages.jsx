@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import api from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { useLiveRefetch, MESSAGE_EVENTS } from '../hooks/useLiveEvents';
-import { ChatAttachmentCard, ChatMediaPreview } from '../components/messages/ChatMediaPreview';
+import { ChatAttachmentCard, ChatMediaPreview, PendingChatAttachment } from '../components/messages/ChatMediaPreview';
 
 /*
  * Messages: members <-> admin team (shared inbox).
@@ -246,6 +246,7 @@ function Thread({ conversationId, memberId, header, onBack, onActivity, forwardT
   const [forwardTarget, setForwardTarget] = useState('');
   const [previewAttachment, setPreviewAttachment] = useState(null);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [deleteConfirmation, setDeleteConfirmation] = useState(null);
 
   const scrollRef = useRef(null);
   const textareaRef = useRef(null);
@@ -484,8 +485,11 @@ function Thread({ conversationId, memberId, header, onBack, onActivity, forwardT
     }
   }, [conversationId, draft, files, onActivity, readOnly, replyTo, uploadFile, uploading]);
 
-  const deleteMessage = useCallback(async (message, mode) => {
-    if (!window.confirm(mode === 'for-everyone' ? 'Delete this message for everyone?' : 'Delete this message for you?')) return;
+  const deleteMessage = useCallback(async (message, mode, confirmed = false) => {
+    if (mode === 'for-everyone' && !confirmed) {
+      setDeleteConfirmation(message);
+      return;
+    }
     try {
       await api.delete(`/messages/conversations/${conversationId}/messages/${message.id}`, { data: { mode } });
       if (mode === 'for-me') setMessages((old) => old.filter((item) => !sameId(item.id, message.id)));
@@ -836,8 +840,23 @@ function Thread({ conversationId, memberId, header, onBack, onActivity, forwardT
                 {headerVerified && <VerifiedBadge className="h-5 w-5" />}
               </h2>
               <p className="mt-1 text-sm text-[color:var(--text-3)]">Member · Orbit</p>
-              {header.subtitle && <p className="mt-4 rounded-xl bg-[var(--bg-3)] px-3.5 py-3 text-xs leading-relaxed text-[color:var(--text-2)]">{header.subtitle}</p>}
+              {header.subtitle && <p className="mt-3 text-sm text-[color:var(--text-3)]">{header.subtitle}</p>}
+              <p className="mt-4 text-[11px] font-semibold uppercase tracking-wide text-[color:var(--text-3)]">About</p>
+              <p className="mt-1 whitespace-pre-wrap break-words rounded-xl bg-[var(--bg-3)] px-3.5 py-3 text-sm leading-relaxed text-[color:var(--text-2)]">{header.bio?.trim() || 'No description added yet.'}</p>
               <button type="button" onClick={() => setProfileOpen(false)} className={`mt-5 w-full rounded-xl bg-[var(--accent)] px-4 py-2.5 text-sm font-semibold text-white shadow-[0_10px_22px_-10px_var(--accent)] transition duration-200 hover:brightness-110 active:scale-[0.98] ${FOCUS_RING}`}>Back to chat</button>
+            </div>
+          </section>
+        </div>
+      )}
+
+      {deleteConfirmation && (
+        <div className="fixed inset-0 z-[110] grid place-items-center bg-black/55 p-4 backdrop-blur-sm" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setDeleteConfirmation(null); }}>
+          <section role="alertdialog" aria-modal="true" aria-labelledby="thread-delete-title" aria-describedby="thread-delete-description" className="w-full max-w-sm rounded-2xl border border-[color:var(--border)] bg-[var(--bg-2)] p-5 shadow-[0_30px_80px_-24px_rgba(0,0,0,0.55)]">
+            <h2 id="thread-delete-title" className="text-base font-semibold text-[color:var(--text)]">Delete for everyone?</h2>
+            <p id="thread-delete-description" className="mt-2 text-sm leading-relaxed text-[color:var(--text-2)]">This message will be removed for everyone in this chat.</p>
+            <div className="mt-5 flex justify-end gap-2">
+              <button type="button" onClick={() => setDeleteConfirmation(null)} className={`rounded-xl border border-[color:var(--border)] px-4 py-2 text-sm font-medium text-[color:var(--text-2)] hover:bg-[var(--bg-3)] ${FOCUS_RING}`}>Cancel</button>
+              <button type="button" onClick={() => { const message = deleteConfirmation; setDeleteConfirmation(null); deleteMessage(message, 'for-everyone', true); }} className={`rounded-xl bg-[var(--danger)] px-4 py-2 text-sm font-semibold text-white transition hover:brightness-110 active:scale-[0.98] ${FOCUS_RING}`}>Delete for everyone</button>
             </div>
           </section>
         </div>
@@ -881,6 +900,7 @@ const MessageRow = memo(function MessageRow({ row, status, onRetry, onDiscard, o
         )}
         {m.deleted ? <span className="italic opacity-70">This message was deleted</span> : <Linkified text={m.body || ''} />}
         {!m.deleted && m.attachments?.map((file) => <ChatAttachmentCard key={file.public_id} file={file} onOpen={onOpenAttachment} />)}
+        {p?.status === 'sending' && p.files?.map((file, index) => <PendingChatAttachment key={`${p.tempId}-${index}`} file={file} />)}
         {!p && !m.deleted && (
           <div className={`${showActions ? 'mt-2 flex' : 'hidden'} items-center gap-0.5 whitespace-normal rounded-lg bg-black/10 p-0.5 md:absolute md:-top-4 ${right ? 'md:right-2' : 'md:left-2'} md:z-10 md:mt-0 md:flex md:border md:border-[color:var(--border)] md:bg-[var(--bg-2)] md:text-[color:var(--text-2)] md:opacity-0 md:shadow-[0_8px_20px_-12px_rgba(15,23,42,0.5)] md:transition-opacity md:duration-200 md:focus-within:opacity-100 md:group-hover:opacity-100`}>
             <MessageAction icon="reply" title="Reply" onClick={() => onReply(m)} />
@@ -1151,6 +1171,7 @@ function ManagerInbox() {
                 subtitle: selected?.email || '',
                 avatarName: selected?.name,
                 avatarUrl: selected?.avatar_url,
+                bio: selected?.bio || '',
               }}
               onBack={back}
               onActivity={loadList}

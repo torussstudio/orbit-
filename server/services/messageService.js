@@ -162,7 +162,7 @@ async function otherSideReadAt(conversation, user) {
 // read yet (replies from other managers never count as unread).
 const listConversations = async (user) => {
   const { rows } = await db.query(
-    `SELECT m.id AS member_id, m.name, m.email, m.avatar_url,
+    `SELECT m.id AS member_id, m.name, m.email, m.avatar_url, m.bio,
             c.id AS conversation_id, c.last_message_at,
             lm.body AS last_body, lm.attachments AS last_attachments, lm.sender_id AS last_sender_id,
             lm.created_at AS last_created_at,
@@ -196,6 +196,7 @@ const listConversations = async (user) => {
     name: row.name,
     email: row.email,
     avatar_url: row.avatar_url,
+    bio: row.bio,
     conversation_id: row.conversation_id,
     last_message_at: row.last_message_at,
     last_message: row.last_created_at

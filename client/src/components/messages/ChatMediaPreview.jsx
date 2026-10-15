@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 export const attachmentDownloadUrl = (url) => String(url || '').replace('/upload/', '/upload/fl_attachment/');
 
@@ -48,6 +48,27 @@ export function ChatAttachmentCard({ file, onOpen }) {
         <Icon name="download" className="h-3.5 w-3.5" />
         <span className="truncate">Download · {name}</span>
       </a>
+    </div>
+  );
+}
+
+export function PendingChatAttachment({ file }) {
+  const [src, setSrc] = useState('');
+  useEffect(() => {
+    if (!file || !String(file.type || '').startsWith('image/')) return undefined;
+    const objectUrl = URL.createObjectURL(file);
+    setSrc(objectUrl);
+    return () => URL.revokeObjectURL(objectUrl);
+  }, [file]);
+  const image = String(file?.type || '').startsWith('image/');
+  return (
+    <div className="relative mt-2 aspect-[4/3] w-[min(68vw,248px)] overflow-hidden rounded-xl border border-black/10 bg-black/15" aria-label={`Sending ${file?.name || 'attachment'}`}>
+      {image && src
+        ? <img src={src} alt="" className="h-full w-full object-cover opacity-60" />
+        : <span className="flex h-full w-full flex-col items-center justify-center gap-2 px-3 text-center text-current opacity-70"><Icon name="file" className="h-10 w-10" /><span className="line-clamp-2 max-w-full break-all text-xs font-medium">{file?.name || 'Attachment'}</span></span>}
+      <span className="absolute inset-0 grid place-items-center bg-black/25" role="status" aria-label="Uploading">
+        <span className="h-10 w-10 animate-spin rounded-full border-[3px] border-white/40 border-t-white shadow-lg motion-reduce:animate-none" />
+      </span>
     </div>
   );
 }
