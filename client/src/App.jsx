@@ -28,6 +28,7 @@ const TimeLog = lazy(() => import('./pages/TimeLog'));
 const MyTimeLog = lazy(() => import('./pages/MyTimeLog'));
 const Messages = lazy(() => import('./pages/Messages'));
 const DirectMessages = lazy(() => import('./pages/DirectMessages'));
+const InviteAcceptance = lazy(() => import('./pages/InviteAcceptance'));
 
 const SuspenseFallback = () => (
   <Loader label="Loading page" size="lg" variant="page" />
@@ -40,6 +41,7 @@ export default function App() {
       <ToastProvider>
       <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
         <Routes>
+          <Route path="/invite/:token" element={<Suspense fallback={<SuspenseFallback />}><InviteAcceptance /></Suspense>} />
           <Route path="/login" element={<Suspense fallback={<SuspenseFallback />}><Login /></Suspense>} />
           <Route path="/" element={<RequireAuth><Layout /></RequireAuth>}>
             <Route index element={<Suspense fallback={<SuspenseFallback />}><Dashboard /></Suspense>} />

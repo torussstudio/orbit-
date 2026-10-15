@@ -585,7 +585,7 @@ function MenuButton({ onClick, icon, children, danger = false }) {
 /* ------------------------------------------------------------------ */
 
 export default function Layout() {
-  const { user, logout, isManager } = useAuth();
+  const { user, logout, isManager, updateUser } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const [confirmModal, setConfirmModal] = useState({ show: false, loading: false });
@@ -603,6 +603,8 @@ export default function Layout() {
   const [unreadMessages, setUnreadMessages] = useState(0);
   const [messagesSeen, setMessagesSeen] = useState(0);
   const [messagesReady, setMessagesReady] = useState(false);
+  const [welcomeBusy, setWelcomeBusy] = useState(false);
+  const [welcomeError, setWelcomeError] = useState("");
   const hasNewMessages = messagesReady && unreadMessages > messagesSeen;
   const totalNew = newRequests + newReviews + newAssigned + (hasNewMessages ? 1 : 0);
   const mainRef = useRef(null);
@@ -893,6 +895,20 @@ export default function Layout() {
       navigate('/login');
     } finally {
       setConfirmModal({ show: false, loading: false });
+    }
+  };
+
+  const finishWelcome = async () => {
+    if (welcomeBusy) return;
+    setWelcomeBusy(true);
+    setWelcomeError("");
+    try {
+      await api.post('/members/onboarding/complete');
+      updateUser({ onboarding_pending: false });
+    } catch (err) {
+      setWelcomeError(err.response?.data?.error || "Couldn't save this yet. Please try again.");
+    } finally {
+      setWelcomeBusy(false);
     }
   };
 
@@ -1234,6 +1250,24 @@ export default function Layout() {
         onCancel={() => setConfirmModal({ show: false, loading: false })}
         loading={confirmModal.loading}
       />
+
+      {user?.onboarding_pending && (
+        <div className="fixed inset-0 z-[2500] flex items-center justify-center bg-black/45 px-4 py-6" role="presentation">
+          <section role="dialog" aria-modal="true" aria-labelledby="orbit-welcome-title" className="w-full max-w-lg rounded-2xl border border-[var(--border)] bg-[var(--bg-2)] p-6 shadow-2xl sm:p-8">
+            <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-[var(--accent-light)] text-[var(--accent)]"><Icon d={ICONS.home} className="h-6 w-6" /></div>
+            <h2 id="orbit-welcome-title" className="m-0 text-xl font-semibold text-[var(--text)]">Welcome to Orbit, {user.name}</h2>
+            <p className="mt-2 text-sm text-[var(--text-2)]">Here are a few quick tips to get started:</p>
+            <ul className="mt-4 space-y-3 pl-5 text-sm leading-6 text-[var(--text-2)]">
+              <li>Open <strong>Task View</strong> to see the work assigned to you.</li>
+              <li>Keep task stages updated as your work progresses.</li>
+              <li>Submit a time log before moving a task to <strong>In Review</strong>.</li>
+              <li>Use <strong>Messages</strong> to contact your team and share files.</li>
+            </ul>
+            {welcomeError && <p role="alert" className="mt-4 text-sm text-[var(--danger)]">{welcomeError}</p>}
+            <button type="button" className="btn btn-primary mt-6 w-full" onClick={finishWelcome} disabled={welcomeBusy}>{welcomeBusy ? "Saving…" : "Get started"}</button>
+          </section>
+        </div>
+      )}
     </div>
   );
 }

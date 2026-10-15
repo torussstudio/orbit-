@@ -197,6 +197,29 @@ const initDB = async () => {
   await ensureColumn("members", "location VARCHAR(255)");
   await ensureColumn("members", "bio TEXT");
   await ensureColumn("members", "avatar_url TEXT");
+  await ensureColumn("members", "onboarding_pending BOOLEAN NOT NULL DEFAULT false");
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS member_invitations (
+      id ${idDefinition(memberIdType)},
+      name VARCHAR(255) NOT NULL,
+      email VARCHAR(255) NOT NULL,
+      password_hash VARCHAR(255) NOT NULL,
+      role VARCHAR(20) NOT NULL CHECK (role IN ('manager', 'member')),
+      birthday DATE,
+      skills TEXT[],
+      token_hash CHAR(64) UNIQUE NOT NULL,
+      status VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'accepted', 'approved', 'rejected', 'expired')),
+      created_by ${refType(memberIdType)} REFERENCES members(id) ON DELETE SET NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      expires_at TIMESTAMPTZ NOT NULL,
+      accepted_at TIMESTAMPTZ,
+      decided_at TIMESTAMPTZ,
+      decided_by ${refType(memberIdType)} REFERENCES members(id) ON DELETE SET NULL
+    )
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_member_invitations_status ON member_invitations(status, created_at DESC)`);
+  await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_member_invitations_open_email ON member_invitations(LOWER(email)) WHERE status IN ('pending','accepted')`);
 
   await pool.query(`
   CREATE TABLE IF NOT EXISTS refresh_tokens (

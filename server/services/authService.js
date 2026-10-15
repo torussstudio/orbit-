@@ -66,6 +66,7 @@ function publicUser(row) {
     bio: row.bio || null,
     birthday: row.birthday || null,
     avatar_url: row.avatar_url || null,
+    onboarding_pending: Boolean(row.onboarding_pending),
   };
 }
 
@@ -502,7 +503,8 @@ async function refreshSession({
         location,
         bio,
         birthday,
-        avatar_url
+        avatar_url,
+        onboarding_pending
       FROM members
       WHERE id = $1
       LIMIT 1
@@ -1019,7 +1021,8 @@ async function getProfile(
         location,
         bio,
         birthday,
-        avatar_url
+        avatar_url,
+        onboarding_pending
       FROM members
       WHERE id = $1
       LIMIT 1
@@ -1283,7 +1286,8 @@ async function updateProfile(
             bio,
             avatar_url,
             skills,
-            birthday
+            birthday,
+            onboarding_pending
         `,
         values,
       ));

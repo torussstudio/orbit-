@@ -124,6 +124,10 @@ async function readPrefs(userId, type) {
  *   instead, so the notification is never lost.
  */
 function decideDelivery(type, prefs, pushConfigured = vapidConfigured) {
+  // Invitation approvals are an account-access gate: every manager must see
+  // the in-app request even when they have paused optional notifications.
+  if (type === 'member_invitation') return IN_APP_ONLY;
+
   // Chat has its own inbox and unread badge. Never fall back to the project
   // bell, even when push is unavailable; the message remains in that inbox.
   if (type === 'message') {

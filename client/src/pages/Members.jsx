@@ -1012,8 +1012,9 @@ function MemberFormPanel({ editing, onClose, onSaved }) {
     setError("");
     try {
       if (editing) await api.put(`/members/${editing.id}`, payload);
+      else if (form.role === "manager") await api.post("/members/direct", payload);
       else await api.post("/members", payload);
-      await onSaved(editing ? "Member updated" : "Member added");
+      await onSaved(editing ? "Member updated" : form.role === "manager" ? "Manager added" : "Invitation sent");
     } catch (err) {
       setError(err.response?.data?.error || "We couldn't save this member. Please try again.");
       setSaving(false);
@@ -1091,6 +1092,7 @@ function MemberFormPanel({ editing, onClose, onSaved }) {
             </div>
             <FieldError id="mb-password-error">{fieldErrors.password}</FieldError>
           </div>
+            {!editing && form.role === "member" && <p className="mt-1.5 text-xs text-[color:var(--text-3)]">The password is not included in the invitation email. Share it with the member separately after approval.</p>}
 
           {error && (
             <div
@@ -1107,11 +1109,64 @@ function MemberFormPanel({ editing, onClose, onSaved }) {
             Cancel
           </button>
           <button type="submit" className="btn btn-primary" disabled={saving}>
-            {saving ? "Saving…" : "Save member"}
+            {saving ? (editing ? "Saving…" : form.role === "member" ? "Sending invitation…" : "Adding manager…") : (editing ? "Save member" : form.role === "member" ? "Send invitation" : "Add manager")}
           </button>
         </div>
       </form>
     </SlideOver>
+  );
+}
+
+function PendingInvitations() {
+  const [items, setItems] = useState([]);
+  const [error, setError] = useState("");
+  const [busyId, setBusyId] = useState(null);
+  const load = useCallback(async () => {
+    try {
+      const { data } = await api.get("/members/invitations/pending", { silent: true });
+      setItems(Array.isArray(data) ? data : []);
+      setError("");
+    } catch {
+      setError("We couldn't load member approval requests.");
+    }
+  }, []);
+  useEffect(() => {
+    load();
+    const timer = window.setInterval(load, 15000);
+    return () => window.clearInterval(timer);
+  }, [load]);
+  const decide = async (id, decision) => {
+    setBusyId(id);
+    setError("");
+    try {
+      await api.post(`/members/invitations/${id}/decision`, { decision });
+      await load();
+    } catch (err) {
+      setError(err.response?.data?.error || "We couldn't update this approval request.");
+    } finally {
+      setBusyId(null);
+    }
+  };
+  if (!items.length && !error) return null;
+  return (
+    <section className="card mb-5 !p-0" aria-labelledby="pending-invitations-heading">
+      <div className="flex items-center justify-between gap-3 border-b border-[var(--border)] px-4 py-3">
+        <h2 id="pending-invitations-heading" className="m-0 text-sm font-semibold text-[var(--text)]">Member approval requests</h2>
+        {items.length > 0 && <span className="rounded-full bg-[var(--accent-light)] px-2.5 py-1 text-xs font-semibold text-[var(--accent)]">{items.length}</span>}
+      </div>
+      {error && <p role="alert" className="m-0 px-4 py-3 text-sm text-[var(--danger)]">{error}</p>}
+      <ul className="m-0 list-none divide-y divide-[var(--border)] p-0">
+        {items.map((item) => (
+          <li key={item.id} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+            <div className="min-w-0"><div className="truncate text-sm font-semibold text-[var(--text)]">{item.name}</div><div className="truncate text-xs text-[var(--text-3)]">{item.email} · {item.role}</div></div>
+            <div className="flex gap-2">
+              <button type="button" className="btn btn-ghost btn-sm" disabled={busyId === item.id} onClick={() => decide(item.id, "reject")}>Reject</button>
+              <button type="button" className="btn btn-primary btn-sm" disabled={busyId === item.id} onClick={() => decide(item.id, "approve")}>{busyId === item.id ? "Saving…" : "Approve"}</button>
+            </div>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 
@@ -1648,6 +1703,7 @@ export default function Members() {
       </div>
 
       <div className="page-body" aria-busy={loading}>
+        {isManager && <PendingInvitations />}
         {notice && (
           <div
             role="alert"
