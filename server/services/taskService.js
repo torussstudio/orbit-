@@ -1158,13 +1158,19 @@ async function getInReviewTasks() {
        pt.title AS parent_task_title,
        p.id AS project_id,
        p.name AS project_name,
-       assignee_agg.assignee_name
+       assignee_agg.assignee_name,
+       COALESCE(time_totals.logged_minutes, 0)::int AS logged_minutes
      FROM tasks t
      LEFT JOIN tasks pt
        ON t.parent_task_id = pt.id
      INNER JOIN projects p
        ON t.project_id = p.id
      ${ASSIGNEE_JOIN}
+     LEFT JOIN LATERAL (
+       SELECT SUM(e.minutes) AS logged_minutes
+       FROM time_entries e
+       WHERE e.task_id = t.id
+     ) time_totals ON true
      WHERE t.stage = 'In Review'
      ORDER BY t.updated_at DESC
      LIMIT 100`,

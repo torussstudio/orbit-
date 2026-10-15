@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import api from '../api/client';
 import { useAuth } from '../context/AuthContext';
+import { useLiveRefetch, TIMELOG_EVENTS } from '../hooks/useLiveEvents';
 import Modal from '../components/ui/Modal';
 import DatePicker from '../components/ui/DatePicker';
 import Loader from '../components/ui/Loader';
@@ -69,16 +70,18 @@ const ICONS = {
 /* Helpers                                                             */
 /* ------------------------------------------------------------------ */
 
-function timeAgo(value) {
+function timeAgo(value, now = Date.now()) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return '';
-  const minutes = Math.round((Date.now() - date.getTime()) / 60000);
+  const minutes = Math.round((now - date.getTime()) / 60000);
   if (minutes < 1) return 'Just now';
   if (minutes < 60) return `${minutes} min ago`;
-  const hours = Math.round(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.round(hours / 24);
-  if (days < 7) return `${days}d ago`;
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  if (hours < 24) return remainingMinutes ? `${hours}h ${remainingMinutes}m ago` : `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  const remainingHours = hours % 24;
+  if (days < 7) return remainingHours ? `${days}d ${remainingHours}h ago` : `${days}d ago`;
   return date.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
@@ -147,14 +150,38 @@ function ReworkCell({ item }) {
 }
 
 function UpdatedCell({ item }) {
+  const updated = new Date(item.updated_at);
+  if (Number.isNaN(updated.getTime())) return <span className="text-xs text-[var(--text-3)]">—</span>;
   return (
     <time
       dateTime={item.updated_at}
-      title={new Date(item.updated_at).toLocaleString()}
-      className="whitespace-nowrap text-xs tabular-nums text-[var(--text-3)]"
+      title={updated.toLocaleString()}
+      className="flex min-w-[120px] flex-col whitespace-nowrap text-xs tabular-nums"
     >
-      {timeAgo(item.updated_at)}
+      <span className="text-[var(--text-2)]">{updated.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</span>
+      <LiveAge updatedAt={item.updated_at} />
     </time>
+  );
+}
+
+function LiveAge({ updatedAt }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 30000);
+    return () => clearInterval(timer);
+  }, []);
+  return <span className="mt-0.5 text-[10px] text-[var(--text-3)]">{timeAgo(updatedAt, now)}</span>;
+}
+
+function LoggedTimeCell({ item }) {
+  const minutes = Math.max(0, Number(item.logged_minutes) || 0);
+  if (!minutes) return <span className="text-xs text-[var(--text-3)]">—</span>;
+  const hours = Math.floor(minutes / 60);
+  const remainder = minutes % 60;
+  return (
+    <span className="whitespace-nowrap text-xs font-medium tabular-nums text-[var(--text-2)]" title={`${minutes} minutes logged`}>
+      {hours ? `${hours}h` : ''}{hours && remainder ? ' ' : ''}{remainder ? `${remainder}m` : ''}
+    </span>
   );
 }
 
@@ -250,6 +277,8 @@ export default function InReview() {
     if (!isManager) { navigate('/'); return; }
     load();
   }, [isManager, navigate]);
+
+  useLiveRefetch(TIMELOG_EVENTS, load, { enabled: isManager });
 
   // Drop a project filter whose items have all left the queue.
   const projects = [...new Set(subtasks.map((s) => s.project_name))];
@@ -413,7 +442,7 @@ export default function InReview() {
                     <table className="w-full border-collapse text-left">
                       <thead>
                         <tr className="border-b border-[var(--border)] bg-[var(--bg-3)]">
-                          {['Task', 'Assignee', 'Reworks', 'Updated'].map((label) => (
+                          {['Task', 'Assignee', 'Time logged', 'Reworks', 'Updated'].map((label) => (
                             <th key={label} scope="col" className="px-4 py-2.5 text-left text-xs font-medium normal-case tracking-normal text-[var(--text-3)]">
                               {label}
                             </th>
@@ -428,6 +457,7 @@ export default function InReview() {
                           <tr key={s.id} className="border-b border-[var(--border)] transition-colors duration-150 last:border-b-0 hover:bg-[var(--bg-3)] motion-reduce:transition-none">
                             <td className="max-w-[22rem] px-4 py-3.5 align-top"><TaskCell item={s} /></td>
                             <td className="px-4 py-3.5 align-top"><AssigneeCell item={s} /></td>
+                            <td className="px-4 py-3.5 align-top"><LoggedTimeCell item={s} /></td>
                             <td className="px-4 py-3.5 align-top"><ReworkCell item={s} /></td>
                             <td className="px-4 py-3.5 align-top"><UpdatedCell item={s} /></td>
                             <td className="px-4 py-3.5 align-top">
@@ -447,6 +477,7 @@ export default function InReview() {
                       <TaskCell item={s} />
                       <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2">
                         <AssigneeCell item={s} />
+                        <span className="inline-flex items-center gap-1.5 text-xs text-[var(--text-3)]"><span>Time logged</span><LoggedTimeCell item={s} /></span>
                         <ReworkCell item={s} />
                         <span className="ml-auto"><UpdatedCell item={s} /></span>
                       </div>
