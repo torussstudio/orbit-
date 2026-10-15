@@ -7,7 +7,9 @@ async function createRequest({ title, project_name, description, due_date, reque
   const { rows } = await pool.query(
     `insert into task_requests (title, project_name, description, due_date, requested_by)
      values ($1, $2, $3, $4, $5)
-     returning *`,
+     returning id, title, project_name, description,
+               to_char(due_date, 'YYYY-MM-DD') as due_date,
+               requested_by, created_at`,
     [title, project_name, description, due_date, requested_by]
   );
   return rows[0];
@@ -18,7 +20,10 @@ async function createRequest({ title, project_name, description, due_date, reque
 // the real number of requests.
 async function listRequests() {
   const { rows } = await pool.query(
-    `select tr.*, m.name as requested_by_name,
+    `select tr.id, tr.title, tr.project_name, tr.description,
+            to_char(tr.due_date, 'YYYY-MM-DD') as due_date,
+            tr.requested_by, tr.created_at,
+            m.name as requested_by_name,
             count(*) over() as ${TOTAL_COLUMN}
        from task_requests tr
        left join members m on m.id = tr.requested_by

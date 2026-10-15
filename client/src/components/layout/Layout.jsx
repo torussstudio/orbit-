@@ -1256,11 +1256,11 @@ export default function Layout() {
           <section role="dialog" aria-modal="true" aria-labelledby="orbit-welcome-title" className="w-full max-w-lg rounded-2xl border border-[var(--border)] bg-[var(--bg-2)] p-6 shadow-2xl sm:p-8">
             <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-[var(--accent-light)] text-[var(--accent)]"><Icon d={ICONS.home} className="h-6 w-6" /></div>
             <h2 id="orbit-welcome-title" className="m-0 text-xl font-semibold text-[var(--text)]">Welcome to Orbit, {user.name}</h2>
-            <p className="mt-2 text-sm text-[var(--text-2)]">Here are a few quick tips to get started:</p>
+            <p className="mt-2 text-sm text-[var(--text-2)]">Here are a few tips to help you get started:</p>
             <ul className="mt-4 space-y-3 pl-5 text-sm leading-6 text-[var(--text-2)]">
-              <li>Open <strong>Task View</strong> to see the work assigned to you.</li>
-              <li>Keep task stages updated as your work progresses.</li>
-              <li>Submit a time log before moving a task to <strong>In Review</strong>.</li>
+              <li>Open <strong>Task View</strong> to find the tasks assigned to you.</li>
+              <li>Update each task’s status as you make progress.</li>
+              <li>Log your time before moving a task to <strong>In Review</strong>.</li>
               <li>Use <strong>Messages</strong> to contact your team and share files.</li>
             </ul>
             {welcomeError && <p role="alert" className="mt-4 text-sm text-[var(--danger)]">{welcomeError}</p>}
