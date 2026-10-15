@@ -70,21 +70,6 @@ const ICONS = {
 /* Helpers                                                             */
 /* ------------------------------------------------------------------ */
 
-function timeAgo(value, now = Date.now()) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return '';
-  const minutes = Math.round((now - date.getTime()) / 60000);
-  if (minutes < 1) return 'Just now';
-  if (minutes < 60) return `${minutes} min ago`;
-  const hours = Math.floor(minutes / 60);
-  const remainingMinutes = minutes % 60;
-  if (hours < 24) return remainingMinutes ? `${hours}h ${remainingMinutes}m ago` : `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  const remainingHours = hours % 24;
-  if (days < 7) return remainingHours ? `${days}d ${remainingHours}h ago` : `${days}d ago`;
-  return date.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
-}
-
 const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
 const toISODate = (d = new Date()) => {
@@ -155,22 +140,11 @@ function UpdatedCell({ item }) {
   return (
     <time
       dateTime={item.updated_at}
-      title={updated.toLocaleString()}
-      className="flex min-w-[120px] flex-col whitespace-nowrap text-xs tabular-nums"
+      className="whitespace-nowrap text-xs tabular-nums text-[var(--text-2)]"
     >
-      <span className="text-[var(--text-2)]">{updated.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</span>
-      <LiveAge updatedAt={item.updated_at} />
+      {updated.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
     </time>
   );
-}
-
-function LiveAge({ updatedAt }) {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), 30000);
-    return () => clearInterval(timer);
-  }, []);
-  return <span className="mt-0.5 text-[10px] text-[var(--text-3)]">{timeAgo(updatedAt, now)}</span>;
 }
 
 function LoggedTimeCell({ item }) {
