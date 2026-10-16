@@ -83,6 +83,17 @@ function resolveRange(range, customFrom, customTo) {
   }
 }
 
+function resolveDueDateRange(range, from, to) {
+  if (range === 'all') return { from: null, to: null };
+  if (range === 'month' && from) {
+    const nextMonth = new Date(`${from}T00:00:00Z`);
+    nextMonth.setUTCMonth(nextMonth.getUTCMonth() + 1);
+    return { from, to: addDays(nextMonth.toISOString().slice(0, 10), -1) };
+  }
+  if (range === 'week' && from) return { from, to: addDays(from, 6) };
+  return { from, to };
+}
+
 // 750 -> { h: 12, m: 30 }
 const splitMinutes = (minutes) => {
   const total = Math.max(0, Math.round(Number(minutes) || 0));
@@ -925,7 +936,7 @@ function Dot() {
 /* -------------------------------------------------------------------------- */
 
 const ENTRY_ROW =
-  'grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-1 px-4 py-3 sm:px-5 md:grid-cols-[minmax(0,1fr)_9rem_5.5rem_5.5rem_4.25rem]';
+  'grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-1 px-4 py-3 sm:px-5 md:grid-cols-[minmax(0,1fr)_9rem_5.5rem_5.5rem_6rem]';
 
 function MiscChip() {
   return (
@@ -1061,6 +1072,85 @@ function SectionHead({ title, count, children }) {
 /* -------------------------------------------------------------------------- */
 /* Edit / delete entries (managers)                                           */
 /* -------------------------------------------------------------------------- */
+
+function LogUnloggedTaskModal({ task, onClose, onSaved }) {
+  const assignees = task.assignees || [];
+  const [memberId, setMemberId] = useState(String(assignees[0]?.id ?? ''));
+  const [workDate, setWorkDate] = useState(task.completed_on || istToday());
+  const [hours, setHours] = useState('0');
+  const [mins, setMins] = useState('');
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
+  const today = istToday();
+
+  const submit = async (event) => {
+    event.preventDefault();
+    if (saving) return;
+    const h = hours === '' ? 0 : Number(hours);
+    const m = mins === '' ? 0 : Number(mins);
+    if (!Number.isInteger(h) || !Number.isInteger(m) || h < 0 || m < 0 || m > 59) {
+      setError('Enter valid whole hours and minutes.');
+      return;
+    }
+    const minutes = h * 60 + m;
+    if (minutes < 1 || minutes > 24 * 60) {
+      setError('Enter a total time between 1 minute and 24 hours.');
+      return;
+    }
+    if (!memberId || !workDate) {
+      setError('Select an assigned member and a date.');
+      return;
+    }
+
+    setSaving(true);
+    setError('');
+    try {
+      await api.post(`/time-log/unlogged-done/${task.id}/entries`, { member_id: memberId, work_date: workDate, minutes });
+      onSaved();
+    } catch (err) {
+      setError(err?.response?.data?.error || "We couldn't save this task's time. Please try again.");
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal title="Log time for completed task" onClose={saving ? () => {} : onClose}>
+      <form onSubmit={submit} noValidate>
+        <p className="m-0 mb-4 text-[13px] leading-[1.55] text-[color:var(--text-2)]">
+          <strong className="text-[color:var(--text)]">{task.title}</strong>
+          <br />{task.project_name}
+        </p>
+        <div className="form-group">
+          <label className="form-label" htmlFor="tl-unlogged-member">Assigned member</label>
+          <select id="tl-unlogged-member" className="form-input" value={memberId} onChange={(event) => { setMemberId(event.target.value); setError(''); }}>
+            {assignees.map((assignee) => <option key={assignee.id} value={String(assignee.id)}>{assignee.name}</option>)}
+          </select>
+        </div>
+        <div className="form-group">
+          <span className="form-label">Date worked</span>
+          <DatePicker value={workDate} onChange={(value) => { setWorkDate(value); setError(''); }} maxDate={today} placeholder="dd-mm-yyyy" />
+        </div>
+        <div className="form-group">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="form-label" htmlFor="tl-unlogged-hours">Hours</label>
+              <input id="tl-unlogged-hours" className="form-input" type="number" inputMode="numeric" min="0" max="24" step="1" value={hours} onChange={(event) => { setHours(event.target.value); setError(''); }} />
+            </div>
+            <div>
+              <label className="form-label" htmlFor="tl-unlogged-mins">Minutes</label>
+              <input id="tl-unlogged-mins" className="form-input" type="number" inputMode="numeric" min="0" max="59" step="1" value={mins} onChange={(event) => { setMins(event.target.value); setError(''); }} />
+            </div>
+          </div>
+        </div>
+        {error && <div className="mb-3 text-xs text-[color:var(--danger)]" role="alert">{error}</div>}
+        <div className="modal-actions">
+          <button type="button" className="btn btn-ghost" onClick={onClose} disabled={saving}>Cancel</button>
+          <button type="submit" className="btn btn-primary" disabled={saving || !assignees.length}>{saving ? 'Saving…' : 'Save time'}</button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
 
 function EditEntryModal({ entry, onClose, onSaved }) {
   const total = minutesOf(entry);
@@ -1290,7 +1380,7 @@ function useEntryActions(refresh) {
 /* Project detail                                                             */
 /* -------------------------------------------------------------------------- */
 
-function TaskGroup({ group, open, onToggle, onEdit, onDelete }) {
+function TaskGroup({ group, open, onToggle, onEdit, onDelete, onLogTask }) {
   const panelId = `tl-group-${group.key.replace(/[^a-z0-9_-]/gi, '_')}`;
   const count = group.entries.length;
   return (
@@ -1348,7 +1438,11 @@ function TaskGroup({ group, open, onToggle, onEdit, onDelete }) {
         <div className="justify-self-end text-[14px]">
           <Duration minutes={group.total} className="font-semibold text-[color:var(--text)]" />
         </div>
-        <span />
+        {group.is_unlogged ? (
+          <button type="button" className={cx(QUIET_BTN, FOCUS, '!h-8 !px-2 !text-[11px]')} onClick={() => onLogTask(group)} disabled={!group.assignees?.length} title={group.assignees?.length ? 'Add time for this task' : 'This task has no active assignee'}>
+            Log time
+          </button>
+        ) : <span />}
       </div>
 
       {open && (
@@ -1370,7 +1464,7 @@ function TaskGroup({ group, open, onToggle, onEdit, onDelete }) {
   );
 }
 
-function ProjectDetailView({ projectId, from, to, onBack, onOpenMember, unloggedDoneTasks = [] }) {
+function ProjectDetailView({ projectId, from, to, onBack, onOpenMember, unloggedDoneTasks = [], onUnloggedSaved }) {
   const { data, loading, error, refreshing, refreshSilently, retry } = useTimeLogData(
     `/time-log/projects/${projectId}`,
     from,
@@ -1382,6 +1476,7 @@ function ProjectDetailView({ projectId, from, to, onBack, onOpenMember, unlogged
   const { onEdit, onDelete, modals, noticeBar } = useEntryActions(refreshSilently);
 
   const [openKeys, setOpenKeys] = useState(() => new Set());
+  const [loggingTask, setLoggingTask] = useState(null);
 
   const entries = data?.entries || [];
   const project = data?.project;
@@ -1415,7 +1510,8 @@ function ProjectDetailView({ projectId, from, to, onBack, onOpenMember, unlogged
         entries: [],
         total: 0,
         last: null,
-        memberNames: [],
+        memberNames: (task.assignees || []).map((assignee) => assignee.name),
+        assignees: task.assignees || [],
         is_unlogged: true,
       });
     }
@@ -1536,6 +1632,7 @@ function ProjectDetailView({ projectId, from, to, onBack, onOpenMember, unlogged
                     onToggle={toggle}
                     onEdit={onEdit}
                     onDelete={onDelete}
+                    onLogTask={setLoggingTask}
                   />
                 ))}
               </div>
@@ -1583,6 +1680,18 @@ function ProjectDetailView({ projectId, from, to, onBack, onOpenMember, unlogged
       )}
 
       {modals}
+      {loggingTask && (
+        <LogUnloggedTaskModal
+          key={loggingTask.id}
+          task={loggingTask}
+          onClose={() => setLoggingTask(null)}
+          onSaved={() => {
+            setLoggingTask(null);
+            refreshSilently();
+            onUnloggedSaved?.();
+          }}
+        />
+      )}
     </>
   );
 }
@@ -1885,11 +1994,34 @@ function ListError({ retry }) {
   );
 }
 
-function ProjectsList({ from, to, query, sort, onOpen, setExport }) {
+function ProjectsList({ from, to, query, sort, onOpen, setExport, unloggedDoneTasks = [] }) {
   const { data, loading, error, refreshing, refreshSilently, retry } = useTimeLogData('/time-log/projects', from, to);
   useLiveRefetch(TIMELOG_EVENTS, refreshSilently);
 
-  const all = data?.projects || [];
+  const all = useMemo(() => {
+    const projects = new Map((data?.projects || []).map((project) => [String(project.id), { ...project, unlogged_task_count: 0 }]));
+    for (const task of unloggedDoneTasks) {
+      const id = String(task.project_id);
+      const existing = projects.get(id);
+      if (existing) existing.unlogged_task_count += 1;
+      else {
+        projects.set(id, {
+          id: task.project_id,
+          name: task.project_name,
+          client_name: task.client_name,
+          status: task.project_status,
+          total_minutes: 0,
+          misc_minutes: 0,
+          entry_count: 0,
+          task_count: 0,
+          member_count: 0,
+          last_logged_on: null,
+          unlogged_task_count: 1,
+        });
+      }
+    }
+    return [...projects.values()];
+  }, [data?.projects, unloggedDoneTasks]);
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
     const list = q
@@ -1905,7 +2037,7 @@ function ProjectsList({ from, to, query, sort, onOpen, setExport }) {
           minutes: acc.minutes + p.total_minutes,
           misc: acc.misc + p.misc_minutes,
           entries: acc.entries + p.entry_count,
-          tasks: acc.tasks + p.task_count,
+          tasks: acc.tasks + p.task_count + p.unlogged_task_count,
         }),
         { minutes: 0, misc: 0, entries: 0, tasks: 0 },
       ),
@@ -1925,12 +2057,13 @@ function ProjectsList({ from, to, query, sort, onOpen, setExport }) {
         ? () =>
             downloadCsv(
               `time-log_projects_${fileSuffix(from, to)}.csv`,
-              ['Project', 'Client', 'Status', 'Tasks', 'Entries', 'Members', 'Minutes', 'Hours', 'Misc minutes', 'Last logged (IST)'],
+              ['Project', 'Client', 'Status', 'Tasks', 'Not logged tasks', 'Entries', 'Members', 'Minutes', 'Hours', 'Misc minutes', 'Last logged (IST)'],
               visible.map((p) => [
                 p.name,
                 p.client_name || '',
                 p.status || '',
-                p.task_count,
+                p.task_count + p.unlogged_task_count,
+                p.unlogged_task_count,
                 p.entry_count,
                 p.member_count,
                 p.total_minutes,
@@ -1996,8 +2129,9 @@ function ProjectsList({ from, to, query, sort, onOpen, setExport }) {
               meta={
                 <>
                   <span>
-                    {p.task_count} task{p.task_count !== 1 ? 's' : ''}
+                    {p.task_count + p.unlogged_task_count} task{p.task_count + p.unlogged_task_count !== 1 ? 's' : ''}
                   </span>
+                  {p.unlogged_task_count > 0 && <><Dot /><span className="font-medium text-[color:var(--warning)]">{p.unlogged_task_count} not logged</span></>}
                   <Dot />
                   <span>
                     {p.member_count} member{p.member_count !== 1 ? 's' : ''}
@@ -2157,23 +2291,6 @@ function MembersList({ from, to, query, sort, onOpen, setExport }) {
 
 export default function TimeLog() {
   const [params, setParams] = useSearchParams();
-  const [unloggedDoneTasks, setUnloggedDoneTasks] = useState([]);
-
-  const loadUnloggedDoneTasks = useCallback(async () => {
-    try {
-      const { data } = await api.get('/time-log/unlogged-done');
-      setUnloggedDoneTasks(data?.tasks || []);
-    } catch {
-      // Keep the time log page usable if the warning list cannot be refreshed.
-    }
-  }, []);
-
-  useEffect(() => {
-    loadUnloggedDoneTasks();
-  }, [loadUnloggedDoneTasks]);
-
-  useLiveRefetch(TIMELOG_EVENTS, loadUnloggedDoneTasks);
-
   const view = params.get('view') === 'members' ? 'members' : 'projects';
   const range = RANGES.some((r) => r.value === params.get('range')) ? params.get('range') : 'all';
   const customFrom = params.get('from') || '';
@@ -2187,6 +2304,24 @@ export default function TimeLog() {
     if (r.from && r.to && r.from > r.to) return { from: r.to, to: r.from };
     return r;
   }, [range, customFrom, customTo]);
+
+  const dueDateRange = useMemo(() => resolveDueDateRange(range, from, to), [range, from, to]);
+  const [unloggedDoneTasks, setUnloggedDoneTasks] = useState([]);
+
+  const loadUnloggedDoneTasks = useCallback(async () => {
+    try {
+      const { data } = await api.get('/time-log/unlogged-done', { params: dueDateRange });
+      setUnloggedDoneTasks(data?.tasks || []);
+    } catch {
+      // Keep the time log page usable if the warning list cannot be refreshed.
+    }
+  }, [dueDateRange]);
+
+  useEffect(() => {
+    loadUnloggedDoneTasks();
+  }, [loadUnloggedDoneTasks]);
+
+  useLiveRefetch(TIMELOG_EVENTS, loadUnloggedDoneTasks);
 
   const [query, setQuery] = useState('');
   const deferredQuery = useDeferredValue(query);
@@ -2351,6 +2486,7 @@ export default function TimeLog() {
             onBack={backToList}
             onOpenMember={openMember}
             unloggedDoneTasks={unloggedDoneTasks}
+            onUnloggedSaved={loadUnloggedDoneTasks}
           />
         ) : memberId ? (
           <MemberDetailView
@@ -2364,7 +2500,7 @@ export default function TimeLog() {
         ) : view === 'members' ? (
           <MembersList from={from} to={to} query={deferredQuery} sort={sort} onOpen={openMember} setExport={setExport} />
         ) : (
-          <ProjectsList from={from} to={to} query={deferredQuery} sort={sort} onOpen={openProject} setExport={setExport} />
+          <ProjectsList from={from} to={to} query={deferredQuery} sort={sort} onOpen={openProject} setExport={setExport} unloggedDoneTasks={unloggedDoneTasks} />
         )}
       </div>
     </>

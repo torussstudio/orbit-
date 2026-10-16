@@ -10,6 +10,7 @@ router.post("/entries", auth, timeLogController.createEntry);
 // Managers only. List/detail accept ?from=YYYY-MM-DD&to=YYYY-MM-DD (work dates).
 router.get("/projects", auth, managerOnly, timeLogController.getProjects);
 router.get("/unlogged-done", auth, managerOnly, timeLogController.getUnloggedDoneTasks);
+router.post("/unlogged-done/:taskId/entries", auth, managerOnly, timeLogController.addUnloggedTaskEntry);
 router.get("/projects/:id", auth, managerOnly, timeLogController.getProjectDetail);
 router.get("/members", auth, managerOnly, timeLogController.getMembers);
 router.get("/members/:id", auth, managerOnly, timeLogController.getMemberDetail);

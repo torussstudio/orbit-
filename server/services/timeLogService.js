@@ -268,17 +268,26 @@ async function getProjects({ from, to }) {
   return { projects: rows };
 }
 
-async function getUnloggedDoneTasks() {
+async function getUnloggedDoneTasks({ from, to } = {}) {
   const { rows } = await db.query(
     `
-      SELECT t.id, t.title, t.project_id, p.name AS project_name,
+      SELECT t.id, t.title, t.project_id, p.name AS project_name, p.client_name, p.status AS project_status,
              t.parent_task_id, pt.title AS parent_title,
-             COALESCE(c.name, pc.name) AS cluster_name
+             COALESCE(c.name, pc.name) AS cluster_name,
+             to_char(t.due_date, 'YYYY-MM-DD') AS due_date,
+             to_char((COALESCE(done_activity.completed_at, t.updated_at) AT TIME ZONE 'Asia/Kolkata')::date, 'YYYY-MM-DD') AS completed_on,
+             COALESCE(assignee_data.assignees, '[]'::json) AS assignees
       FROM tasks t
       JOIN projects p ON p.id = t.project_id
       LEFT JOIN tasks pt ON pt.id = t.parent_task_id
       LEFT JOIN clusters c ON c.id = t.cluster_id
       LEFT JOIN clusters pc ON pc.id = pt.cluster_id
+      LEFT JOIN LATERAL (
+        SELECT json_agg(json_build_object('id', m.id, 'name', m.name) ORDER BY lower(m.name)) AS assignees
+        FROM task_assignees ta
+        JOIN members m ON m.id = ta.member_id AND m.active = true
+        WHERE ta.task_id = t.id
+      ) assignee_data ON true
       LEFT JOIN LATERAL (
         SELECT MAX(a.created_at) AS completed_at
         FROM task_activity a
@@ -289,15 +298,64 @@ async function getUnloggedDoneTasks() {
         AND NOT EXISTS (
           SELECT 1 FROM time_entries e WHERE e.task_id = t.id
         )
-        AND COALESCE(done_activity.completed_at, t.updated_at)
-          >= (date_trunc('month', NOW() AT TIME ZONE 'Asia/Kolkata') AT TIME ZONE 'Asia/Kolkata')
-        AND COALESCE(done_activity.completed_at, t.updated_at)
-          < ((date_trunc('month', NOW() AT TIME ZONE 'Asia/Kolkata') + INTERVAL '1 month') AT TIME ZONE 'Asia/Kolkata')
+        AND (
+          ($1::date IS NULL AND $2::date IS NULL)
+          OR (t.due_date IS NOT NULL AND ($1::date IS NULL OR t.due_date >= $1::date) AND ($2::date IS NULL OR t.due_date <= $2::date))
+          OR (p.end_date IS NOT NULL AND ($1::date IS NULL OR p.end_date >= $1::date) AND ($2::date IS NULL OR p.end_date <= $2::date))
+        )
       ORDER BY lower(p.name), lower(t.title)
     `,
+    [from, to],
   );
 
   return { tasks: rows };
+}
+
+async function addUnloggedTaskEntry(taskId, body = {}) {
+  const memberId = body.member_id;
+  if (memberId === undefined || memberId === null || memberId === '') {
+    throw httpError(400, 'Select the member who worked on this task.');
+  }
+  const workDate = readWorkDate(body.work_date);
+  const minutes = readMinutes(body.minutes);
+  const { rows: found } = await db.query(
+    `
+      SELECT t.id, t.title, t.project_id,
+             coalesce(t.cluster_id, pt.cluster_id) AS cluster_id,
+             p.trashed_at, t.stage,
+             EXISTS (SELECT 1 FROM task_assignees ta WHERE ta.task_id = t.id AND ta.member_id::text = $2) AS assigned
+      FROM tasks t
+      JOIN projects p ON p.id = t.project_id
+      LEFT JOIN tasks pt ON pt.id = t.parent_task_id
+      WHERE t.id::text = $1
+      LIMIT 1
+    `,
+    [String(taskId), String(memberId)],
+  );
+  const task = found[0];
+  if (!task || String(task.stage || '').trim().toLowerCase() !== 'done' || task.trashed_at) {
+    throw httpError(404, 'This completed task is no longer available.');
+  }
+  if (!task.assigned) throw httpError(403, 'Choose a member assigned to this task.');
+  const { rows: memberRows } = await db.query(
+    `SELECT id FROM members WHERE id::text = $1 AND active = true LIMIT 1`,
+    [String(memberId)],
+  );
+  if (!memberRows[0]) throw httpError(400, 'Choose an active member.');
+  const { rows: existing } = await db.query(`SELECT 1 FROM time_entries WHERE task_id = $1 LIMIT 1`, [task.id]);
+  if (existing.length) throw httpError(409, 'This task already has a time entry.');
+
+  const { rows } = await db.query(
+    `
+      INSERT INTO time_entries
+        (member_id, project_id, cluster_id, task_id, task_title, is_misc, minutes, work_date)
+      VALUES ($1, $2, $3, $4, $5, false, $6, $7)
+      RETURNING id, project_id, task_id, task_title, minutes, to_char(work_date, 'YYYY-MM-DD') AS work_date
+    `,
+    [memberRows[0].id, task.project_id, task.cluster_id, task.id, task.title, minutes, workDate],
+  );
+  liveEvents.timeLogChanged(task.project_id, memberRows[0].id);
+  return rows[0];
 }
 
 async function getProjectDetail(projectId, { from, to }) {
@@ -420,6 +478,7 @@ module.exports = {
   createEntry,
   getProjects,
   getUnloggedDoneTasks,
+  addUnloggedTaskEntry,
   getProjectDetail,
   getMembers,
   getMemberDetail,
