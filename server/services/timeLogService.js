@@ -276,18 +276,21 @@ async function getUnloggedDoneTasks({ from, to } = {}) {
              COALESCE(c.name, pc.name) AS cluster_name,
              to_char(t.due_date, 'YYYY-MM-DD') AS due_date,
              to_char((COALESCE(done_activity.completed_at, t.updated_at) AT TIME ZONE 'Asia/Kolkata')::date, 'YYYY-MM-DD') AS completed_on,
-             COALESCE(assignee_data.assignees, '[]'::json) AS assignees
+             COALESCE(assignment_data.has_assignees, false) AS has_assignees,
+             COALESCE(assignment_data.assignees, '[]'::json) AS assignees
       FROM tasks t
       JOIN projects p ON p.id = t.project_id
       LEFT JOIN tasks pt ON pt.id = t.parent_task_id
       LEFT JOIN clusters c ON c.id = t.cluster_id
       LEFT JOIN clusters pc ON pc.id = pt.cluster_id
       LEFT JOIN LATERAL (
-        SELECT json_agg(json_build_object('id', m.id, 'name', m.name) ORDER BY lower(m.name)) AS assignees
+        SELECT COUNT(*) > 0 AS has_assignees,
+               json_agg(json_build_object('id', m.id, 'name', m.name) ORDER BY lower(m.name))
+                 FILTER (WHERE m.id IS NOT NULL) AS assignees
         FROM task_assignees ta
-        JOIN members m ON m.id = ta.member_id AND m.active = true
+        LEFT JOIN members m ON m.id = ta.member_id AND m.active = true
         WHERE ta.task_id = t.id
-      ) assignee_data ON true
+      ) assignment_data ON true
       LEFT JOIN LATERAL (
         SELECT MAX(a.created_at) AS completed_at
         FROM task_activity a
@@ -308,7 +311,16 @@ async function getUnloggedDoneTasks({ from, to } = {}) {
     [from, to],
   );
 
-  return { tasks: rows };
+  const hasUnassignedTasks = rows.some((task) => !task.has_assignees);
+  let members = [];
+  if (hasUnassignedTasks) {
+    const { rows: memberRows } = await db.query(
+      `SELECT id, name FROM members WHERE active = true ORDER BY lower(name)`,
+    );
+    members = memberRows;
+  }
+
+  return { tasks: rows, members };
 }
 
 async function addUnloggedTaskEntry(taskId, body = {}) {
@@ -323,6 +335,7 @@ async function addUnloggedTaskEntry(taskId, body = {}) {
       SELECT t.id, t.title, t.project_id,
              coalesce(t.cluster_id, pt.cluster_id) AS cluster_id,
              p.trashed_at, t.stage,
+             EXISTS (SELECT 1 FROM task_assignees ta WHERE ta.task_id = t.id) AS has_assignees,
              EXISTS (SELECT 1 FROM task_assignees ta WHERE ta.task_id = t.id AND ta.member_id::text = $2) AS assigned
       FROM tasks t
       JOIN projects p ON p.id = t.project_id
@@ -336,7 +349,7 @@ async function addUnloggedTaskEntry(taskId, body = {}) {
   if (!task || String(task.stage || '').trim().toLowerCase() !== 'done' || task.trashed_at) {
     throw httpError(404, 'This completed task is no longer available.');
   }
-  if (!task.assigned) throw httpError(403, 'Choose a member assigned to this task.');
+  if (task.has_assignees && !task.assigned) throw httpError(403, 'Choose a member assigned to this task.');
   const { rows: memberRows } = await db.query(
     `SELECT id FROM members WHERE id::text = $1 AND active = true LIMIT 1`,
     [String(memberId)],

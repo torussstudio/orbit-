@@ -1,6 +1,18 @@
 const db = require("../db");
 const { keepStoredDate } = require("../utils/dateInput");
 
+async function insertEventAttendees(client, eventId, memberIds) {
+  const uniqueIds = [...new Set(memberIds || [])];
+  if (!uniqueIds.length) return;
+
+  const values = uniqueIds.map((_, index) => `($1, $${index + 2})`).join(", ");
+  await client.query(
+    `INSERT INTO calendar_attendees(event_id, member_id) VALUES ${values}
+     ON CONFLICT (event_id, member_id) DO NOTHING`,
+    [eventId, ...uniqueIds],
+  );
+}
+
 const COMPLETED_TASK_STAGES = ["Done"];
 
 class CalendarService {
@@ -190,14 +202,7 @@ class CalendarService {
         ],
       );
       const event = rows[0];
-      if (member_ids?.length) {
-        for (const mid of member_ids) {
-          await client.query(
-            "INSERT INTO calendar_attendees(event_id, member_id) VALUES($1,$2) ON CONFLICT (event_id, member_id) DO NOTHING",
-            [event.id, mid],
-          );
-        }
-      }
+      await insertEventAttendees(client, event.id, member_ids);
       await client.query("COMMIT");
       return event;
     } catch (e) {
@@ -237,12 +242,7 @@ class CalendarService {
       );
       if (member_ids) {
         await client.query("DELETE FROM calendar_attendees WHERE event_id=$1", [id]);
-        for (const mid of member_ids) {
-          await client.query(
-            "INSERT INTO calendar_attendees(event_id, member_id) VALUES($1,$2) ON CONFLICT (event_id, member_id) DO NOTHING",
-            [id, mid],
-          );
-        }
+        await insertEventAttendees(client, id, member_ids);
       }
       await client.query("COMMIT");
       return rows[0];

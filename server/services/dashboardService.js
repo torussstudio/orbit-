@@ -160,10 +160,15 @@ async function getDashboardData(user) {
     const [
       projects, stageAndTotals, overdue, clusterRework, workload,
     ] = await Promise.all([
-      db.query(`SELECT id,name,status,
-        (SELECT COUNT(*) FROM tasks WHERE project_id=p.id) as total_tasks,
-        (SELECT COUNT(*) FROM tasks WHERE project_id=p.id AND stage='Done') as done_tasks
-        FROM projects p WHERE status!='archived' ORDER BY created_at DESC LIMIT 10`),
+      db.query(`SELECT p.id, p.name, p.status,
+          COUNT(t.id)::int AS total_tasks,
+          COUNT(t.id) FILTER (WHERE t.stage = 'Done')::int AS done_tasks
+        FROM projects p
+        LEFT JOIN tasks t ON t.project_id = p.id
+        WHERE p.status != 'archived'
+        GROUP BY p.id
+        ORDER BY p.created_at DESC
+        LIMIT 10`),
       db.query(
         `SELECT stage, COUNT(*) as count FROM tasks WHERE parent_task_id IS NULL GROUP BY stage ORDER BY count DESC;
          SELECT COUNT(*) as count FROM projects WHERE status!='archived';

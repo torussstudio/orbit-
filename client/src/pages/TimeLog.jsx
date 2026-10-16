@@ -1074,8 +1074,8 @@ function SectionHead({ title, count, children }) {
 /* -------------------------------------------------------------------------- */
 
 function LogUnloggedTaskModal({ task, onClose, onSaved }) {
-  const assignees = task.assignees || [];
-  const [memberId, setMemberId] = useState(String(assignees[0]?.id ?? ''));
+  const members = task.member_options || task.assignees || [];
+  const [memberId, setMemberId] = useState(String(members[0]?.id ?? ''));
   const [workDate, setWorkDate] = useState(task.completed_on || istToday());
   const [hours, setHours] = useState('0');
   const [mins, setMins] = useState('');
@@ -1098,7 +1098,7 @@ function LogUnloggedTaskModal({ task, onClose, onSaved }) {
       return;
     }
     if (!memberId || !workDate) {
-      setError('Select an assigned member and a date.');
+      setError('Select a member and a date.');
       return;
     }
 
@@ -1121,9 +1121,9 @@ function LogUnloggedTaskModal({ task, onClose, onSaved }) {
           <br />{task.project_name}
         </p>
         <div className="form-group">
-          <label className="form-label" htmlFor="tl-unlogged-member">Assigned member</label>
+          <label className="form-label" htmlFor="tl-unlogged-member">{task.has_assignees ? 'Assigned member' : 'Member to credit'}</label>
           <select id="tl-unlogged-member" className="form-input" value={memberId} onChange={(event) => { setMemberId(event.target.value); setError(''); }}>
-            {assignees.map((assignee) => <option key={assignee.id} value={String(assignee.id)}>{assignee.name}</option>)}
+            {members.map((member) => <option key={member.id} value={String(member.id)}>{member.name}</option>)}
           </select>
         </div>
         <div className="form-group">
@@ -1145,7 +1145,7 @@ function LogUnloggedTaskModal({ task, onClose, onSaved }) {
         {error && <div className="mb-3 text-xs text-[color:var(--danger)]" role="alert">{error}</div>}
         <div className="modal-actions">
           <button type="button" className="btn btn-ghost" onClick={onClose} disabled={saving}>Cancel</button>
-          <button type="submit" className="btn btn-primary" disabled={saving || !assignees.length}>{saving ? 'Saving…' : 'Save time'}</button>
+          <button type="submit" className="btn btn-primary" disabled={saving || !members.length}>{saving ? 'Saving…' : 'Save time'}</button>
         </div>
       </form>
     </Modal>
@@ -1439,7 +1439,7 @@ function TaskGroup({ group, open, onToggle, onEdit, onDelete, onLogTask }) {
           <Duration minutes={group.total} className="font-semibold text-[color:var(--text)]" />
         </div>
         {group.is_unlogged ? (
-          <button type="button" className={cx(QUIET_BTN, FOCUS, '!h-8 !px-2 !text-[11px]')} onClick={() => onLogTask(group)} disabled={!group.assignees?.length} title={group.assignees?.length ? 'Add time for this task' : 'This task has no active assignee'}>
+          <button type="button" className={cx(QUIET_BTN, FOCUS, '!h-8 !px-2 !text-[11px]')} onClick={() => onLogTask(group)} disabled={!group.member_options?.length} title={group.has_assignees ? (group.member_options?.length ? 'Add time for this task' : 'This task has no active assignee') : group.member_options?.length ? 'Choose a member to log time' : 'No active members are available'}>
             Log time
           </button>
         ) : <span />}
@@ -1464,7 +1464,7 @@ function TaskGroup({ group, open, onToggle, onEdit, onDelete, onLogTask }) {
   );
 }
 
-function ProjectDetailView({ projectId, from, to, onBack, onOpenMember, unloggedDoneTasks = [], onUnloggedSaved }) {
+function ProjectDetailView({ projectId, from, to, onBack, onOpenMember, unloggedDoneTasks = [], unloggedMemberOptions = [], onUnloggedSaved }) {
   const { data, loading, error, refreshing, refreshSilently, retry } = useTimeLogData(
     `/time-log/projects/${projectId}`,
     from,
@@ -1512,6 +1512,8 @@ function ProjectDetailView({ projectId, from, to, onBack, onOpenMember, unlogged
         last: null,
         memberNames: (task.assignees || []).map((assignee) => assignee.name),
         assignees: task.assignees || [],
+        has_assignees: task.has_assignees,
+        member_options: task.has_assignees ? (task.assignees || []) : unloggedMemberOptions,
         is_unlogged: true,
       });
     }
@@ -1521,7 +1523,7 @@ function ProjectDetailView({ projectId, from, to, onBack, onOpenMember, unlogged
       totals: sumEntries(entries),
       perMember: [...pm.values()].map((m) => ({ ...m, count: m.tasks.size })).sort((a, b) => b.minutes - a.minutes),
     };
-  }, [entries, projectUnloggedTasks]);
+  }, [entries, projectUnloggedTasks, unloggedMemberOptions]);
 
   const toggle = useCallback((key) => {
     setOpenKeys((prev) => {
@@ -2307,11 +2309,13 @@ export default function TimeLog() {
 
   const dueDateRange = useMemo(() => resolveDueDateRange(range, from, to), [range, from, to]);
   const [unloggedDoneTasks, setUnloggedDoneTasks] = useState([]);
+  const [unloggedMemberOptions, setUnloggedMemberOptions] = useState([]);
 
   const loadUnloggedDoneTasks = useCallback(async () => {
     try {
       const { data } = await api.get('/time-log/unlogged-done', { params: dueDateRange });
       setUnloggedDoneTasks(data?.tasks || []);
+      setUnloggedMemberOptions(data?.members || []);
     } catch {
       // Keep the time log page usable if the warning list cannot be refreshed.
     }
@@ -2486,6 +2490,7 @@ export default function TimeLog() {
             onBack={backToList}
             onOpenMember={openMember}
             unloggedDoneTasks={unloggedDoneTasks}
+            unloggedMemberOptions={unloggedMemberOptions}
             onUnloggedSaved={loadUnloggedDoneTasks}
           />
         ) : memberId ? (
