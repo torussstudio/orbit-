@@ -34,9 +34,9 @@ const SKELETON_ROWS = [0, 1, 2, 3, 4, 5];
 // Distribution bar: biggest items, the rest folded into "Others".
 const MAX_SEGMENTS = 6;
 
-/* -------------------------------------------------------------------------- */
+/* ---------------------------------------------------------------------- */
 /* Helpers                                                                    */
-/* -------------------------------------------------------------------------- */
+/* ---------------------------------------------------------------------- */
 
 const isAbort = (e) =>
   e?.code === 'ERR_CANCELED' || e?.name === 'CanceledError' || e?.name === 'AbortError';
@@ -2510,4 +2510,4 @@ export default function TimeLog() {
       </div>
     </>
   );
-}
+}

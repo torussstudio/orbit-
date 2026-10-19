@@ -135,7 +135,6 @@ const CHOICES = [
 
 // The task is the only request that MUST succeed. Project and members are
 // best-effort: a member who was assigned a task but is not on the project gets
-// 403 from /projects/:id, and that must not block the task page.
 // Requests are cancelled on navigation/unmount so a slow response for a previous
 // task can never overwrite the current one.
 function useTaskDetail({ taskId, projectId, isManager, onNotice }) {
