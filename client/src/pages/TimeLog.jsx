@@ -1075,6 +1075,8 @@ function SectionHead({ title, count, children }) {
 
 function LogUnloggedTaskModal({ task, onClose, onSaved }) {
   const members = task.member_options || task.assignees || [];
+  // The project view passes a task *group* (task_id), other callers may pass the raw task (id).
+  const taskId = task.task_id ?? task.id;
   const [memberId, setMemberId] = useState(String(members[0]?.id ?? ''));
   const [workDate, setWorkDate] = useState(task.completed_on || istToday());
   const [hours, setHours] = useState('0');
@@ -1105,7 +1107,7 @@ function LogUnloggedTaskModal({ task, onClose, onSaved }) {
     setSaving(true);
     setError('');
     try {
-      await api.post(`/time-log/unlogged-done/${task.id}/entries`, { member_id: memberId, work_date: workDate, minutes });
+      await api.post(`/time-log/unlogged-done/${taskId}/entries`, { member_id: memberId, work_date: workDate, minutes });
       onSaved();
     } catch (err) {
       setError(err?.response?.data?.error || "We couldn't save this task's time. Please try again.");
@@ -1507,6 +1509,7 @@ function ProjectDetailView({ projectId, from, to, onBack, onOpenMember, unlogged
         parent_title: task.parent_title || null,
         cluster_name: task.cluster_name || null,
         task_stage: 'Done',
+        completed_on: task.completed_on || null,
         entries: [],
         total: 0,
         last: null,
@@ -1684,7 +1687,7 @@ function ProjectDetailView({ projectId, from, to, onBack, onOpenMember, unlogged
       {modals}
       {loggingTask && (
         <LogUnloggedTaskModal
-          key={loggingTask.id}
+          key={loggingTask.task_id ?? loggingTask.id}
           task={loggingTask}
           onClose={() => setLoggingTask(null)}
           onSaved={() => {

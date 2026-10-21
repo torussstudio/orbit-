@@ -13,7 +13,6 @@ import Loader, { LoadingSkeleton } from '../components/ui/Loader';
 // themes keep working. `color:` hints keep Tailwind from guessing the type.
 
 // One surface per tab. Groups inside it are separated by dividers instead of
-// each being its own bordered card.
 const SURFACE =
   'rounded-2xl border border-[color:var(--border)] bg-[var(--bg-2)] px-5 py-6 sm:px-7';
 
