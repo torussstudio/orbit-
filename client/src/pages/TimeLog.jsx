@@ -1078,12 +1078,13 @@ function LogUnloggedTaskModal({ task, onClose, onSaved }) {
   // The project view passes a task *group* (task_id), other callers may pass the raw task (id).
   const taskId = task.task_id ?? task.id;
   const [memberId, setMemberId] = useState(String(members[0]?.id ?? ''));
-  const [workDate, setWorkDate] = useState(task.completed_on || istToday());
+  const today = istToday();
+  // Date and member come from the task itself; only the time is entered here.
+  const workDate = task.completed_on && task.completed_on <= today ? task.completed_on : today;
   const [hours, setHours] = useState('0');
   const [mins, setMins] = useState('');
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
-  const today = istToday();
 
   const submit = async (event) => {
     event.preventDefault();
@@ -1099,15 +1100,15 @@ function LogUnloggedTaskModal({ task, onClose, onSaved }) {
       setError('Enter a total time between 1 minute and 24 hours.');
       return;
     }
-    if (!memberId || !workDate) {
-      setError('Select a member and a date.');
+    if (!memberId) {
+      setError('No member is assigned to this task.');
       return;
     }
 
     setSaving(true);
     setError('');
     try {
-      await api.post(`/time-log/unlogged-done/${taskId}/entries`, { member_id: memberId, work_date: workDate, minutes });
+      await api.post(`/time-log/unlogged-done/${taskId}/entries`, { member_id: memberId, minutes });
       onSaved();
     } catch (err) {
       setError(err?.response?.data?.error || "We couldn't save this task's time. Please try again.");
@@ -1123,14 +1124,20 @@ function LogUnloggedTaskModal({ task, onClose, onSaved }) {
           <br />{task.project_name}
         </p>
         <div className="form-group">
-          <label className="form-label" htmlFor="tl-unlogged-member">{task.has_assignees ? 'Assigned member' : 'Member to credit'}</label>
-          <select id="tl-unlogged-member" className="form-input" value={memberId} onChange={(event) => { setMemberId(event.target.value); setError(''); }}>
-            {members.map((member) => <option key={member.id} value={String(member.id)}>{member.name}</option>)}
-          </select>
+          <span className="form-label">{members.length > 1 ? 'Member (assigned to this task)' : 'Member'}</span>
+          {members.length > 1 ? (
+            <select id="tl-unlogged-member" className="form-input" value={memberId} onChange={(event) => { setMemberId(event.target.value); setError(''); }}>
+              {members.map((member) => <option key={member.id} value={String(member.id)}>{member.name}</option>)}
+            </select>
+          ) : (
+            <div className="form-input flex items-center opacity-80" aria-readonly="true">{members[0]?.name || 'No member assigned'}</div>
+          )}
+          {task.credit_source === 'sub_tasks' && <p className="m-0 mt-1 text-[11.5px] text-[color:var(--text-3)]">From this task's sub tasks.</p>}
+          {task.credit_source === 'completed_by' && <p className="m-0 mt-1 text-[11.5px] text-[color:var(--text-3)]">No assignee — credited to the member who marked it Done.</p>}
         </div>
         <div className="form-group">
           <span className="form-label">Date worked</span>
-          <DatePicker value={workDate} onChange={(value) => { setWorkDate(value); setError(''); }} maxDate={today} placeholder="dd-mm-yyyy" />
+          <div className="form-input flex items-center opacity-80" aria-readonly="true">{formatDay(workDate)}</div>
         </div>
         <div className="form-group">
           <div className="grid grid-cols-2 gap-3">
@@ -1441,7 +1448,7 @@ function TaskGroup({ group, open, onToggle, onEdit, onDelete, onLogTask }) {
           <Duration minutes={group.total} className="font-semibold text-[color:var(--text)]" />
         </div>
         {group.is_unlogged ? (
-          <button type="button" className={cx(QUIET_BTN, FOCUS, '!h-8 !px-2 !text-[11px]')} onClick={() => onLogTask(group)} disabled={!group.member_options?.length} title={group.has_assignees ? (group.member_options?.length ? 'Add time for this task' : 'This task has no active assignee') : group.member_options?.length ? 'Choose a member to log time' : 'No active members are available'}>
+          <button type="button" className={cx(QUIET_BTN, FOCUS, '!h-8 !px-2 !text-[11px]')} onClick={() => onLogTask(group)} disabled={!group.member_options?.length} title={group.member_options?.length ? 'Add time for this task' : 'No member is assigned to this task'}>
             Log time
           </button>
         ) : <span />}
@@ -1510,13 +1517,14 @@ function ProjectDetailView({ projectId, from, to, onBack, onOpenMember, unlogged
         cluster_name: task.cluster_name || null,
         task_stage: 'Done',
         completed_on: task.completed_on || null,
+        credit_source: task.credit_source || null,
         entries: [],
         total: 0,
         last: null,
         memberNames: (task.assignees || []).map((assignee) => assignee.name),
         assignees: task.assignees || [],
         has_assignees: task.has_assignees,
-        member_options: task.has_assignees ? (task.assignees || []) : unloggedMemberOptions,
+        member_options: task.assignees || [],
         is_unlogged: true,
       });
     }
