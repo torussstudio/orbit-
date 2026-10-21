@@ -269,15 +269,16 @@ async function getProjects({ from, to }) {
 }
 
 /*
- * Completed tasks with no time entry. The member to credit and the work date
- * are decided here, never by the manager:
+ * Tasks sent to In Review or Done with no time entry (members can't log time
+ * once a task is In Review, so both count as "not logged"). The member to
+ * credit and the work date are decided here, never by the manager:
  *   member: the task's assignees; if none, the assignees of its sub tasks;
- *           if none, whoever moved the task to Done.
- *   date:   the day (IST) the task was moved to Done.
+ *           if none, whoever moved the task to its current stage.
+ *   date:   the day (IST) the task reached its current stage.
  * Managers only enter the time taken.
  */
 const UNLOGGED_SELECT = `
-  SELECT t.id, t.title, t.project_id, p.name AS project_name, p.client_name, p.status AS project_status,
+  SELECT t.id, t.title, t.stage, t.project_id, p.name AS project_name, p.client_name, p.status AS project_status,
          t.parent_task_id, pt.title AS parent_title,
          coalesce(t.cluster_id, pt.cluster_id) AS cluster_id,
          COALESCE(c.name, pc.name) AS cluster_name,
@@ -297,7 +298,7 @@ const UNLOGGED_SELECT = `
   LEFT JOIN LATERAL (
     SELECT MAX(a.created_at) AS completed_at
     FROM task_activity a
-    WHERE a.task_id = t.id AND a.meta->>'to' = 'Done'
+    WHERE a.task_id = t.id AND lower(trim(a.meta->>'to')) = lower(trim(t.stage))
   ) done_activity ON true
   LEFT JOIN LATERAL (
     SELECT
@@ -312,10 +313,10 @@ const UNLOGGED_SELECT = `
                 WHERE s.parent_task_id = t.id) x) AS sub_assigned,
       (SELECT json_build_array(json_build_object('id', m.id, 'name', m.name))
          FROM task_activity a JOIN members m ON m.id = a.actor_id
-        WHERE a.task_id = t.id AND a.meta->>'to' = 'Done'
+        WHERE a.task_id = t.id AND lower(trim(a.meta->>'to')) = lower(trim(t.stage))
         ORDER BY a.created_at DESC LIMIT 1) AS completed_by
   ) credit ON true
-  WHERE lower(trim(coalesce(t.stage, ''))) = 'done'
+  WHERE lower(trim(coalesce(t.stage, ''))) IN ('done', 'in review')
     AND p.trashed_at IS NULL
     AND NOT EXISTS (SELECT 1 FROM time_entries e WHERE e.task_id = t.id)
 `;
@@ -351,7 +352,7 @@ async function addUnloggedTaskEntry(taskId, body = {}) {
       [String(taskId)],
     );
     if (logged.length) throw httpError(409, 'This task already has a time entry.');
-    throw httpError(404, 'This completed task is no longer available.');
+    throw httpError(404, 'This task is no longer available.');
   }
 
   const candidates = Array.isArray(task.assignees) ? task.assignees : [];

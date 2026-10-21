@@ -1117,7 +1117,7 @@ function LogUnloggedTaskModal({ task, onClose, onSaved }) {
   };
 
   return (
-    <Modal title="Log time for completed task" onClose={saving ? () => {} : onClose}>
+    <Modal title={String(task.stage || task.task_stage || '').toLowerCase() === 'in review' ? 'Log time for task in review' : 'Log time for completed task'} onClose={saving ? () => {} : onClose}>
       <form onSubmit={submit} noValidate>
         <p className="m-0 mb-4 text-[13px] leading-[1.55] text-[color:var(--text-2)]">
           <strong className="text-[color:var(--text)]">{task.title}</strong>
@@ -1433,10 +1433,10 @@ function TaskGroup({ group, open, onToggle, onEdit, onDelete, onLogTask }) {
                   <span className="truncate">{group.cluster_name}</span>
                 </>
               )}
-              {group.task_stage === 'Done' && (
+              {(group.task_stage === 'Done' || group.task_stage === 'In Review') && (
                 <>
                   <Dot />
-                  <span>Done</span>
+                  <span>{group.task_stage}</span>
                 </>
               )}
             </div>
@@ -1515,7 +1515,7 @@ function ProjectDetailView({ projectId, from, to, onBack, onOpenMember, unlogged
         title: task.title || 'Untitled',
         parent_title: task.parent_title || null,
         cluster_name: task.cluster_name || null,
-        task_stage: 'Done',
+        task_stage: task.stage || 'Done',
         completed_on: task.completed_on || null,
         credit_source: task.credit_source || null,
         entries: [],
@@ -1713,6 +1713,55 @@ function ProjectDetailView({ projectId, from, to, onBack, onOpenMember, unlogged
 /* Member detail                                                              */
 /* -------------------------------------------------------------------------- */
 
+// Tasks this member sent to In Review / Done without logging any time.
+function MemberUnloggedSection({ tasks, onLog }) {
+  if (!tasks.length) return null;
+  return (
+    <section className={cx(SURFACE, 'mb-4 overflow-hidden')} aria-label="Not logged">
+      <SectionHead title="Not logged" count={tasks.length}>
+        <span className="text-[11.5px] text-[color:var(--text-3)]">Sent to review or done without time</span>
+      </SectionHead>
+      <div className="divide-y divide-[color:var(--border)]">
+        {tasks.map((task) => (
+          <div key={task.id} className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3 sm:px-5">
+            <div className="min-w-0 flex-[1_1_260px]">
+              <div className="truncate text-[13.5px] font-semibold text-[color:var(--text)]">{task.title || 'Untitled'}</div>
+              <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[11.5px] text-[color:var(--text-3)]">
+                <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10.5px] font-semibold text-amber-800">Not logged</span>
+                <Dot />
+                <span className="font-medium text-[color:var(--text-2)]">{task.project_name}</span>
+                {task.parent_title && (
+                  <>
+                    <Dot />
+                    <span className="truncate">sub task of {task.parent_title}</span>
+                  </>
+                )}
+                {task.cluster_name && (
+                  <>
+                    <Dot />
+                    <span className="truncate">{task.cluster_name}</span>
+                  </>
+                )}
+                <Dot />
+                <span>{task.stage}</span>
+                {task.completed_on && (
+                  <>
+                    <Dot />
+                    <span>{formatDayShort(task.completed_on)}</span>
+                  </>
+                )}
+              </div>
+            </div>
+            <button type="button" className={cx(QUIET_BTN, FOCUS, '!h-8 !px-2 !text-[11px]')} onClick={() => onLog(task)}>
+              Log time
+            </button>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function MemberProjectGroup({ group, open, onToggle, max, total, onOpenProject, index, onEdit, onDelete }) {
   const panelId = `tl-mp-${group.key}`;
   return (
@@ -1791,7 +1840,7 @@ function MemberProjectGroup({ group, open, onToggle, max, total, onOpenProject, 
   );
 }
 
-function MemberDetailView({ memberId, from, to, onBack, onOpenProject }) {
+function MemberDetailView({ memberId, from, to, onBack, onOpenProject, unloggedDoneTasks = [], onUnloggedSaved }) {
   const { data, loading, error, refreshing, refreshSilently, retry } = useTimeLogData(
     `/time-log/members/${memberId}`,
     from,
@@ -1804,6 +1853,21 @@ function MemberDetailView({ memberId, from, to, onBack, onOpenProject }) {
 
   const entries = data?.entries || [];
   const member = data?.member;
+  const [loggingTask, setLoggingTask] = useState(null);
+
+  // Not-logged tasks credited to this member. When a task has several
+  // assignees, logging from here credits this member only.
+  const memberUnlogged = useMemo(
+    () =>
+      unloggedDoneTasks
+        .filter((task) => (task.assignees || []).some((a) => String(a.id) === String(memberId)))
+        .map((task) => ({
+          ...task,
+          member_options: (task.assignees || []).filter((a) => String(a.id) === String(memberId)),
+        }))
+        .sort((a, b) => String(b.completed_on || '').localeCompare(String(a.completed_on || ''))),
+    [unloggedDoneTasks, memberId],
+  );
 
   const { groups, totals } = useMemo(() => {
     const g = groupByProject(entries).sort((a, b) => b.total_minutes - a.total_minutes);
@@ -1863,6 +1927,8 @@ function MemberDetailView({ memberId, from, to, onBack, onOpenProject }) {
 
       {noticeBar}
 
+      {!loading && !error && <MemberUnloggedSection tasks={memberUnlogged} onLog={setLoggingTask} />}
+
       {loading ? (
         <PageSkeleton />
       ) : error ? (
@@ -1919,6 +1985,18 @@ function MemberDetailView({ memberId, from, to, onBack, onOpenProject }) {
       )}
 
       {modals}
+      {loggingTask && (
+        <LogUnloggedTaskModal
+          key={loggingTask.id}
+          task={loggingTask}
+          onClose={() => setLoggingTask(null)}
+          onSaved={() => {
+            setLoggingTask(null);
+            refreshSilently();
+            onUnloggedSaved?.();
+          }}
+        />
+      )}
     </>
   );
 }
@@ -2168,11 +2246,39 @@ function ProjectsList({ from, to, query, sort, onOpen, setExport, unloggedDoneTa
   );
 }
 
-function MembersList({ from, to, query, sort, onOpen, setExport }) {
+function MembersList({ from, to, query, sort, onOpen, setExport, unloggedDoneTasks = [] }) {
   const { data, loading, error, refreshing, refreshSilently, retry } = useTimeLogData('/time-log/members', from, to);
   useLiveRefetch(TIMELOG_EVENTS, refreshSilently);
 
-  const all = data?.members || [];
+  // Members with time, plus anyone who has tasks sent to review / done
+  // without logging time (they show up even with 0 minutes).
+  const all = useMemo(() => {
+    const members = new Map((data?.members || []).map((m) => [String(m.id), { ...m, unlogged_task_count: 0 }]));
+    for (const task of unloggedDoneTasks) {
+      for (const a of task.assignees || []) {
+        const id = String(a.id);
+        const existing = members.get(id);
+        if (existing) existing.unlogged_task_count += 1;
+        else {
+          members.set(id, {
+            id: a.id,
+            name: a.name,
+            email: '',
+            avatar_url: null,
+            active: true,
+            total_minutes: 0,
+            misc_minutes: 0,
+            entry_count: 0,
+            task_count: 0,
+            project_count: 0,
+            last_logged_on: null,
+            unlogged_task_count: 1,
+          });
+        }
+      }
+    }
+    return [...members.values()];
+  }, [data?.members, unloggedDoneTasks]);
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
     const list = q ? all.filter((m) => `${m.name} ${m.email || ''}`.toLowerCase().includes(q)) : all;
@@ -2203,12 +2309,13 @@ function MembersList({ from, to, query, sort, onOpen, setExport }) {
         ? () =>
             downloadCsv(
               `time-log_members_${fileSuffix(from, to)}.csv`,
-              ['Member', 'Email', 'Projects', 'Tasks', 'Entries', 'Minutes', 'Hours', 'Misc minutes', 'Last logged (IST)'],
+              ['Member', 'Email', 'Projects', 'Tasks', 'Not logged tasks', 'Entries', 'Minutes', 'Hours', 'Misc minutes', 'Last logged (IST)'],
               visible.map((m) => [
                 m.name,
                 m.email || '',
                 m.project_count,
                 m.task_count,
+                m.unlogged_task_count,
                 m.entry_count,
                 m.total_minutes,
                 toHours(m.total_minutes),
@@ -2279,6 +2386,7 @@ function MembersList({ from, to, query, sort, onOpen, setExport }) {
                   <span>
                     {m.task_count} task{m.task_count !== 1 ? 's' : ''}
                   </span>
+                  {m.unlogged_task_count > 0 && <><Dot /><span className="font-medium text-[color:var(--warning)]">{m.unlogged_task_count} not logged</span></>}
                   <Dot />
                   <span>last {formatDayShort(m.last_logged_on)}</span>
                   {m.misc_minutes > 0 && (
@@ -2512,9 +2620,11 @@ export default function TimeLog() {
             to={to}
             onBack={backToList}
             onOpenProject={openProject}
+            unloggedDoneTasks={unloggedDoneTasks}
+            onUnloggedSaved={loadUnloggedDoneTasks}
           />
         ) : view === 'members' ? (
-          <MembersList from={from} to={to} query={deferredQuery} sort={sort} onOpen={openMember} setExport={setExport} />
+          <MembersList from={from} to={to} query={deferredQuery} sort={sort} onOpen={openMember} setExport={setExport} unloggedDoneTasks={unloggedDoneTasks} />
         ) : (
           <ProjectsList from={from} to={to} query={deferredQuery} sort={sort} onOpen={openProject} setExport={setExport} unloggedDoneTasks={unloggedDoneTasks} />
         )}
