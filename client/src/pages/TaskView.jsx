@@ -421,13 +421,36 @@ function ReviewConfirm({ task, onClose, onConfirm }) {
 /* Page                                                                       */
 /* -------------------------------------------------------------------------- */
 
+// The project filter is remembered per user, so leaving the page and coming
+// back keeps the selection. Storage can be blocked (private mode), so every
+// read/write is guarded and the page still works without it.
+const projectFilterKey = (userId) => `orbit.taskView.projectFilter.${userId ?? "anon"}`;
+
+function readStoredFilter(key) {
+  try {
+    return window.localStorage.getItem(key) || "all";
+  } catch {
+    return "all";
+  }
+}
+
+function writeStoredFilter(key, value) {
+  try {
+    if (value === "all") window.localStorage.removeItem(key);
+    else window.localStorage.setItem(key, String(value));
+  } catch {
+    /* storage unavailable: the filter just won't be remembered */
+  }
+}
+
 export default function TaskView() {
-  const { isManager } = useAuth();
+  const { isManager, user } = useAuth();
+  const filterKey = projectFilterKey(user?.id);
   const [tasks, setTasks] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [notice, setNotice] = useState("");
-  const [projectFilter, setProjectFilter] = useState("all");
+  const [projectFilter, setProjectFilter] = useState(() => readStoredFilter(filterKey));
   const [statusFilter, setStatusFilter] = useState("all");
   const [limit, setLimit] = useState(PAGE_SIZE);
   const [reviewTask, setReviewTask] = useState(null);
@@ -499,6 +522,19 @@ export default function TaskView() {
     );
     return { projectOptions: options, overdueCount: overdue };
   }, [tasks]);
+
+  // Remember the selection.
+  useEffect(() => {
+    writeStoredFilter(filterKey, projectFilter);
+  }, [filterKey, projectFilter]);
+
+  // A remembered project that no longer has any of your tasks falls back to "All".
+  useEffect(() => {
+    if (loading || loadError || projectFilter === "all") return;
+    if (!projectOptions.some((p) => String(p.id) === String(projectFilter))) {
+      setProjectFilter("all");
+    }
+  }, [loading, loadError, projectFilter, projectOptions]);
 
   // The API already scopes this to the current member (sub tasks and standalone
   // main tasks). Main tasks that use sub tasks aren't assigned directly.
