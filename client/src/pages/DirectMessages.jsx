@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import api from '../api/client';
 import { useAuth } from '../context/AuthContext';
@@ -49,6 +49,29 @@ const EMOJI_CATEGORIES = [
 const same = (a, b) => a != null && b != null && String(a) === String(b);
 const errorText = (e) => e?.response?.data?.error || 'Something went wrong. Please try again.';
 const labelTime = (v) => v ? new Intl.DateTimeFormat('en-IN', { hour: 'numeric', minute: '2-digit' }).format(new Date(v)) : '';
+
+/* ---------- WhatsApp-style date separators ---------- */
+
+const dayKey = (v) => { const d = new Date(v); return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`; };
+const labelDay = (v) => {
+  if (!v) return '';
+  const date = new Date(v);
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const day = new Date(date); day.setHours(0, 0, 0, 0);
+  const diff = Math.round((today - day) / 86400000);
+  if (diff === 0) return 'Today';
+  if (diff === 1) return 'Yesterday';
+  if (diff > 1 && diff < 7) return new Intl.DateTimeFormat('en-IN', { weekday: 'long' }).format(date);
+  return new Intl.DateTimeFormat('en-IN', { day: 'numeric', month: 'long', year: 'numeric' }).format(date);
+};
+
+const DateDivider = ({ label }) => (
+  <div className="pointer-events-none sticky top-0 z-10 my-3 flex justify-center">
+    <span className="rounded-lg border border-[color:var(--border)] bg-[var(--bg-2)]/95 px-3 py-1 text-[11px] font-medium text-[color:var(--text-2)] shadow-[0_6px_16px_-12px_rgba(15,23,42,0.5)] backdrop-blur">
+      {label}
+    </span>
+  </div>
+);
 
 /* ---------- Presentation helpers (no logic) ---------- */
 
@@ -431,6 +454,8 @@ export default function DirectMessages() {
   if (isManager) return <div className="flex h-full items-center justify-center p-8 text-sm text-[color:var(--text-2)]">Member chats are available to members only.</div>;
 
   const focusRing = 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent)] focus-visible:ring-offset-1';
+  const pendingForChat = pendingUploads.filter((pending) => same(pending.conversationId, conversationId));
+  const showPendingToday = pendingForChat.length > 0 && (!messages.length || dayKey(messages[messages.length - 1].created_at) !== dayKey(new Date()));
 
   return (
     <div className="flex min-h-full min-w-0 items-start bg-[var(--bg)] md:p-5 lg:p-8">
@@ -543,39 +568,44 @@ export default function DirectMessages() {
                     <p className="mt-3 text-sm font-semibold tracking-tight text-[color:var(--text)]">No messages yet</p>
                     <p className="mt-1 text-xs text-[color:var(--text-3)]">Say hello to {peer?.name || 'this member'}.</p>
                   </div>
-                ) : messages.map((message) => {
+                ) : messages.map((message, index) => {
                   const mine = same(message.sender_id, user?.id);
                   const menuOpen = same(deleteMenuId, message.id);
+                  const showDate = index === 0 || dayKey(messages[index - 1].created_at) !== dayKey(message.created_at);
                   return (
-                    <div key={message.id} className={`mb-3 flex ${mine ? 'justify-end' : 'justify-start'}`}>
-                      <div onClick={() => setActiveMessageId((id) => (same(id, message.id) ? null : message.id))} className={`group relative max-w-[88%] px-3.5 py-2.5 sm:max-w-[68%] ${mine ? 'rounded-2xl rounded-br-md bg-[var(--accent)] text-white shadow-[0_10px_24px_-14px_var(--accent)]' : 'rounded-2xl rounded-bl-md border border-[color:var(--border)] bg-[var(--bg-2)] text-[color:var(--text)] shadow-[0_8px_20px_-16px_rgba(15,23,42,0.5)]'}`}>
-                        {message.forwarded_from_id && <p className="mb-1 flex items-center gap-1 text-[10px] font-medium italic opacity-75"><Icon name="forward" className="h-3 w-3" />Forwarded</p>}
-                        {message.reply_to_message_id && (
-                          <div className={`mb-1.5 rounded-lg border-l-2 bg-black/10 px-2.5 py-1.5 text-[11px] ${mine ? 'border-white/60' : 'border-[color:var(--accent)]'}`}>
-                            <span className="font-semibold">{message.reply_sender_name || 'Reply'}</span>
-                            <p className="truncate opacity-80">{message.reply_body || 'Attachment'}</p>
-                          </div>
-                        )}
-                        {message.deleted ? <p className="text-xs italic opacity-70">This message was deleted</p> : message.body && <p className="whitespace-pre-wrap break-words text-[13.5px] leading-relaxed">{message.body}</p>}
-                        {!message.deleted && message.attachments?.map((file) => <ChatAttachmentCard key={file.public_id} file={file} onOpen={setPreviewAttachment} />)}
-                        {!message.deleted && (
-                          <div className={`${same(activeMessageId, message.id) ? 'mt-2 flex' : 'hidden'} items-center gap-0.5 whitespace-normal rounded-lg bg-black/10 p-0.5 md:absolute md:-top-4 ${mine ? 'md:right-2' : 'md:left-2'} md:z-10 md:mt-0 md:flex md:border md:border-[color:var(--border)] md:bg-[var(--bg-2)] md:text-[color:var(--text-2)] ${menuOpen ? 'md:opacity-100' : 'md:opacity-0'} md:shadow-[0_8px_20px_-12px_rgba(15,23,42,0.5)] md:transition-opacity md:duration-200 md:focus-within:opacity-100 md:group-hover:opacity-100`}>
-                            <MessageAction icon="reply" title="Reply" onClick={() => { setReplyTo(message); input.current?.focus(); }} />
-                            <MessageAction icon="forward" title="Forward" onClick={() => { setForwarding(message); setForwardTarget(''); }} />
-                            <DeleteMenu
-                              open={menuOpen}
-                              mine={mine}
-                              onToggle={() => setDeleteMenuId((id) => (same(id, message.id) ? null : message.id))}
-                              onSelect={(mode) => { setDeleteMenuId(null); deleteMessage(message, mode); }}
-                            />
-                          </div>
-                        )}
-                        <p className={`mt-1 text-right text-[10px] tabular-nums ${mine ? 'text-white/70' : 'text-[color:var(--text-3)]'}`}>{labelTime(message.created_at)}</p>
+                    <Fragment key={message.id}>
+                      {showDate && <DateDivider label={labelDay(message.created_at)} />}
+                      <div className={`mb-3 flex ${mine ? 'justify-end' : 'justify-start'}`}>
+                        <div onClick={() => setActiveMessageId((id) => (same(id, message.id) ? null : message.id))} className={`group relative max-w-[88%] px-3.5 py-2.5 sm:max-w-[68%] ${mine ? 'rounded-2xl rounded-br-md bg-[var(--accent)] text-white shadow-[0_10px_24px_-14px_var(--accent)]' : 'rounded-2xl rounded-bl-md border border-[color:var(--border)] bg-[var(--bg-2)] text-[color:var(--text)] shadow-[0_8px_20px_-16px_rgba(15,23,42,0.5)]'}`}>
+                          {message.forwarded_from_id && <p className="mb-1 flex items-center gap-1 text-[10px] font-medium italic opacity-75"><Icon name="forward" className="h-3 w-3" />Forwarded</p>}
+                          {message.reply_to_message_id && (
+                            <div className={`mb-1.5 rounded-lg border-l-2 bg-black/10 px-2.5 py-1.5 text-[11px] ${mine ? 'border-white/60' : 'border-[color:var(--accent)]'}`}>
+                              <span className="font-semibold">{message.reply_sender_name || 'Reply'}</span>
+                              <p className="truncate opacity-80">{message.reply_body || 'Attachment'}</p>
+                            </div>
+                          )}
+                          {message.deleted ? <p className="text-xs italic opacity-70">This message was deleted</p> : message.body && <p className="whitespace-pre-wrap break-words text-[13.5px] leading-relaxed">{message.body}</p>}
+                          {!message.deleted && message.attachments?.map((file) => <ChatAttachmentCard key={file.public_id} file={file} onOpen={setPreviewAttachment} />)}
+                          {!message.deleted && (
+                            <div className={`${same(activeMessageId, message.id) ? 'mt-2 flex' : 'hidden'} items-center gap-0.5 whitespace-normal rounded-lg bg-black/10 p-0.5 md:absolute md:-top-4 ${mine ? 'md:right-2' : 'md:left-2'} md:z-10 md:mt-0 md:flex md:border md:border-[color:var(--border)] md:bg-[var(--bg-2)] md:text-[color:var(--text-2)] ${menuOpen ? 'md:opacity-100' : 'md:opacity-0'} md:shadow-[0_8px_20px_-12px_rgba(15,23,42,0.5)] md:transition-opacity md:duration-200 md:focus-within:opacity-100 md:group-hover:opacity-100`}>
+                              <MessageAction icon="reply" title="Reply" onClick={() => { setReplyTo(message); input.current?.focus(); }} />
+                              <MessageAction icon="forward" title="Forward" onClick={() => { setForwarding(message); setForwardTarget(''); }} />
+                              <DeleteMenu
+                                open={menuOpen}
+                                mine={mine}
+                                onToggle={() => setDeleteMenuId((id) => (same(id, message.id) ? null : message.id))}
+                                onSelect={(mode) => { setDeleteMenuId(null); deleteMessage(message, mode); }}
+                              />
+                            </div>
+                          )}
+                          <p className={`mt-1 text-right text-[10px] tabular-nums ${mine ? 'text-white/70' : 'text-[color:var(--text-3)]'}`}>{labelTime(message.created_at)}</p>
+                        </div>
                       </div>
-                    </div>
+                    </Fragment>
                   );
                 })}
-                {pendingUploads.filter((pending) => same(pending.conversationId, conversationId)).map((pending) => (
+                {showPendingToday && <DateDivider label="Today" />}
+                {pendingForChat.map((pending) => (
                   <div key={pending.id} className="mb-3 flex justify-end">
                     <div className="max-w-[88%] rounded-2xl rounded-br-md bg-[var(--accent)] px-3.5 py-2.5 text-white opacity-90 sm:max-w-[68%]">
                       {pending.body && <p className="whitespace-pre-wrap break-words text-[13.5px] leading-relaxed">{pending.body}</p>}
