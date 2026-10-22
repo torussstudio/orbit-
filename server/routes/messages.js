@@ -29,6 +29,10 @@ router.post("/conversations/:id/messages", auth, messageController.sendMessage);
 router.delete("/conversations/:id/messages/:messageId", auth, messageController.deleteMessage);
 router.post("/conversations/:id/messages/:messageId/forward", auth, messageController.forwardMessage);
 router.post("/conversations/:id/read", auth, messageController.markRead);
+router.post("/conversations/:id/typing", auth, messageController.typing);
+router.get("/conversations/:id/search", auth, messageController.searchMessages);
+router.patch("/conversations/:id/messages/:messageId", auth, messageController.editMessage);
+router.post("/conversations/:id/messages/:messageId/reactions", auth, messageController.reactToMessage);
 
 // One-to-one chats between active members. The service checks both roles
 // and conversation participation for every request.
@@ -42,5 +46,9 @@ router.post("/direct/conversations/:id/messages", auth, directMessageController.
 router.delete("/direct/conversations/:id/messages/:messageId", auth, directMessageController.deleteMessage);
 router.post("/direct/conversations/:id/messages/:messageId/forward", auth, directMessageController.forwardMessage);
 router.post("/direct/conversations/:id/read", auth, directMessageController.read);
+router.post("/direct/conversations/:id/typing", auth, directMessageController.typing);
+router.get("/direct/conversations/:id/search", auth, directMessageController.search);
+router.patch("/direct/conversations/:id/messages/:messageId", auth, directMessageController.edit);
+router.post("/direct/conversations/:id/messages/:messageId/reactions", auth, directMessageController.react);
 
 module.exports = router;

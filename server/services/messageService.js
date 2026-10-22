@@ -2,6 +2,7 @@ const db = require("../db");
 const liveEvents = require("./liveEvents");
 const { createNotification } = require("../utils/pushNotify");
 const { validateAttachment } = require("./directMessageService");
+const chatExtras = require("../utils/chatExtras");
 
 /*
  * Messages between members and the admin team.
@@ -268,6 +269,8 @@ const listMessages = async (user, conversationId, { before, after, limit } = {})
     `SELECT msg.id, msg.conversation_id, msg.sender_id,
             CASE WHEN msg.deleted_at IS NOT NULL THEN '' ELSE msg.body END AS body, msg.attachments, msg.created_at,
             msg.reply_to_message_id, msg.forwarded_from_id, msg.deleted_at IS NOT NULL AS deleted,
+            CASE WHEN msg.deleted_at IS NOT NULL THEN '{}'::jsonb ELSE msg.reactions END AS reactions,
+            msg.edited_at,
             rm.body AS reply_body, rs.name AS reply_sender_name,
             s.name AS sender_name, s.role AS sender_role
        FROM messages msg
@@ -385,7 +388,7 @@ const deleteMessage = async (user, conversationId, messageId, mode) => {
   const message = rows[0];
   if (!message) throw httpError(404, 'Message not found.');
   if (mode === 'for-everyone' && !sameId(message.sender_id, user.id)) throw httpError(403, 'You can only delete your own message for everyone.');
-  if (mode === 'for-everyone') await query("UPDATE messages SET deleted_at = COALESCE(deleted_at, NOW()), body = 'This message was deleted', attachments = '[]'::jsonb WHERE id = $1", [messageId]);
+  if (mode === 'for-everyone') await query("UPDATE messages SET deleted_at = COALESCE(deleted_at, NOW()), body = 'This message was deleted', attachments = '[]'::jsonb, reactions = '{}'::jsonb WHERE id = $1", [messageId]);
   else await query("UPDATE messages SET hidden_by = CASE WHEN hidden_by ? $2 THEN hidden_by ELSE hidden_by || to_jsonb($2::text) END WHERE id = $1", [messageId, String(user.id)]);
   liveEvents.messageCreated(conversation);
   return { success: true };
@@ -491,6 +494,87 @@ const markRead = async (user, conversationId) => {
   return { changed };
 };
 
+/* -------------------------------------------------------------------------- */
+/* Reactions, editing, search, typing                                         */
+/* -------------------------------------------------------------------------- */
+
+// emoji: the reaction to set; the same emoji again, or null, removes it.
+const reactToMessage = async (user, conversationId, messageId, rawEmoji) => {
+  const conversation = await getAccessibleConversation(user, conversationId);
+  const emoji = chatExtras.cleanEmoji(rawEmoji);
+  const client = await db.connect();
+  let reactions;
+  try {
+    await client.query("BEGIN");
+    let rows;
+    try {
+      ({ rows } = await client.query(
+        `SELECT id, reactions, deleted_at, hidden_by FROM messages
+          WHERE id = $1 AND conversation_id = $2 FOR UPDATE`,
+        [messageId, conversation.id]
+      ));
+    } catch (err) {
+      if (err.code === "22P02") throw httpError(404, "Message not found.");
+      throw err;
+    }
+    const message = rows[0];
+    if (!message || message.deleted_at || (message.hidden_by || []).includes(String(user.id))) {
+      throw httpError(404, "Message not found.");
+    }
+    reactions = chatExtras.nextReactions(message.reactions, user.id, emoji);
+    await client.query("UPDATE messages SET reactions = $2::jsonb WHERE id = $1", [message.id, JSON.stringify(reactions)]);
+    await client.query("COMMIT");
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+  liveEvents.messageUpdated(conversation);
+  return { id: messageId, reactions };
+};
+
+const editMessage = async (user, conversationId, messageId, rawBody) => {
+  const conversation = await getAccessibleConversation(user, conversationId);
+  const { rows } = await query(
+    `SELECT id, sender_id, body, attachments, created_at, deleted_at, forwarded_from_id
+       FROM messages WHERE id = $1 AND conversation_id = $2`,
+    [messageId, conversation.id],
+    "Message not found."
+  );
+  const message = rows[0];
+  chatExtras.assertEditable(message, user.id);
+  const body = chatExtras.cleanEditBody(rawBody, (message.attachments || []).length > 0);
+  if (body === message.body) return { id: message.id, body, edited_at: null, unchanged: true };
+  const updated = await db.query(
+    "UPDATE messages SET body = $2, edited_at = NOW() WHERE id = $1 RETURNING id, body, edited_at",
+    [message.id, body]
+  );
+  liveEvents.messageUpdated(conversation);
+  return updated.rows[0];
+};
+
+// Newest matches first. Deleted messages and ones this user hid never match.
+const searchMessages = async (user, conversationId, q) => {
+  const conversation = await getAccessibleConversation(user, conversationId);
+  const pattern = chatExtras.searchPattern(q);
+  if (!pattern) return { results: [] };
+  const { rows } = await db.query(
+    `SELECT id, sender_id, body, created_at FROM messages
+      WHERE conversation_id = $1 AND deleted_at IS NULL
+        AND NOT (hidden_by ? $2) AND body ILIKE $3
+      ORDER BY created_at DESC, id DESC LIMIT ${chatExtras.SEARCH_LIMIT}`,
+    [conversation.id, String(user.id), pattern]
+  );
+  return { results: rows };
+};
+
+const typing = async (user, conversationId) => {
+  const conversation = await getAccessibleConversation(user, conversationId);
+  if (chatExtras.typingAllowed(`t${conversation.id}`, user.id)) liveEvents.messageTyping(conversation, user.id);
+  return { ok: true };
+};
+
 // Sidebar badge.
 //   manager: members' messages this manager has not read, active members only
 //   member:  admin team messages in their own conversation not read yet
@@ -535,4 +619,8 @@ module.exports = {
   forwardMessage,
   markRead,
   unreadCount,
+  reactToMessage,
+  editMessage,
+  searchMessages,
+  typing,
 };

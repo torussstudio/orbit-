@@ -63,7 +63,30 @@ const unreadCount = handle(async (req, res) => {
   res.json({ count: current.count + direct.count });
 });
 
+// { emoji } — the same emoji again, or null, removes the reaction.
+const reactToMessage = handle(async (req, res) => {
+  res.json(await messageService.reactToMessage(req.user, req.params.id, req.params.messageId, req.body?.emoji));
+});
+
+// { body }
+const editMessage = handle(async (req, res) => {
+  res.json({ message: await messageService.editMessage(req.user, req.params.id, req.params.messageId, req.body?.body) });
+});
+
+// ?q=
+const searchMessages = handle(async (req, res) => {
+  res.json(await messageService.searchMessages(req.user, req.params.id, req.query.q));
+});
+
+const typing = handle(async (req, res) => {
+  res.json(await messageService.typing(req.user, req.params.id));
+});
+
 module.exports = {
+  reactToMessage,
+  editMessage,
+  searchMessages,
+  typing,
   listConversations,
   startConversation,
   myConversation,

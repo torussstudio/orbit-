@@ -71,6 +71,15 @@ export const DASHBOARD_EVENTS = TASK_AND_PROJECT_EVENTS;
 export const MESSAGE_EVENTS = ["message.created", "message.read", ...CATCH_UP];
 export const DIRECT_MESSAGE_EVENTS = ["direct.message.created", "direct.message.read", ...CATCH_UP];
 
+// An open chat also refetches when a message is edited or gets a reaction.
+export const MESSAGE_THREAD_EVENTS = [...MESSAGE_EVENTS, "message.updated"];
+export const DIRECT_THREAD_EVENTS = [...DIRECT_MESSAGE_EVENTS, "direct.message.updated"];
+
+// "Someone is typing". Carries conversationId and userId, never text. Use
+// subscribe() directly: these must not trigger a refetch.
+export const MESSAGE_TYPING_EVENTS = ["message.typing"];
+export const DIRECT_TYPING_EVENTS = ["direct.typing"];
+
 // The bell keeps its own 30 s refresh, so it does not need "poll" / "resync".
 export const NOTIFICATION_EVENTS = ["notification.created"];
 

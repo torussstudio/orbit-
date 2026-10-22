@@ -790,6 +790,10 @@ const initDB = async () => {
   await ensureColumn("messages", `forwarded_from_id ${refType(defaultIdType)}`);
   await ensureColumn("messages", `hidden_by JSONB NOT NULL DEFAULT '[]'::jsonb`);
   await ensureColumn("messages", `deleted_at TIMESTAMPTZ`);
+  // Chat extras: reactions as { "<memberId>": "👍" } (one per person) and
+  // the time a message was last edited.
+  await ensureColumn("messages", `reactions JSONB NOT NULL DEFAULT '{}'::jsonb`);
+  await ensureColumn("messages", `edited_at TIMESTAMPTZ`);
   await pool.query(`ALTER TABLE messages DROP CONSTRAINT IF EXISTS messages_body_check`);
   await ensureConstraint("messages", "messages_body_or_attachment_check", `ALTER TABLE messages ADD CONSTRAINT messages_body_or_attachment_check CHECK (char_length(body) BETWEEN 0 AND 4000 AND (char_length(body) > 0 OR jsonb_array_length(attachments) > 0))`);
   await pool.query(`
@@ -836,6 +840,8 @@ const initDB = async () => {
   await ensureColumn("direct_messages", `forwarded_from_id ${refType(defaultIdType)}`);
   await ensureColumn("direct_messages", `hidden_by JSONB NOT NULL DEFAULT '[]'::jsonb`);
   await ensureColumn("direct_messages", `deleted_at TIMESTAMPTZ`);
+  await ensureColumn("direct_messages", `reactions JSONB NOT NULL DEFAULT '{}'::jsonb`);
+  await ensureColumn("direct_messages", `edited_at TIMESTAMPTZ`);
   await pool.query(`
     CREATE TABLE IF NOT EXISTS direct_conversation_reads (
       direct_conversation_id ${refType(defaultIdType)} NOT NULL REFERENCES direct_conversations(id) ON DELETE CASCADE,

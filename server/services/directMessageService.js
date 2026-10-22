@@ -4,6 +4,7 @@ const crypto = require('node:crypto');
 const db = require('../db');
 const liveEvents = require('./liveEvents');
 const { createNotification } = require('../utils/pushNotify');
+const chatExtras = require('../utils/chatExtras');
 
 const MAX_BODY = 4000;
 const MAX_ATTACHMENTS = 3;
@@ -209,6 +210,8 @@ async function listMessages(user, conversationId, { before, after, limit } = {})
             CASE WHEN m.deleted_at IS NOT NULL THEN '' ELSE m.body END AS body,
             m.attachments, m.created_at, m.reply_to_message_id,
             m.forwarded_from_id, m.deleted_at IS NOT NULL AS deleted,
+            CASE WHEN m.deleted_at IS NOT NULL THEN '{}'::jsonb ELSE m.reactions END AS reactions,
+            m.edited_at,
             rm.body AS reply_body, rm.sender_id AS reply_sender_id,
             rs.name AS reply_sender_name
        FROM direct_messages m
@@ -330,7 +333,7 @@ async function deleteMessage(user, conversationId, messageId, mode) {
   const message = rows[0];
   if (!message) throw fail(404, 'Message not found.');
   if (mode === 'for-everyone' && !sameId(message.sender_id, user.id)) throw fail(403, 'You can only delete your own message for everyone.');
-  if (mode === 'for-everyone') await db.query(`UPDATE direct_messages SET deleted_at = COALESCE(deleted_at, NOW()), body = '', attachments = '[]'::jsonb WHERE id = $1`, [messageId]);
+  if (mode === 'for-everyone') await db.query(`UPDATE direct_messages SET deleted_at = COALESCE(deleted_at, NOW()), body = '', attachments = '[]'::jsonb, reactions = '{}'::jsonb WHERE id = $1`, [messageId]);
   else await db.query(`UPDATE direct_messages SET hidden_by = CASE WHEN hidden_by ? $2 THEN hidden_by ELSE hidden_by || to_jsonb($2::text) END WHERE id = $1`, [messageId, String(user.id)]);
   liveEvents.directMessageCreated(conversation);
   return { success: true };
@@ -380,6 +383,78 @@ async function markRead(user, conversationId) {
   return { changed };
 }
 
+/* ---------- Reactions, editing, search, typing ---------- */
+
+// emoji: the reaction to set; the same emoji again, or null, removes it.
+async function reactToMessage(user, conversationId, messageId, rawEmoji) {
+  const conversation = await accessible(user, conversationId);
+  const emoji = chatExtras.cleanEmoji(rawEmoji);
+  const client = await db.connect();
+  let reactions;
+  try {
+    await client.query('BEGIN');
+    const { rows } = await client.query(
+      `SELECT id, reactions, deleted_at, hidden_by FROM direct_messages
+        WHERE id = $1 AND direct_conversation_id = $2 FOR UPDATE`,
+      [messageId, conversation.id],
+    );
+    const message = rows[0];
+    if (!message || message.deleted_at || (message.hidden_by || []).includes(String(user.id))) {
+      throw fail(404, 'Message not found.');
+    }
+    reactions = chatExtras.nextReactions(message.reactions, user.id, emoji);
+    await client.query('UPDATE direct_messages SET reactions = $2::jsonb WHERE id = $1', [message.id, JSON.stringify(reactions)]);
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+  liveEvents.directMessageUpdated(conversation);
+  return { id: messageId, reactions };
+}
+
+async function editMessage(user, conversationId, messageId, rawBody) {
+  const conversation = await accessible(user, conversationId);
+  const { rows } = await db.query(
+    `SELECT id, sender_id, body, attachments, created_at, deleted_at, forwarded_from_id
+       FROM direct_messages WHERE id = $1 AND direct_conversation_id = $2`,
+    [messageId, conversation.id],
+  );
+  const message = rows[0];
+  chatExtras.assertEditable(message, user.id);
+  const body = chatExtras.cleanEditBody(rawBody, (message.attachments || []).length > 0);
+  if (body === message.body) return { id: message.id, body, edited_at: null, unchanged: true };
+  const updated = await db.query(
+    `UPDATE direct_messages SET body = $2, edited_at = NOW() WHERE id = $1 RETURNING id, body, edited_at`,
+    [message.id, body],
+  );
+  liveEvents.directMessageUpdated(conversation);
+  return updated.rows[0];
+}
+
+// Newest matches first. Messages deleted, or hidden by this user, never match.
+async function searchMessages(user, conversationId, q) {
+  const conversation = await accessible(user, conversationId);
+  const pattern = chatExtras.searchPattern(q);
+  if (!pattern) return { results: [] };
+  const { rows } = await db.query(
+    `SELECT id, sender_id, body, created_at FROM direct_messages
+      WHERE direct_conversation_id = $1 AND deleted_at IS NULL
+        AND NOT (hidden_by ? $2) AND body ILIKE $3
+      ORDER BY created_at DESC, id DESC LIMIT ${chatExtras.SEARCH_LIMIT}`,
+    [conversation.id, String(user.id), pattern],
+  );
+  return { results: rows };
+}
+
+async function typing(user, conversationId) {
+  const conversation = await accessible(user, conversationId);
+  if (chatExtras.typingAllowed(`d${conversation.id}`, user.id)) liveEvents.directTyping(conversation, user.id);
+  return { ok: true };
+}
+
 async function unreadCount(user) {
   requireMember(user);
   const { rows } = await db.query(
@@ -394,4 +469,4 @@ async function unreadCount(user) {
   return Number(rows[0]?.count || 0);
 }
 
-module.exports = { listMembers, listConversations, startConversation, listMessages, sendMessage, deleteMessage, forwardMessage, markRead, unreadCount, signUpload, validateAttachment };
+module.exports = { listMembers, listConversations, startConversation, listMessages, sendMessage, deleteMessage, forwardMessage, markRead, unreadCount, signUpload, validateAttachment, reactToMessage, editMessage, searchMessages, typing };

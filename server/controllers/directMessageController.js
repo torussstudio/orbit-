@@ -22,4 +22,8 @@ module.exports = {
   read: handle(async (req, res) => res.json(await service.markRead(req.user, req.params.id))),
   unread: handle(async (req, res) => res.json({ count: await service.unreadCount(req.user) })),
   uploadSignature: handle(async (req, res) => res.json(await service.signUpload(req.user, req.body || {}))),
+  react: handle(async (req, res) => res.json(await service.reactToMessage(req.user, req.params.id, req.params.messageId, req.body?.emoji))),
+  edit: handle(async (req, res) => res.json({ message: await service.editMessage(req.user, req.params.id, req.params.messageId, req.body?.body) })),
+  search: handle(async (req, res) => res.json(await service.searchMessages(req.user, req.params.id, req.query.q))),
+  typing: handle(async (req, res) => res.json(await service.typing(req.user, req.params.id))),
 };

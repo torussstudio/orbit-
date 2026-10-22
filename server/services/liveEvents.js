@@ -273,6 +273,61 @@ function directMessageRead(conversation) {
   directMessageEvent("direct.message.read", conversation);
 }
 
+// A message was edited or got a reaction. Clients refetch the thread.
+function directMessageUpdated(conversation) {
+  directMessageEvent("direct.message.updated", conversation);
+}
+
+function messageUpdated(conversation) {
+  messageEvent("message.updated", conversation);
+}
+
+/*
+ * Typing indicators. Only the OTHER side hears it, the event carries the
+ * typer's id (no text), and nothing is stored.
+ */
+function directTyping(conversation, userId) {
+  try {
+    if (shouldSkip() || !conversation) return;
+    const other = String(conversation.member_one_id) === String(userId)
+      ? conversation.member_two_id
+      : conversation.member_one_id;
+    eventBus.publish([other], {
+      type: "direct.typing",
+      conversationId: conversation.id,
+      userId,
+      at: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.error("[liveEvents] typing event failed:", err?.message);
+  }
+}
+
+async function sendMessageTyping(conversation, userId) {
+  const { rows } = await db.query(
+    `SELECT id FROM members WHERE role = 'manager' AND active = true`,
+  );
+  const recipients = [conversation.member_id, ...rows.map((row) => row.id)]
+    .filter((id) => String(id) !== String(userId));
+  eventBus.publish(recipients, {
+    type: "message.typing",
+    conversationId: conversation.id,
+    userId,
+    at: new Date().toISOString(),
+  });
+}
+
+function messageTyping(conversation, userId) {
+  try {
+    if (shouldSkip() || !conversation) return;
+    sendMessageTyping(conversation, userId).catch((err) => {
+      console.error("[liveEvents] typing event failed:", err?.message);
+    });
+  } catch (err) {
+    console.error("[liveEvents] typing event failed:", err?.message);
+  }
+}
+
 /*
  * The member's access changed (deactivated, deleted, role changed, password
  * set by a manager, logged out everywhere): forget their cached auth lookup,
@@ -363,4 +418,8 @@ module.exports = {
   messageRead,
   directMessageCreated,
   directMessageRead,
+  directMessageUpdated,
+  messageUpdated,
+  directTyping,
+  messageTyping,
 };

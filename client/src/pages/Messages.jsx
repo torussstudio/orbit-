@@ -2,8 +2,12 @@ import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRe
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import api from '../api/client';
 import { useAuth } from '../context/AuthContext';
-import { useLiveRefetch, MESSAGE_EVENTS } from '../hooks/useLiveEvents';
+import { useLiveRefetch, MESSAGE_EVENTS, MESSAGE_THREAD_EVENTS, MESSAGE_TYPING_EVENTS } from '../hooks/useLiveEvents';
 import { ChatAttachmentCard, ChatMediaPreview, PendingChatAttachment } from '../components/messages/ChatMediaPreview';
+import {
+  ChatSearchBar, Highlight, ReactionChips, ReactionPicker, ReadTicks, TypingBubble, TypingDots,
+  canEditMessage, toggleReaction, useTypingIndicator, useTypingSender,
+} from '../components/messages/ChatExtras';
 
 /*
  * Messages: members <-> admin team (shared inbox).
@@ -113,6 +117,8 @@ const ICON_PATHS = {
   forward: <><path d="M15 14l5-5-5-5" /><path d="M20 9H10a6 6 0 00-6 6v3" /></>,
   trash: <><path d="M4 7h16" /><path d="M10 11v6M14 11v6" /><path d="M6 7l1 12a1 1 0 001 1h8a1 1 0 001-1l1-12" /><path d="M9 7V4h6v3" /></>,
   file: <><path d="M14 3H7a1 1 0 00-1 1v16a1 1 0 001 1h10a1 1 0 001-1V7l-4-4z" /><path d="M14 3v4h4" /></>,
+  smile: <><circle cx="12" cy="12" r="9" /><path d="M8.5 14.2a4.5 4.5 0 007 0M9 9.5h.01M15 9.5h.01" /></>,
+  edit: <><path d="M4 20h4L18.5 9.5a2.1 2.1 0 00-4-4L4 16v4z" /><path d="M13.5 6.5l4 4" /></>,
 };
 
 function Icon({ name, className = 'h-4 w-4' }) {
@@ -149,9 +155,10 @@ function Avatar({ name, url, size = 'md' }) {
 }
 
 // Plain text with http(s) links made clickable. No HTML is ever rendered.
+// `query` marks search matches in the text parts.
 const URL_RE = /(https?:\/\/[^\s<]+[^\s<.,:;"')\]!?])/g;
 
-function Linkified({ text }) {
+function Linkified({ text, query = '' }) {
   return text.split(URL_RE).map((part, i) =>
     i % 2 === 1 ? (
       <a
@@ -164,7 +171,7 @@ function Linkified({ text }) {
         {part}
       </a>
     ) : (
-      <Fragment key={i}>{part}</Fragment>
+      <Fragment key={i}><Highlight text={part} query={query} /></Fragment>
     ),
   );
 }
@@ -248,8 +255,15 @@ function Thread({ conversationId, memberId, header, onBack, onActivity, forwardT
   const [previewAttachment, setPreviewAttachment] = useState(null);
   const [profileOpen, setProfileOpen] = useState(false);
   const [deleteConfirmation, setDeleteConfirmation] = useState(null);
+  const [editing, setEditing] = useState(null);
+  const [reactPickerId, setReactPickerId] = useState(null);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [flash, setFlash] = useState(null); // { id, at }: search match to highlight
+  const [actionError, setActionError] = useState(''); // edit / reaction failed
 
   const scrollRef = useRef(null);
+  const olderBusyRef = useRef(false);
   const textareaRef = useRef(null);
   const fileInputRef = useRef(null);
   const dragDepthRef = useRef(0);
@@ -292,9 +306,17 @@ function Thread({ conversationId, memberId, header, onBack, onActivity, forwardT
     try {
       const { data } = await api.get(`/messages/conversations/${cid}/messages`, { params: { limit: 100 } });
       if (cidRef.current !== cid) return;
-      stickRef.current = true;
-      setMessages(data.messages || []);
-      setHasMore(Boolean(data.has_more));
+      if (!silent) stickRef.current = true;
+      // Keep older pages already on screen (scrolled up to, or opened by
+      // search), so a live update does not throw them away.
+      const page = data.messages || [];
+      const older = page.length
+        ? messagesRef.current.filter((m) => new Date(m.created_at) < new Date(page[0].created_at))
+        : [];
+      const next = page.length ? [...older, ...page] : [];
+      messagesRef.current = next;
+      setMessages(next);
+      if (!older.length) setHasMore(Boolean(data.has_more));
       setOtherReadAt(data.other_read_at || null);
       setReadOnly(data.conversation?.member_active === false);
       setError('');
@@ -322,15 +344,60 @@ function Thread({ conversationId, memberId, header, onBack, onActivity, forwardT
     setShowJump(false);
     setDraft('');
     setFiles([]);
+    setEditing(null);
+    setReactPickerId(null);
+    setSearchOpen(false);
+    setSearchQuery('');
+    setFlash(null);
+    messagesRef.current = [];
     lastSeenIdRef.current = null;
     stickRef.current = true;
     loadLatest();
   }, [conversationId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  useLiveRefetch(MESSAGE_EVENTS, fetchNew, {
+  useLiveRefetch(MESSAGE_THREAD_EVENTS, fetchNew, {
     match: (event) => sameId(event.conversationId, cidRef.current),
     delay: 150,
   });
+
+  const { notify: notifyTyping, reset: resetTyping } = useTypingSender(`/messages/conversations/${conversationId}/typing`);
+  const { typingIds, clear: clearTyping } = useTypingIndicator(MESSAGE_TYPING_EVENTS, conversationId, user?.id);
+
+  // Display name for a person in this thread (reactions, "typing…").
+  const nameOf = useCallback((id) => {
+    if (sameId(id, user?.id)) return 'You';
+    if (sameId(id, memberId)) return isManager ? header.title : user?.name || 'Member';
+    const found = messagesRef.current.find((m) => sameId(m.sender_id, id) && m.sender_name);
+    return found?.sender_name || 'Admin';
+  }, [user?.id, user?.name, memberId, isManager, header.title]);
+
+  const typingLabel = useMemo(() => {
+    if (!typingIds.length) return '';
+    const names = typingIds.map((id) => {
+      const known = nameOf(id);
+      return known === 'Admin' && !isManager ? 'The admin team' : known.split(' ')[0];
+    });
+    return names.length === 1 ? `${names[0]} is typing` : `${names.slice(0, 2).join(' and ')} are typing`;
+  }, [typingIds, nameOf, isManager]);
+
+  useEffect(() => {
+    if (!actionError) return undefined;
+    const timer = setTimeout(() => setActionError(''), 4000);
+    return () => clearTimeout(timer);
+  }, [actionError]);
+
+  // The reaction picker closes on a click outside it or on Escape.
+  useEffect(() => {
+    if (reactPickerId == null) return undefined;
+    const onDown = (event) => { if (!event.target.closest?.('[data-react-picker]')) setReactPickerId(null); };
+    const onKey = (event) => { if (event.key === 'Escape') setReactPickerId(null); };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [reactPickerId]);
 
   // While the thread is open and the tab is visible: keep it marked as read,
   // so the server does not push to this person. Also on coming back to the tab.
@@ -361,11 +428,12 @@ function Thread({ conversationId, memberId, header, onBack, onActivity, forwardT
     const previous = lastSeenIdRef.current;
     lastSeenIdRef.current = String(last.id);
     if (previous === null || previous === String(last.id)) return;
+    if (!sameId(last.sender_id, user?.id)) clearTyping(last.sender_id);
     if (isOwnSide(last)) return;
 
     markRead();
     if (!stickRef.current) setShowJump(true);
-  }, [messages, isOwnSide, markRead]);
+  }, [messages, isOwnSide, markRead, clearTyping, user?.id]);
 
   // Scroll: keep position after loading older, else stay pinned to the bottom.
   useLayoutEffect(() => {
@@ -378,27 +446,61 @@ function Thread({ conversationId, memberId, header, onBack, onActivity, forwardT
       return;
     }
     if (stickRef.current) el.scrollTop = el.scrollHeight;
-  }, [messages, pending, loading]);
+  }, [messages, pending, loading, typingIds.length]);
 
-  const loadOlder = useCallback(async () => {
-    if (loadingOlder || !hasMore || !messagesRef.current.length) return;
+  // One page older than the oldest message on screen. Returns how many came.
+  const fetchOlderPage = useCallback(async () => {
+    if (olderBusyRef.current || !messagesRef.current.length) return 0;
     const cid = conversationId;
+    olderBusyRef.current = true;
     setLoadingOlder(true);
     try {
       const { data } = await api.get(`/messages/conversations/${cid}/messages`, {
         params: { before: messagesRef.current[0].id },
       });
-      if (cidRef.current !== cid) return;
+      if (cidRef.current !== cid) return 0;
+      const incoming = data.messages || [];
+      const next = mergeMessages(messagesRef.current, incoming);
+      const added = next.length - messagesRef.current.length;
       const el = scrollRef.current;
-      if (el) restoreRef.current = { height: el.scrollHeight, top: el.scrollTop };
-      setMessages((prev) => mergeMessages(prev, data.messages || []));
+      if (el && added) restoreRef.current = { height: el.scrollHeight, top: el.scrollTop };
+      messagesRef.current = next;
+      setMessages(next);
       setHasMore(Boolean(data.has_more));
+      return added;
     } catch {
-      /* the button stays, the person can try again */
+      return 0; /* the button stays, the person can try again */
     } finally {
+      olderBusyRef.current = false;
       setLoadingOlder(false);
     }
-  }, [conversationId, hasMore, loadingOlder]);
+  }, [conversationId]);
+
+  const loadOlder = useCallback(() => {
+    if (hasMore) fetchOlderPage();
+  }, [hasMore, fetchOlderPage]);
+
+  // Search: load older pages until the match is on screen, then flash it.
+  const jumpTo = useCallback(async (result) => {
+    if (!result) return;
+    const cid = conversationId;
+    stickRef.current = false;
+    setShowJump(false);
+    for (let guard = 0; guard < 40 && !messagesRef.current.some((m) => sameId(m.id, result.id)); guard += 1) {
+      const added = await fetchOlderPage();
+      if (!added || cidRef.current !== cid) break;
+    }
+    setFlash({ id: String(result.id), at: Date.now() });
+  }, [conversationId, fetchOlderPage]);
+
+  useEffect(() => {
+    if (!flash) return undefined;
+    const frame = requestAnimationFrame(() => {
+      document.getElementById(`team-msg-${flash.id}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    });
+    const timer = setTimeout(() => setFlash(null), 2200);
+    return () => { cancelAnimationFrame(frame); clearTimeout(timer); };
+  }, [flash]);
 
   const onScroll = (e) => {
     const el = e.currentTarget;
@@ -446,7 +548,53 @@ function Thread({ conversationId, memberId, header, onBack, onActivity, forwardT
     return { public_id: result.public_id, secure_url: result.secure_url, resource_type: result.resource_type, format: result.format, bytes: result.bytes, original_filename: file.name };
   }, []);
 
+  const saveEdit = useCallback(async () => {
+    const target = editing;
+    const body = draft.trim();
+    if (!target || (!body && !target.attachments?.length) || uploading) return;
+    setUploading(true);
+    setActionError('');
+    try {
+      const { data } = await api.patch(`/messages/conversations/${conversationId}/messages/${target.id}`, { body }, { silent: true });
+      setMessages((old) => old.map((m) => (sameId(m.id, target.id) ? { ...m, body: data?.message?.body ?? body, edited_at: data?.message?.edited_at || m.edited_at } : m)));
+      setEditing(null);
+      setDraft('');
+      onActivity?.();
+    } catch (err) {
+      setActionError(apiError(err, 'Could not edit this message.'));
+    } finally {
+      setUploading(false);
+    }
+  }, [conversationId, draft, editing, onActivity, uploading]);
+
+  const startEdit = useCallback((message) => {
+    setEditing(message);
+    setReplyTo(null);
+    setForwarding(null);
+    setDraft(message.body || '');
+    requestAnimationFrame(() => textareaRef.current?.focus());
+  }, []);
+
+  const cancelEdit = () => {
+    setEditing(null);
+    setDraft('');
+  };
+
+  // Same emoji again removes it. Shown at once, then confirmed by the server.
+  const react = useCallback(async (message, emoji) => {
+    setReactPickerId(null);
+    setMessages((old) => old.map((m) => (sameId(m.id, message.id) ? { ...m, reactions: toggleReaction(m.reactions, user?.id, emoji) } : m)));
+    try {
+      const { data } = await api.post(`/messages/conversations/${conversationId}/messages/${message.id}/reactions`, { emoji }, { silent: true });
+      setMessages((old) => old.map((m) => (sameId(m.id, message.id) ? { ...m, reactions: data?.reactions || {} } : m)));
+    } catch (err) {
+      setActionError(apiError(err, 'Could not add the reaction.'));
+      loadLatest({ silent: true });
+    }
+  }, [conversationId, loadLatest, user?.id]);
+
   const send = useCallback(async (retry) => {
+    if (editing && !retry) { saveEdit(); return; }
     setError('');
     const body = (retry ? retry.body : draft).trim();
     const outgoingFiles = retry?.files || files;
@@ -459,6 +607,7 @@ function Thread({ conversationId, memberId, header, onBack, onActivity, forwardT
       setPending((p) => [...p, { tempId, body, displayBody: body || outgoingFiles.map((file) => file.name).join(', '), files: outgoingFiles, status: 'sending', error: '', created_at: new Date().toISOString() }]);
       setDraft('');
     }
+    resetTyping();
     stickRef.current = true;
     setShowJump(false);
     textareaRef.current?.focus();
@@ -485,7 +634,7 @@ function Thread({ conversationId, memberId, header, onBack, onActivity, forwardT
     } finally {
       setUploading(false);
     }
-  }, [conversationId, draft, files, onActivity, readOnly, replyTo, uploadFile, uploading]);
+  }, [conversationId, draft, editing, files, onActivity, readOnly, replyTo, resetTyping, saveEdit, uploadFile, uploading]);
 
   const deleteMessage = useCallback(async (message, mode, confirmed = false) => {
     if (mode === 'for-everyone' && !confirmed) {
@@ -519,6 +668,11 @@ function Thread({ conversationId, memberId, header, onBack, onActivity, forwardT
   }, [draft]);
 
   const onComposerKey = (e) => {
+    if (e.key === 'Escape' && editing) {
+      e.preventDefault();
+      cancelEdit();
+      return;
+    }
     if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
       send();
@@ -643,10 +797,32 @@ function Thread({ conversationId, memberId, header, onBack, onActivity, forwardT
             <span className="truncate">{header.title}</span>
             {headerVerified && <VerifiedBadge className="h-4 w-4" />}
           </h2>
-          {header.subtitle && <p className="mt-0.5 truncate text-[11px] text-[color:var(--text-3)]">{header.subtitle}</p>}
+          {typingLabel ? (
+            <p className="mt-0.5 flex items-center gap-1.5 truncate text-[11px] font-medium text-[color:var(--accent)]" aria-live="polite"><TypingDots />{typingLabel}…</p>
+          ) : (
+            header.subtitle && <p className="mt-0.5 truncate text-[11px] text-[color:var(--text-3)]">{header.subtitle}</p>
+          )}
         </button>
-        {header.action && <div className="ml-auto shrink-0">{header.action}</div>}
+        <button
+          type="button"
+          onClick={() => { setSearchOpen((v) => !v); setSearchQuery(''); }}
+          aria-label="Search this chat"
+          aria-pressed={searchOpen}
+          title="Search this chat"
+          className={`ml-auto grid h-9 w-9 shrink-0 place-items-center rounded-xl transition duration-200 hover:bg-[var(--bg-3)] hover:text-[color:var(--text)] active:scale-95 ${FOCUS_RING} ${searchOpen ? 'bg-[var(--bg-3)] text-[color:var(--accent)]' : 'text-[color:var(--text-2)]'}`}
+        >
+          <Icon name="search" className="h-[18px] w-[18px]" />
+        </button>
+        {header.action && <div className="shrink-0">{header.action}</div>}
       </header>
+      {searchOpen && (
+        <ChatSearchBar
+          searchUrl={`/messages/conversations/${conversationId}/search`}
+          onClose={() => { setSearchOpen(false); setSearchQuery(''); }}
+          onJump={jumpTo}
+          onQueryChange={setSearchQuery}
+        />
+      )}
 
       {/* Messages */}
       <div className="relative min-h-0 flex-1">
@@ -695,6 +871,7 @@ function Thread({ conversationId, memberId, header, onBack, onActivity, forwardT
                   <MessageRow
                     key={row.key}
                     row={row}
+                    seen={Boolean(row.right && !row.m.pending && otherReadAt && new Date(otherReadAt) >= new Date(row.m.created_at))}
                     status={
                       row.key === lastOwnKey
                         ? otherReadAt && new Date(otherReadAt) >= new Date(row.m.created_at)
@@ -704,16 +881,25 @@ function Thread({ conversationId, memberId, header, onBack, onActivity, forwardT
                     }
                     onRetry={send}
                     onDiscard={discard}
-                    onReply={(message) => { setReplyTo(message); textareaRef.current?.focus(); }}
+                    onReply={(message) => { setEditing(null); setReplyTo(message); textareaRef.current?.focus(); }}
                     onDelete={deleteMessage}
                     onForward={(message) => { setForwarding(message); setForwardTarget(''); }}
                     onOpenAttachment={setPreviewAttachment}
                     canForward={Boolean(isManager)}
+                    meId={user?.id}
+                    nameOf={nameOf}
+                    onReact={react}
+                    onEdit={startEdit}
+                    pickerOpen={sameId(reactPickerId, row.m.id)}
+                    onOpenPicker={(message) => setReactPickerId(message.id)}
+                    searchQuery={searchOpen ? searchQuery : ''}
+                    flashing={sameId(flash?.id, row.m.id)}
                   />
                 ),
               )}
             </ol>
           )}
+          {typingLabel && !loading && !error && <div className="mt-3"><TypingBubble label={typingLabel} /></div>}
         </div>
 
         {showJump && (
@@ -730,6 +916,18 @@ function Thread({ conversationId, memberId, header, onBack, onActivity, forwardT
 
       {/* Composer */}
       <div className="relative shrink-0 border-t border-[color:var(--border)] bg-[var(--bg-2)] px-3 pb-2.5 pt-3 sm:px-5">
+        {actionError && (
+          <p role="alert" className="mb-2 rounded-xl border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs text-red-600">{actionError}</p>
+        )}
+        {editing && (
+          <div className="mb-2 flex items-center justify-between gap-3 rounded-xl border-l-2 border-amber-400 bg-amber-400/10 px-3 py-2 text-xs text-[color:var(--text-2)]">
+            <span className="flex min-w-0 items-center gap-1.5">
+              <Icon name="edit" className="h-3.5 w-3.5 text-amber-500" />
+              <span className="truncate"><span className="font-semibold text-[color:var(--text)]">Editing message</span> · {editing.body || 'Attachment'}</span>
+            </span>
+            <button type="button" onClick={cancelEdit} aria-label="Cancel editing" className={`grid h-6 w-6 shrink-0 place-items-center rounded-md transition duration-200 hover:bg-black/10 ${FOCUS_RING}`}><Icon name="close" className="h-3.5 w-3.5" /></button>
+          </div>
+        )}
         {replyTo && (
           <div className="mb-2 flex items-center justify-between gap-3 rounded-xl border-l-2 border-[color:var(--accent)] bg-[var(--accent-light)] px-3 py-2 text-xs text-[color:var(--text-2)]">
             <span className="truncate">Replying to {replyTo.sender_name || 'message'}: {replyTo.body}</span>
@@ -777,7 +975,7 @@ function Thread({ conversationId, memberId, header, onBack, onActivity, forwardT
               title="Attach a file"
               aria-label="Attach a file"
               onClick={() => fileInputRef.current?.click()}
-              disabled={files.length >= MAX_ATTACHMENTS || uploading}
+              disabled={files.length >= MAX_ATTACHMENTS || uploading || Boolean(editing)}
               className={`grid h-9 w-9 shrink-0 place-items-center rounded-xl text-[color:var(--text-2)] transition duration-200 hover:bg-[var(--bg-2)] hover:text-[color:var(--text)] active:scale-95 disabled:opacity-40 ${FOCUS_RING}`}
             >
               <Icon name="clip" className="h-[18px] w-[18px]" />
@@ -792,15 +990,15 @@ function Thread({ conversationId, memberId, header, onBack, onActivity, forwardT
               value={draft}
               maxLength={MAX_LEN}
               disabled={loading || Boolean(error)}
-              onChange={(e) => setDraft(e.target.value)}
+              onChange={(e) => { setDraft(e.target.value); if (e.target.value.trim() && !editing) notifyTyping(); }}
               onKeyDown={onComposerKey}
-              placeholder={isManager ? `Message ${header.title}` : 'Message the admin team'}
+              placeholder={editing ? 'Edit your message' : isManager ? `Message ${header.title}` : 'Message the admin team'}
               className="min-h-9 min-w-0 flex-1 resize-none bg-transparent px-1.5 py-2 text-[16px] leading-5 text-[color:var(--text)] outline-none placeholder:text-[color:var(--text-3)] disabled:opacity-60 sm:text-sm"
             />
             <button
               type="submit"
-              disabled={(!draft.trim() && !files.length) || loading || Boolean(error) || uploading}
-              aria-label="Send message"
+              disabled={(!draft.trim() && !files.length && !editing?.attachments?.length) || loading || Boolean(error) || uploading}
+              aria-label={editing ? 'Save edit' : 'Send message'}
               className={`grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-[var(--accent)] text-white shadow-[0_8px_18px_-8px_var(--accent)] transition duration-200 hover:brightness-110 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none ${FOCUS_RING}`}
             >
               {uploading ? <span className="animate-pulse text-xs">…</span> : <Icon name="send" className="h-[18px] w-[18px]" />}
@@ -867,10 +1065,14 @@ function Thread({ conversationId, memberId, header, onBack, onActivity, forwardT
   );
 }
 
-const MessageRow = memo(function MessageRow({ row, status, onRetry, onDiscard, onReply, onDelete, onForward, onOpenAttachment, canForward }) {
+const MessageRow = memo(function MessageRow({
+  row, status, seen, onRetry, onDiscard, onReply, onDelete, onForward, onOpenAttachment, canForward,
+  meId, nameOf, onReact, onEdit, pickerOpen, onOpenPicker, searchQuery, flashing,
+}) {
   const { m, right, mine, grouped, name } = row;
   const p = m.pending;
   const [showActions, setShowActions] = useState(false);
+  const editable = canEditMessage(m, meId);
 
   const bubble = right
     ? mine
@@ -880,7 +1082,7 @@ const MessageRow = memo(function MessageRow({ row, status, onRetry, onDiscard, o
     : 'rounded-bl-md border border-[color:var(--border)] bg-[var(--bg-2)] text-[color:var(--text)] shadow-[0_8px_20px_-16px_rgba(15,23,42,0.5)]';
 
   return (
-    <li className={`group flex w-full min-w-0 flex-col ${right ? 'items-end' : 'items-start'} ${grouped ? 'mt-0.5' : 'mt-3 first:mt-0'}`}>
+    <li id={m.id != null ? `team-msg-${m.id}` : undefined} className={`group flex w-full min-w-0 flex-col ${right ? 'items-end' : 'items-start'} ${grouped ? 'mt-0.5' : 'mt-3 first:mt-0'}`}>
       {name && (
         <span className="mb-1 inline-flex items-center gap-1 px-1 text-[11px] font-medium text-[color:var(--text-3)]">
           {name}
@@ -891,7 +1093,7 @@ const MessageRow = memo(function MessageRow({ row, status, onRetry, onDiscard, o
         onClick={() => { if (!p && !m.deleted) setShowActions((v) => !v); }}
         className={`relative max-w-[88%] whitespace-pre-wrap break-words rounded-2xl px-3.5 py-2 text-[13.5px] leading-relaxed [overflow-wrap:anywhere] sm:max-w-[min(72%,560px)] ${bubble} ${
           p?.status === 'failed' ? 'opacity-70 ring-1 ring-[color:var(--danger)]' : ''
-        } ${p?.status === 'sending' ? 'opacity-70' : ''}`}
+        } ${p?.status === 'sending' ? 'opacity-70' : ''} ${flashing ? 'ring-2 ring-amber-400 ring-offset-2 ring-offset-[color:var(--bg)]' : ''}`}
       >
         {m.forwarded_from_id && <p className="mb-1 flex items-center gap-1 text-[10px] font-medium italic opacity-75"><Icon name="forward" className="h-3 w-3" />Forwarded</p>}
         {m.reply_to_message_id && (
@@ -900,18 +1102,36 @@ const MessageRow = memo(function MessageRow({ row, status, onRetry, onDiscard, o
             <p className="truncate opacity-80">{m.reply_body || 'Message'}</p>
           </div>
         )}
-        {m.deleted ? <span className="italic opacity-70">This message was deleted</span> : <Linkified text={m.body || ''} />}
+        {m.deleted ? <span className="italic opacity-70">This message was deleted</span> : <Linkified text={m.body || ''} query={searchQuery} />}
         {!m.deleted && m.attachments?.map((file) => <ChatAttachmentCard key={file.public_id} file={file} onOpen={onOpenAttachment} />)}
         {p?.status === 'sending' && p.files?.map((file, index) => <PendingChatAttachment key={`${p.tempId}-${index}`} file={file} />)}
         {!p && !m.deleted && (
-          <div className={`${showActions ? 'mt-2 flex' : 'hidden'} items-center gap-0.5 whitespace-normal rounded-lg bg-black/10 p-0.5 md:absolute md:-top-4 ${right ? 'md:right-2' : 'md:left-2'} md:z-10 md:mt-0 md:flex md:border md:border-[color:var(--border)] md:bg-[var(--bg-2)] md:text-[color:var(--text-2)] md:opacity-0 md:shadow-[0_8px_20px_-12px_rgba(15,23,42,0.5)] md:transition-opacity md:duration-200 md:focus-within:opacity-100 md:group-hover:opacity-100`}>
-            <MessageAction icon="reply" title="Reply" onClick={() => onReply(m)} />
-            {canForward && <MessageAction icon="forward" title="Forward" onClick={() => onForward(m)} />}
-            <MessageAction icon="trash" title="Delete for me" text="For me" onClick={() => onDelete(m, 'for-me')} />
-            {mine && <MessageAction icon="trash" title="Delete for everyone" text="Everyone" danger onClick={() => onDelete(m, 'for-everyone')} />}
+          <div data-react-picker className={`${showActions || pickerOpen ? 'mt-2 flex' : 'hidden'} items-center gap-0.5 whitespace-normal rounded-lg bg-black/10 p-0.5 md:absolute ${pickerOpen ? 'md:-top-9' : 'md:-top-4'} ${right ? 'md:right-2' : 'md:left-2'} md:z-10 md:mt-0 md:flex md:border md:border-[color:var(--border)] md:bg-[var(--bg-2)] md:text-[color:var(--text-2)] ${pickerOpen ? 'md:opacity-100' : 'md:opacity-0'} md:shadow-[0_8px_20px_-12px_rgba(15,23,42,0.5)] md:transition-opacity md:duration-200 md:focus-within:opacity-100 md:group-hover:opacity-100`}>
+            {pickerOpen ? (
+              <ReactionPicker current={m.reactions?.[String(meId)]} onPick={(emoji) => { setShowActions(false); onReact(m, emoji); }} />
+            ) : (
+              <>
+                <MessageAction icon="smile" title="React" onClick={(e) => { e.stopPropagation(); onOpenPicker(m); }} />
+                <MessageAction icon="reply" title="Reply" onClick={() => onReply(m)} />
+                {editable && <MessageAction icon="edit" title="Edit" onClick={() => { setShowActions(false); onEdit(m); }} />}
+                {canForward && <MessageAction icon="forward" title="Forward" onClick={() => onForward(m)} />}
+                <MessageAction icon="trash" title="Delete for me" text="For me" onClick={() => onDelete(m, 'for-me')} />
+                {mine && <MessageAction icon="trash" title="Delete for everyone" text="Everyone" danger onClick={() => onDelete(m, 'for-everyone')} />}
+              </>
+            )}
           </div>
         )}
       </div>
+
+      {!p && !m.deleted && (
+        <ReactionChips
+          reactions={m.reactions}
+          meId={meId}
+          nameOf={nameOf}
+          onToggle={(emoji) => onReact(m, emoji)}
+          alignEnd={right}
+        />
+      )}
 
       <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 px-1 text-[10px] tabular-nums text-[color:var(--text-3)]">
         {p?.status === 'sending' && <span>Sending…</span>}
@@ -926,10 +1146,16 @@ const MessageRow = memo(function MessageRow({ row, status, onRetry, onDiscard, o
             </button>
           </span>
         )}
+        {!p && m.edited_at && !m.deleted && (
+          <span className="italic" title={`Edited ${new Date(m.edited_at).toLocaleString('en-IN')}`}>edited</span>
+        )}
         {!p && (
           <time dateTime={m.created_at} title={new Date(m.created_at).toLocaleString('en-IN')}>
             {TIME_FMT.format(new Date(m.created_at))}
           </time>
+        )}
+        {!p && right && !m.deleted && (
+          <ReadTicks seen={seen} className={`-mx-1 h-3.5 w-3.5 ${seen ? 'text-[color:var(--accent)]' : ''}`} />
         )}
         {!p && status && <span className={status === 'Seen' ? 'font-medium text-[color:var(--accent)]' : ''}>· {status}</span>}
       </div>

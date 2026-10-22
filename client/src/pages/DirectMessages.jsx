@@ -732,12 +732,16 @@
 
 
 
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import api from '../api/client';
 import { useAuth } from '../context/AuthContext';
-import { useLiveRefetch, DIRECT_MESSAGE_EVENTS } from '../hooks/useLiveEvents';
+import { useLiveRefetch, DIRECT_THREAD_EVENTS, DIRECT_TYPING_EVENTS } from '../hooks/useLiveEvents';
 import { ChatAttachmentCard, ChatMediaPreview, PendingChatAttachment } from '../components/messages/ChatMediaPreview';
+import {
+  ChatSearchBar, Highlight, ReactionChips, ReactionPicker, ReadTicks, TypingBubble, TypingDots,
+  canEditMessage, toggleReaction, useTypingIndicator, useTypingSender,
+} from '../components/messages/ChatExtras';
 
 const IMAGE_LIMIT = 10 * 1024 * 1024;
 const PDF_LIMIT = 100 * 1024 * 1024;
@@ -783,6 +787,10 @@ const EMOJI_CATEGORIES = [
 const same = (a, b) => a != null && b != null && String(a) === String(b);
 const errorText = (e) => e?.response?.data?.error || 'Something went wrong. Please try again.';
 const labelTime = (v) => v ? new Intl.DateTimeFormat('en-IN', { hour: 'numeric', minute: '2-digit' }).format(new Date(v)) : '';
+const PAGE_SIZE = 50;
+const NEAR_BOTTOM_PX = 120;
+const byTime = (a, b) => new Date(a.created_at) - new Date(b.created_at) || String(a.id).localeCompare(String(b.id), undefined, { numeric: true });
+const isNearBottom = (el) => el.scrollHeight - el.scrollTop - el.clientHeight < NEAR_BOTTOM_PX;
 
 /* ---------- WhatsApp-style date separators ---------- */
 
@@ -823,6 +831,7 @@ const ICONS = {
   chat: ['M21 12a8 8 0 0 1-11.5 7.2L4 20l1.1-4.4A8 8 0 1 1 21 12Z'],
   search: ['M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14Z', 'm20 20-3.5-3.5'],
   file: ['M14 3H7a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V7l-4-4Z', 'M14 3v4h4'],
+  edit: ['M4 20h4L18.5 9.5a2.1 2.1 0 0 0-4-4L4 16v4Z', 'm13.5 6.5 4 4'],
 };
 
 const Icon = ({ name, className = 'h-4 w-4' }) => (
@@ -937,6 +946,22 @@ export default function DirectMessages() {
   const [activeMessageId, setActiveMessageId] = useState(null);
   const [deleteMenuId, setDeleteMenuId] = useState(null);
   const [deleteConfirmation, setDeleteConfirmation] = useState(null);
+  const [otherReadAt, setOtherReadAt] = useState(null);
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const [editing, setEditing] = useState(null);
+  const [reactPickerId, setReactPickerId] = useState(null);
+  const [chatSearchOpen, setChatSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [flashId, setFlashId] = useState(null);
+  const cidRef = useRef(conversationId);
+  const messagesRef = useRef(messages);
+  const stickRef = useRef(true); // keep the view pinned to the newest message
+  const restoreRef = useRef(null); // scroll position to keep after loading older
+  const lastIdRef = useRef(null);
+  const olderBusyRef = useRef(false);
+  cidRef.current = conversationId;
+  messagesRef.current = messages;
   const tail = useRef(null);
   const messageScroll = useRef(null);
   const messageContent = useRef(null);
@@ -956,18 +981,55 @@ export default function DirectMessages() {
     setPeople(data.members || []);
   }, [search, searchOpen]);
 
+  // Newest page. Older pages already on screen (loaded by scrolling up or
+  // by search) are kept, so a live update never throws them away.
   const loadMessages = useCallback(async () => {
     if (!conversationId) return;
+    const cid = conversationId;
     try {
-      const { data } = await api.get(`/messages/direct/conversations/${conversationId}/messages`);
+      const { data } = await api.get(`/messages/direct/conversations/${cid}/messages`, { params: { limit: PAGE_SIZE } });
+      if (String(cidRef.current) !== String(cid)) return;
+      const page = data.messages || [];
+      const older = page.length ? messagesRef.current.filter((m) => byTime(m, page[0]) < 0) : [];
+      const next = page.length ? [...older, ...page] : [];
+      messagesRef.current = next;
       setSelected(data.conversation);
-      setMessages(data.messages || []);
+      setMessages(next);
+      if (!older.length) setHasMore(Boolean(data.has_more));
+      setOtherReadAt(data.other_read_at || null);
       setError('');
-      await api.post(`/messages/direct/conversations/${conversationId}/read`, null, { silent: true });
+      await api.post(`/messages/direct/conversations/${cid}/read`, null, { silent: true });
     } catch (e) {
-      setError(errorText(e));
+      if (String(cidRef.current) === String(cid)) setError(errorText(e));
     } finally {
-      setLoading(false);
+      if (String(cidRef.current) === String(cid)) setLoading(false);
+    }
+  }, [conversationId]);
+
+  // One page older than the oldest message on screen. Returns how many came.
+  const fetchOlderPage = useCallback(async () => {
+    const first = messagesRef.current[0];
+    if (!first || olderBusyRef.current) return 0;
+    const cid = conversationId;
+    olderBusyRef.current = true;
+    setLoadingOlder(true);
+    try {
+      const { data } = await api.get(`/messages/direct/conversations/${cid}/messages`, { params: { before: first.id, limit: PAGE_SIZE } });
+      if (String(cidRef.current) !== String(cid)) return 0;
+      const ids = new Set(messagesRef.current.map((m) => String(m.id)));
+      const older = (data.messages || []).filter((m) => !ids.has(String(m.id)));
+      const el = messageScroll.current;
+      if (el && older.length) restoreRef.current = { height: el.scrollHeight, top: el.scrollTop };
+      const next = [...older, ...messagesRef.current];
+      messagesRef.current = next;
+      setMessages(next);
+      setHasMore(Boolean(data.has_more));
+      return older.length;
+    } catch {
+      return 0;
+    } finally {
+      olderBusyRef.current = false;
+      setLoadingOlder(false);
     }
   }, [conversationId]);
 
@@ -990,9 +1052,34 @@ export default function DirectMessages() {
     setForwardTarget('');
     setActiveMessageId(null);
     setDeleteMenuId(null);
+    setMessages([]);
+    messagesRef.current = [];
+    setHasMore(false);
+    setOtherReadAt(null);
+    setEditing(null);
+    setReactPickerId(null);
+    setChatSearchOpen(false);
+    setSearchQuery('');
+    setFlashId(null);
+    stickRef.current = true;
+    lastIdRef.current = null;
+    if (conversationId) setLoading(true);
   }, [conversationId]);
 
-  useEffect(() => { setDeleteMenuId(null); }, [activeMessageId]);
+  useEffect(() => { setDeleteMenuId(null); setReactPickerId(null); }, [activeMessageId]);
+
+  // The reaction picker closes on a click outside it or on Escape.
+  useEffect(() => {
+    if (reactPickerId == null) return undefined;
+    const onDown = (event) => { if (!event.target.closest?.('[data-react-picker]')) setReactPickerId(null); };
+    const onKey = (event) => { if (event.key === 'Escape') setReactPickerId(null); };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [reactPickerId]);
 
   useEffect(() => {
     if (deleteMenuId == null) return undefined;
@@ -1006,10 +1093,15 @@ export default function DirectMessages() {
     };
   }, [deleteMenuId]);
 
-  useLiveRefetch(DIRECT_MESSAGE_EVENTS, () => {
+  useLiveRefetch(DIRECT_THREAD_EVENTS, () => {
     loadConversations().catch(() => {});
     if (conversationId) loadMessages();
   }, { delay: 200 });
+
+  const typingUrl = conversationId ? `/messages/direct/conversations/${conversationId}/typing` : null;
+  const { notify: notifyTyping, reset: resetTyping } = useTypingSender(typingUrl);
+  const { typingIds, clear: clearTyping } = useTypingIndicator(DIRECT_TYPING_EVENTS, conversationId, user?.id);
+  const peerTyping = typingIds.length > 0;
 
   useEffect(() => {
     if (!conversationId) return undefined;
@@ -1021,7 +1113,61 @@ export default function DirectMessages() {
     return () => clearInterval(timer);
   }, [conversationId]);
 
-  useEffect(() => { tail.current?.scrollIntoView({ behavior: 'smooth', block: 'end' }); }, [messages]);
+  // Scroll: keep the position after loading older messages; otherwise follow
+  // new messages while the view is at the bottom (or the new one is mine).
+  useLayoutEffect(() => {
+    const el = messageScroll.current;
+    if (!el || loading) return; // the list is not on screen yet
+    if (restoreRef.current) {
+      const { height, top } = restoreRef.current;
+      el.scrollTop = el.scrollHeight - height + top;
+      restoreRef.current = null;
+      return;
+    }
+    const last = messages[messages.length - 1];
+    const lastId = last ? String(last.id) : null;
+    const previous = lastIdRef.current;
+    lastIdRef.current = lastId;
+    if (!last || lastId === previous) return;
+    if (!same(last.sender_id, user?.id)) clearTyping(last.sender_id);
+    if (previous === null || stickRef.current || same(last.sender_id, user?.id)) {
+      el.scrollTo({ top: el.scrollHeight, behavior: previous === null ? 'auto' : 'smooth' });
+      stickRef.current = true;
+    }
+  }, [messages, loading, user?.id, clearTyping]);
+
+  // A message being sent, or "typing…", appears at the bottom.
+  useEffect(() => {
+    const el = messageScroll.current;
+    if (el && stickRef.current) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+  }, [pendingUploads.length, peerTyping]);
+
+  const onMessagesScroll = (event) => {
+    const el = event.currentTarget;
+    stickRef.current = isNearBottom(el);
+    if (el.scrollTop < 80 && hasMore && !loading && lastIdRef.current !== null) fetchOlderPage();
+  };
+
+  // Search: load older pages until the match is on screen, then flash it.
+  const jumpTo = useCallback(async (result) => {
+    if (!result) return;
+    const cid = conversationId;
+    stickRef.current = false;
+    for (let guard = 0; guard < 40 && !messagesRef.current.some((m) => same(m.id, result.id)); guard += 1) {
+      const loaded = await fetchOlderPage();
+      if (!loaded || String(cidRef.current) !== String(cid)) break;
+    }
+    setFlashId({ id: String(result.id), at: Date.now() });
+  }, [conversationId, fetchOlderPage]);
+
+  useEffect(() => {
+    if (!flashId) return undefined;
+    const frame = requestAnimationFrame(() => {
+      document.getElementById(`dm-msg-${flashId.id}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    });
+    const timer = setTimeout(() => setFlashId(null), 2200);
+    return () => { cancelAnimationFrame(frame); clearTimeout(timer); };
+  }, [flashId]);
 
   useEffect(() => {
     if (!profileOpen) return undefined;
@@ -1044,7 +1190,7 @@ export default function DirectMessages() {
     const frame = requestAnimationFrame(resize);
     window.addEventListener('resize', resize);
     return () => { cancelAnimationFrame(frame); window.removeEventListener('resize', resize); };
-  }, [conversationId, messages, error, replyTo, forwarding, emojiOpen]);
+  }, [conversationId, messages, error, replyTo, forwarding, emojiOpen, editing, chatSearchOpen, peerTyping]);
 
   const current = useMemo(() => conversations.find((c) => same(c.id, conversationId)), [conversations, conversationId]);
   const peer = selected?.peer || current?.peer;
@@ -1143,8 +1289,56 @@ export default function DirectMessages() {
     };
   };
 
+  const startEdit = (message) => {
+    setEditing(message);
+    setReplyTo(null);
+    setForwarding(null);
+    setActiveMessageId(null);
+    setDraft(message.body || '');
+    requestAnimationFrame(() => input.current?.focus());
+  };
+
+  const cancelEdit = () => {
+    setEditing(null);
+    setDraft('');
+  };
+
+  const saveEdit = async () => {
+    const target = editing;
+    const body = draft.trim();
+    if (!target || (!body && !target.attachments?.length)) return;
+    setSending(true);
+    setError('');
+    try {
+      const { data } = await api.patch(`/messages/direct/conversations/${conversationId}/messages/${target.id}`, { body });
+      setMessages((old) => old.map((m) => (same(m.id, target.id) ? { ...m, body: data.message?.body ?? body, edited_at: data.message?.edited_at || m.edited_at } : m)));
+      setEditing(null);
+      setDraft('');
+      loadConversations().catch(() => {});
+    } catch (e) {
+      setError(errorText(e));
+    } finally {
+      setSending(false);
+    }
+  };
+
+  // Same emoji again removes it. Shown at once, then confirmed by the server.
+  const react = async (message, emoji) => {
+    setReactPickerId(null);
+    setActiveMessageId(null);
+    setMessages((old) => old.map((m) => (same(m.id, message.id) ? { ...m, reactions: toggleReaction(m.reactions, user?.id, emoji) } : m)));
+    try {
+      const { data } = await api.post(`/messages/direct/conversations/${conversationId}/messages/${message.id}/reactions`, { emoji });
+      setMessages((old) => old.map((m) => (same(m.id, message.id) ? { ...m, reactions: data.reactions || {} } : m)));
+    } catch (e) {
+      setError(errorText(e));
+      loadMessages();
+    }
+  };
+
   const send = async (event) => {
     event.preventDefault();
+    if (editing) { if (!sending) saveEdit(); return; }
     if (sending || (!draft.trim() && !files.length) || !conversationId) return;
     const body = draft.trim();
     const outgoingFiles = [...files];
@@ -1154,12 +1348,14 @@ export default function DirectMessages() {
     setPendingUploads((old) => [...old, { id: pendingId, conversationId, body, files: outgoingFiles, created_at: new Date().toISOString() }]);
     setDraft('');
     setFiles([]);
+    resetTyping();
+    stickRef.current = true;
     try {
       const attachments = [];
       for (const file of outgoingFiles) attachments.push(await upload(file));
       const { data } = await api.post(`/messages/direct/conversations/${conversationId}/messages`, { body, attachments, reply_to_message_id: replyTo?.id || null });
       setPendingUploads((old) => old.filter((item) => item.id !== pendingId));
-      setMessages((old) => [...old, data.message]);
+      setMessages((old) => (old.some((m) => same(m.id, data.message.id)) ? old : [...old, data.message]));
       setReplyTo(null);
       await loadConversations();
       input.current?.focus();
@@ -1309,14 +1505,43 @@ export default function DirectMessages() {
                 <Avatar person={peer} className="h-10 w-10 text-sm" />
                 <span className="min-w-0">
                   <span className="flex min-w-0 items-center gap-1.5 text-sm font-semibold tracking-tight text-[color:var(--text)]"><span className="truncate">{peer?.name || 'Member'}</span>{isVerifiedName(peer?.name) && <VerifiedBadge className="h-4 w-4" />}</span>
-                  <span className="mt-0.5 flex items-center gap-1 truncate text-[11px] text-[color:var(--text-3)]"><Icon name="lock" className="h-3 w-3" /><span className="truncate">Only you and {peer?.name || 'this member'} can see this chat.</span></span>
+                  {peerTyping ? (
+                    <span className="mt-0.5 flex items-center gap-1.5 text-[11px] font-medium text-[color:var(--accent)]" aria-live="polite"><TypingDots />typing…</span>
+                  ) : (
+                    <span className="mt-0.5 flex items-center gap-1 truncate text-[11px] text-[color:var(--text-3)]"><Icon name="lock" className="h-3 w-3" /><span className="truncate">Only you and {peer?.name || 'this member'} can see this chat.</span></span>
+                  )}
                 </span>
               </button>
+              <button
+                type="button"
+                onClick={() => { setChatSearchOpen((v) => !v); setSearchQuery(''); }}
+                aria-label="Search this chat"
+                aria-pressed={chatSearchOpen}
+                title="Search this chat"
+                className={`grid h-9 w-9 shrink-0 place-items-center rounded-xl transition duration-200 hover:bg-[var(--bg-3)] hover:text-[color:var(--text)] active:scale-95 ${focusRing} ${chatSearchOpen ? 'bg-[var(--bg-3)] text-[color:var(--accent)]' : 'text-[color:var(--text-2)]'}`}
+              >
+                <Icon name="search" className="h-[18px] w-[18px]" />
+              </button>
             </header>
+            {chatSearchOpen && (
+              <ChatSearchBar
+                searchUrl={`/messages/direct/conversations/${conversationId}/search`}
+                onClose={() => { setChatSearchOpen(false); setSearchQuery(''); }}
+                onJump={jumpTo}
+                onQueryChange={setSearchQuery}
+              />
+            )}
 
-            <div ref={messageScroll} className="min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain bg-[var(--bg)] bg-[radial-gradient(45%_35%_at_100%_0%,var(--accent-light),transparent)] px-3 py-4 sm:px-5">
+            <div ref={messageScroll} onScroll={onMessagesScroll} className="min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain bg-[var(--bg)] bg-[radial-gradient(45%_35%_at_100%_0%,var(--accent-light),transparent)] px-3 py-4 sm:px-5">
               <div ref={messageContent}>
                 {error && <p role="alert" className="mb-3 rounded-xl border border-red-500/20 bg-red-500/10 px-3.5 py-2.5 text-sm text-red-600">{error}</p>}
+                {hasMore && !loading && (
+                  <div className="mb-2 flex justify-center">
+                    <button type="button" onClick={fetchOlderPage} disabled={loadingOlder} className={`rounded-xl border border-[color:var(--border)] bg-[var(--bg-2)] px-3.5 py-1.5 text-xs font-semibold text-[color:var(--text-2)] transition duration-200 hover:text-[color:var(--text)] active:scale-[0.98] disabled:opacity-60 ${focusRing}`}>
+                      {loadingOlder ? 'Loading…' : 'Load earlier messages'}
+                    </button>
+                  </div>
+                )}
                 {loading ? <MessageSkeleton /> : !messages.length && !error ? (
                   <div className="grid place-items-center py-10 text-center">
                     <Avatar person={peer} className="h-14 w-14 text-lg" />
@@ -1329,10 +1554,13 @@ export default function DirectMessages() {
                     {group.items.map((message) => {
                   const mine = same(message.sender_id, user?.id);
                   const menuOpen = same(deleteMenuId, message.id);
+                  const pickerOpen = same(reactPickerId, message.id);
+                  const seen = mine && otherReadAt && new Date(otherReadAt) >= new Date(message.created_at);
+                  const flashing = same(flashId?.id, message.id);
                   return (
                     <Fragment key={message.id}>
-                      <div className={`mb-3 flex ${mine ? 'justify-end' : 'justify-start'}`}>
-                        <div onClick={() => setActiveMessageId((id) => (same(id, message.id) ? null : message.id))} className={`group relative max-w-[88%] px-3.5 py-2.5 sm:max-w-[68%] ${mine ? 'rounded-2xl rounded-br-md bg-[var(--accent)] text-white shadow-[0_10px_24px_-14px_var(--accent)]' : 'rounded-2xl rounded-bl-md border border-[color:var(--border)] bg-[var(--bg-2)] text-[color:var(--text)] shadow-[0_8px_20px_-16px_rgba(15,23,42,0.5)]'}`}>
+                      <div id={`dm-msg-${message.id}`} className={`mb-3 flex scroll-mt-16 flex-col ${mine ? 'items-end' : 'items-start'}`}>
+                        <div onClick={() => setActiveMessageId((id) => (same(id, message.id) ? null : message.id))} className={`group relative max-w-[88%] px-3.5 py-2.5 transition-shadow duration-300 sm:max-w-[68%] ${mine ? 'rounded-2xl rounded-br-md bg-[var(--accent)] text-white shadow-[0_10px_24px_-14px_var(--accent)]' : 'rounded-2xl rounded-bl-md border border-[color:var(--border)] bg-[var(--bg-2)] text-[color:var(--text)] shadow-[0_8px_20px_-16px_rgba(15,23,42,0.5)]'} ${flashing ? 'ring-2 ring-amber-400 ring-offset-2 ring-offset-[color:var(--bg)]' : ''}`}>
                           {message.forwarded_from_id && <p className="mb-1 flex items-center gap-1 text-[10px] font-medium italic opacity-75"><Icon name="forward" className="h-3 w-3" />Forwarded</p>}
                           {message.reply_to_message_id && (
                             <div className={`mb-1.5 rounded-lg border-l-2 bg-black/10 px-2.5 py-1.5 text-[11px] ${mine ? 'border-white/60' : 'border-[color:var(--accent)]'}`}>
@@ -1340,22 +1568,43 @@ export default function DirectMessages() {
                               <p className="truncate opacity-80">{message.reply_body || 'Attachment'}</p>
                             </div>
                           )}
-                          {message.deleted ? <p className="text-xs italic opacity-70">This message was deleted</p> : message.body && <p className="whitespace-pre-wrap break-words text-[13.5px] leading-relaxed">{message.body}</p>}
+                          {message.deleted ? <p className="text-xs italic opacity-70">This message was deleted</p> : message.body && <p className="whitespace-pre-wrap break-words text-[13.5px] leading-relaxed"><Highlight text={message.body} query={chatSearchOpen ? searchQuery : ''} /></p>}
                           {!message.deleted && message.attachments?.map((file) => <ChatAttachmentCard key={file.public_id} file={file} onOpen={setPreviewAttachment} />)}
                           {!message.deleted && (
-                            <div className={`${same(activeMessageId, message.id) ? 'mt-2 flex' : 'hidden'} items-center gap-0.5 whitespace-normal rounded-lg bg-black/10 p-0.5 md:absolute md:-top-4 ${mine ? 'md:right-2' : 'md:left-2'} md:z-10 md:mt-0 md:flex md:border md:border-[color:var(--border)] md:bg-[var(--bg-2)] md:text-[color:var(--text-2)] ${menuOpen ? 'md:opacity-100' : 'md:opacity-0'} md:shadow-[0_8px_20px_-12px_rgba(15,23,42,0.5)] md:transition-opacity md:duration-200 md:focus-within:opacity-100 md:group-hover:opacity-100`}>
-                              <MessageAction icon="reply" title="Reply" onClick={() => { setReplyTo(message); input.current?.focus(); }} />
-                              <MessageAction icon="forward" title="Forward" onClick={() => { setForwarding(message); setForwardTarget(''); }} />
-                              <DeleteMenu
-                                open={menuOpen}
-                                mine={mine}
-                                onToggle={() => setDeleteMenuId((id) => (same(id, message.id) ? null : message.id))}
-                                onSelect={(mode) => { setDeleteMenuId(null); deleteMessage(message, mode); }}
-                              />
+                            <div data-react-picker className={`${same(activeMessageId, message.id) || pickerOpen ? 'mt-2 flex' : 'hidden'} items-center gap-0.5 whitespace-normal rounded-lg bg-black/10 p-0.5 md:absolute ${pickerOpen ? 'md:-top-9' : 'md:-top-4'} ${mine ? 'md:right-2' : 'md:left-2'} md:z-10 md:mt-0 md:flex md:border md:border-[color:var(--border)] md:bg-[var(--bg-2)] md:text-[color:var(--text-2)] ${menuOpen || pickerOpen ? 'md:opacity-100' : 'md:opacity-0'} md:shadow-[0_8px_20px_-12px_rgba(15,23,42,0.5)] md:transition-opacity md:duration-200 md:focus-within:opacity-100 md:group-hover:opacity-100`}>
+                              {pickerOpen ? (
+                                <ReactionPicker current={message.reactions?.[String(user?.id)]} onPick={(emoji) => react(message, emoji)} />
+                              ) : (
+                                <>
+                                  <MessageAction icon="smile" title="React" onClick={(e) => { e.stopPropagation(); setDeleteMenuId(null); setReactPickerId(message.id); }} />
+                                  <MessageAction icon="reply" title="Reply" onClick={() => { setEditing(null); setReplyTo(message); input.current?.focus(); }} />
+                                  {canEditMessage(message, user?.id) && <MessageAction icon="edit" title="Edit" onClick={(e) => { e.stopPropagation(); startEdit(message); }} />}
+                                  <MessageAction icon="forward" title="Forward" onClick={() => { setForwarding(message); setForwardTarget(''); }} />
+                                  <DeleteMenu
+                                    open={menuOpen}
+                                    mine={mine}
+                                    onToggle={() => setDeleteMenuId((id) => (same(id, message.id) ? null : message.id))}
+                                    onSelect={(mode) => { setDeleteMenuId(null); deleteMessage(message, mode); }}
+                                  />
+                                </>
+                              )}
                             </div>
                           )}
-                          <p className={`mt-1 text-right text-[10px] tabular-nums ${mine ? 'text-white/70' : 'text-[color:var(--text-3)]'}`}>{labelTime(message.created_at)}</p>
+                          <p className={`mt-1 flex items-center justify-end gap-1 text-[10px] tabular-nums ${mine ? 'text-white/70' : 'text-[color:var(--text-3)]'}`}>
+                            {message.edited_at && !message.deleted && <span className="italic" title={`Edited ${new Date(message.edited_at).toLocaleString('en-IN')}`}>edited</span>}
+                            <span>{labelTime(message.created_at)}</span>
+                            {mine && !message.deleted && <ReadTicks seen={seen} className={`h-3.5 w-3.5 ${seen ? 'text-sky-200' : ''}`} />}
+                          </p>
                         </div>
+                        {!message.deleted && (
+                          <ReactionChips
+                            reactions={message.reactions}
+                            meId={user?.id}
+                            nameOf={(id) => (same(id, peer?.id) ? peer?.name || 'Member' : 'Member')}
+                            onToggle={(emoji) => react(message, emoji)}
+                            alignEnd={mine}
+                          />
+                        )}
                       </div>
                     </Fragment>
                   );
@@ -1369,11 +1618,21 @@ export default function DirectMessages() {
                     {pendingForChat.map(renderPending)}
                   </section>
                 )}
+                {peerTyping && !loading && <TypingBubble label={`${(peer?.name || 'Member').split(' ')[0]} is typing`} />}
                 <div ref={tail} />
               </div>
             </div>
 
             <form onSubmit={send} className="shrink-0 border-t border-[color:var(--border)] bg-[var(--bg-2)] px-3 pb-2.5 pt-3 sm:px-5">
+              {editing && (
+                <div className="mb-2 flex items-center justify-between gap-3 rounded-xl border-l-2 border-amber-400 bg-amber-400/10 px-3 py-2 text-xs text-[color:var(--text-2)]">
+                  <span className="flex min-w-0 items-center gap-1.5">
+                    <Icon name="edit" className="h-3.5 w-3.5 text-amber-500" />
+                    <span className="truncate"><span className="font-semibold text-[color:var(--text)]">Editing message</span> · {editing.body || 'Attachment'}</span>
+                  </span>
+                  <button type="button" onClick={cancelEdit} aria-label="Cancel editing" className={`grid h-6 w-6 shrink-0 place-items-center rounded-md transition duration-200 hover:bg-black/10 ${focusRing}`}><Icon name="close" className="h-3.5 w-3.5" /></button>
+                </div>
+              )}
               {replyTo && (
                 <div className="mb-2 flex items-center justify-between gap-3 rounded-xl border-l-2 border-[color:var(--accent)] bg-[var(--accent-light)] px-3 py-2 text-xs text-[color:var(--text-2)]">
                   <span className="truncate">Replying to: {replyTo.body || 'Attachment'}</span>
@@ -1419,20 +1678,23 @@ export default function DirectMessages() {
               )}
                 <input ref={fileInput} type="file" multiple accept="image/jpeg,image/png,image/webp,image/svg+xml,application/pdf,application/zip,.ai,.psd,.svg,.zip" onChange={chooseFiles} className="hidden" />
               <div className="flex items-end gap-1 rounded-2xl border border-[color:var(--border)] bg-[var(--bg-3)] p-1.5 transition duration-200 focus-within:border-[color:var(--accent)] focus-within:ring-4 focus-within:ring-[color:var(--accent-light)]">
-                <button type="button" title="Attach a file" aria-label="Attach a file" onClick={() => fileInput.current?.click()} disabled={sending || files.length >= MAX_ATTACHMENTS} className={`grid h-9 w-9 shrink-0 place-items-center rounded-xl text-[color:var(--text-2)] transition duration-200 hover:bg-[var(--bg-2)] hover:text-[color:var(--text)] active:scale-95 disabled:opacity-40 ${focusRing}`}><Icon name="clip" className="h-[18px] w-[18px]" /></button>
+                <button type="button" title="Attach a file" aria-label="Attach a file" onClick={() => fileInput.current?.click()} disabled={sending || Boolean(editing) || files.length >= MAX_ATTACHMENTS} className={`grid h-9 w-9 shrink-0 place-items-center rounded-xl text-[color:var(--text-2)] transition duration-200 hover:bg-[var(--bg-2)] hover:text-[color:var(--text)] active:scale-95 disabled:opacity-40 ${focusRing}`}><Icon name="clip" className="h-[18px] w-[18px]" /></button>
                 <button type="button" title="Add emoji" aria-label="Add emoji" aria-pressed={emojiOpen} onClick={() => setEmojiOpen((v) => !v)} className={`grid h-9 w-9 shrink-0 place-items-center rounded-xl transition duration-200 hover:bg-[var(--bg-2)] active:scale-95 ${focusRing} ${emojiOpen ? 'bg-[var(--bg-2)] text-[color:var(--accent)]' : 'text-[color:var(--text-2)]'}`}><Icon name="smile" className="h-[18px] w-[18px]" /></button>
                 <textarea
                   ref={input}
                   value={draft}
-                  onChange={(e) => setDraft(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); send(e); } }}
+                  onChange={(e) => { setDraft(e.target.value); if (e.target.value.trim() && !editing) notifyTyping(); }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Escape' && editing) { e.preventDefault(); cancelEdit(); return; }
+                    if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); send(e); }
+                  }}
                   maxLength={4000}
                   rows={Math.min(5, draft.split('\n').length)}
-                  placeholder="Write a message"
-                  aria-label="Write a message"
+                  placeholder={editing ? 'Edit your message' : 'Write a message'}
+                  aria-label={editing ? 'Edit your message' : 'Write a message'}
                   className="min-h-9 min-w-0 flex-1 resize-none bg-transparent px-1.5 py-2 text-sm leading-5 text-[color:var(--text)] outline-none placeholder:text-[color:var(--text-3)]"
                 />
-                <button type="submit" disabled={sending || (!draft.trim() && !files.length)} aria-label={sending ? 'Sending' : 'Send message'} className={`grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-[var(--accent)] text-white shadow-[0_8px_18px_-8px_var(--accent)] transition duration-200 hover:brightness-110 active:scale-95 disabled:opacity-40 disabled:shadow-none ${focusRing} ${sending ? 'animate-pulse' : ''}`}><Icon name="send" className="h-[18px] w-[18px]" /></button>
+                <button type="submit" disabled={sending || (!draft.trim() && !files.length && !editing?.attachments?.length)} aria-label={sending ? 'Sending' : editing ? 'Save edit' : 'Send message'} className={`grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-[var(--accent)] text-white shadow-[0_8px_18px_-8px_var(--accent)] transition duration-200 hover:brightness-110 active:scale-95 disabled:opacity-40 disabled:shadow-none ${focusRing} ${sending ? 'animate-pulse' : ''}`}><Icon name="send" className="h-[18px] w-[18px]" /></button>
               </div>
               <p className="mt-1.5 truncate pl-1 text-[10px] text-[color:var(--text-3)]"><span className="sm:hidden">Images 10 MB · files 100 MB</span><span className="hidden sm:inline">Images up to 10 MB · PDFs, SVG, AI, PSD and ZIP up to 100 MB · drag files here</span></p>
             </form>

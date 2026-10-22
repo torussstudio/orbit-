@@ -288,6 +288,8 @@ function publish(userIds, event) {
       taskId: normalizeId(event.taskId),
       projectId: normalizeId(event.projectId),
       conversationId: normalizeId(event.conversationId),
+      // Who did it: only set for chat typing events (an id, never a name).
+      userId: normalizeId(event.userId),
       at: event.at || new Date().toISOString(),
     });
     const chunk = `data: ${payload}\n\n`;
