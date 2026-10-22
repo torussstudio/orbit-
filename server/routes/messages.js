@@ -12,6 +12,9 @@ const directMessageController = require("../controllers/directMessageController"
  * starting a conversation with a member.
  */
 
+// Online / last seen for chat headers and lists. ?ids=1,2&team=1
+router.get("/presence", auth, messageController.presence);
+
 // Sidebar badge (anyone signed in, their own count).
 router.get("/unread-count", auth, messageController.unreadCount);
 

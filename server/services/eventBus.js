@@ -52,6 +52,32 @@ function isEnabled() {
   return process.env.LIVE_EVENTS_ENABLED === "true";
 }
 
+// Presence: told when a user's FIRST stream opens (online = true) and when
+// their LAST stream closes (online = false). See services/presence.js.
+const presenceListeners = new Set();
+function onPresence(listener) {
+  presenceListeners.add(listener);
+  return () => presenceListeners.delete(listener);
+}
+function notifyPresence(userId, online) {
+  for (const listener of presenceListeners) {
+    try {
+      listener(userId, online);
+    } catch (err) {
+      console.error("[eventBus] presence listener failed:", err?.message);
+    }
+  }
+}
+
+// Has at least one open stream (an Orbit tab open and visible) right now.
+function isOnline(userId) {
+  return connections.has(String(userId));
+}
+
+function connectedUserIds() {
+  return [...connections.keys()];
+}
+
 function removeConnection(userId, res) {
   const key = String(userId);
 
@@ -73,7 +99,10 @@ function removeConnection(userId, res) {
   if (!set) return;
 
   set.delete(res);
-  if (set.size === 0) connections.delete(key);
+  if (set.size === 0) {
+    connections.delete(key);
+    notifyPresence(key, false);
+  }
 }
 
 // Removes the connection and ends the response. Safe to call more than once.
@@ -127,6 +156,7 @@ function addConnection(userId, res, { tokenExp, sessionId } = {}) {
   const key = String(userId);
 
   let set = connections.get(key);
+  const firstStream = !set;
   if (!set) {
     set = new Set();
     connections.set(key, set);
@@ -147,6 +177,7 @@ function addConnection(userId, res, { tokenExp, sessionId } = {}) {
   }
 
   set.add(res);
+  if (firstStream) notifyPresence(key, true);
 
   if (sessionId) {
     streamSessions.set(res, {
@@ -342,4 +373,7 @@ module.exports = {
   publish,
   hasConnections,
   stats,
+  onPresence,
+  isOnline,
+  connectedUserIds,
 };

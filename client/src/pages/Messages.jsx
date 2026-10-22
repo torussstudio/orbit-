@@ -5,8 +5,8 @@ import { useAuth } from '../context/AuthContext';
 import { useLiveRefetch, MESSAGE_EVENTS, MESSAGE_THREAD_EVENTS, MESSAGE_TYPING_EVENTS } from '../hooks/useLiveEvents';
 import { ChatAttachmentCard, ChatMediaPreview, PendingChatAttachment } from '../components/messages/ChatMediaPreview';
 import {
-  ChatSearchBar, Highlight, ReactionChips, ReactionPicker, ReadTicks, TypingBubble, TypingDots,
-  canEditMessage, tickState, toggleReaction, useTypingIndicator, useTypingSender,
+  ChatSearchBar, Highlight, OnlineDot, ReactionChips, ReactionPicker, ReadTicks, TypingBubble, TypingDots,
+  canEditMessage, presenceLabel, tickState, usePresence, toggleReaction, useTypingIndicator, useTypingSender,
 } from '../components/messages/ChatExtras';
 
 /*
@@ -787,12 +787,16 @@ function Thread({ conversationId, memberId, header, onBack, onActivity, forwardT
           </button>
         )}
         {header.team ? (
-          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-[var(--accent-light)] text-[color:var(--accent)]">
+          <span className="relative grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-[var(--accent-light)] text-[color:var(--accent)]">
             <Icon name="team" className="h-5 w-5" />
+            {header.online && <OnlineDot />}
           </span>
         ) : (
           <button type="button" onClick={() => setProfileOpen(true)} aria-label={`View ${header.title} profile`} className={`shrink-0 rounded-xl transition duration-200 hover:ring-2 hover:ring-[color:var(--accent)] ${FOCUS_RING}`}>
-            <Avatar name={header.avatarName} url={header.avatarUrl} />
+            <span className="relative block">
+              <Avatar name={header.avatarName} url={header.avatarUrl} />
+              {header.online && <OnlineDot />}
+            </span>
           </button>
         )}
         <button type="button" disabled={header.team} onClick={() => setProfileOpen(true)} className={`min-w-0 flex-1 rounded-lg text-left disabled:cursor-default ${FOCUS_RING}`}>
@@ -802,6 +806,8 @@ function Thread({ conversationId, memberId, header, onBack, onActivity, forwardT
           </h2>
           {typingLabel ? (
             <p className="mt-0.5 flex items-center gap-1.5 truncate text-[11px] font-medium text-[color:var(--accent)]" aria-live="polite"><TypingDots />{typingLabel}…</p>
+          ) : header.status ? (
+            <p className={`mt-0.5 truncate text-[11px] ${header.online ? 'font-medium text-emerald-500' : 'text-[color:var(--text-3)]'}`} aria-live="polite">{header.status}</p>
           ) : (
             header.subtitle && <p className="mt-0.5 truncate text-[11px] text-[color:var(--text-3)]">{header.subtitle}</p>
           )}
@@ -1168,7 +1174,7 @@ const MessageRow = memo(function MessageRow({
 /* Manager: inbox                                                             */
 /* -------------------------------------------------------------------------- */
 
-function InboxRow({ row, active, meId, onOpen }) {
+function InboxRow({ row, active, meId, onOpen, online }) {
   const last = row.last_message;
   const bodyPreview = last ? (last.body || (last.attachments?.length ? 'Attachment' : '')) : '';
   const preview = last
@@ -1188,7 +1194,10 @@ function InboxRow({ row, active, meId, onOpen }) {
             : 'hover:bg-[var(--bg-3)]'
         }`}
       >
-        <Avatar name={row.name} url={row.avatar_url} />
+        <span className="relative shrink-0">
+          <Avatar name={row.name} url={row.avatar_url} />
+          {online && <OnlineDot />}
+        </span>
         <span className="min-w-0 flex-1">
           <span className="flex items-center justify-between gap-2">
             <span className="flex min-w-0 items-center gap-1">
@@ -1301,6 +1310,9 @@ function ManagerInbox() {
   }, [rows, query]);
 
   const selected = rows.find((r) => sameId(r.member_id, memberId));
+  const presenceIds = useMemo(() => rows.map((r) => r.member_id), [rows]);
+  const { presence } = usePresence(presenceIds);
+  const selectedPresence = memberId ? presence[String(memberId)] : null;
   const totalUnread = rows.reduce((sum, r) => sum + (r.unread || 0), 0);
   const openThread = useCallback((id) => navigate(`/messages/${id}`), [navigate]);
   const back = useCallback(() => navigate('/messages'), [navigate]);
@@ -1369,6 +1381,7 @@ function ManagerInbox() {
                     active={sameId(row.member_id, memberId)}
                     meId={user?.id}
                     onOpen={openThread}
+                    online={Boolean(presence[String(row.member_id)]?.online)}
                   />
                 ))}
               </ul>
@@ -1398,6 +1411,8 @@ function ManagerInbox() {
               header={{
                 title: selected?.name || 'Member',
                 subtitle: selected?.email || '',
+                status: presenceLabel(selectedPresence),
+                online: Boolean(selectedPresence?.online),
                 avatarName: selected?.name,
                 avatarUrl: selected?.avatar_url,
                 bio: selected?.bio || '',
@@ -1421,6 +1436,7 @@ function MemberThread() {
   const { user } = useAuth();
   const [conversation, setConversation] = useState(null);
   const [error, setError] = useState('');
+  const { adminsOnline } = usePresence([], { team: true });
 
   const load = useCallback(async () => {
     setError('');
@@ -1452,6 +1468,8 @@ function MemberThread() {
             header={{
               title: 'Admin team',
               subtitle: 'Your messages go to every admin. Any of them can reply.',
+              status: adminsOnline ? `${adminsOnline} admin${adminsOnline === 1 ? '' : 's'} online` : '',
+              online: adminsOnline > 0,
               team: true,
               action: <Link to="/messages/people" className={`inline-flex items-center rounded-xl border border-[color:var(--border)] px-3 py-2 text-xs font-semibold text-[color:var(--text-2)] transition duration-200 hover:bg-[var(--bg-3)] hover:text-[color:var(--text)] active:scale-[0.98] ${FOCUS_RING}`}>Member chats</Link>,
             }}

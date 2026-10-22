@@ -1,5 +1,6 @@
 const messageService = require("../services/messageService");
 const directMessageService = require("../services/directMessageService");
+const presenceService = require("../services/presence");
 
 // Errors thrown with a status (see httpError in messageService) are sent
 // as-is. Anything else is a real server error and goes to the error handler.
@@ -82,7 +83,12 @@ const typing = handle(async (req, res) => {
   res.json(await messageService.typing(req.user, req.params.id));
 });
 
+const presence = handle(async (req, res) => {
+  res.json(await presenceService.getPresence(req.user, req.query.ids, req.query.team === "1"));
+});
+
 module.exports = {
+  presence,
   reactToMessage,
   editMessage,
   searchMessages,

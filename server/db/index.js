@@ -196,6 +196,8 @@ const initDB = async () => {
   await ensureColumn("members", "phone VARCHAR(50)");
   await ensureColumn("members", "location VARCHAR(255)");
   await ensureColumn("members", "bio TEXT");
+  // Chat "last seen" (services/presence.js).
+  await ensureColumn("members", "last_seen_at TIMESTAMPTZ");
   await ensureColumn("members", "avatar_url TEXT");
   await ensureColumn("members", "onboarding_pending BOOLEAN NOT NULL DEFAULT false");
 

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import api from '../../api/client';
-import { useLiveEvents } from '../../hooks/useLiveEvents';
+import { useLiveEvents, PRESENCE_EVENTS } from '../../hooks/useLiveEvents';
 
 /*
  * Chat extras shared by both chats (Messages.jsx: member <-> admin team,
@@ -32,6 +32,82 @@ export function canEditMessage(message, meId) {
   if (!message || message.pending || message.deleted || message.forwarded_from_id) return false;
   if (!sameId(message.sender_id, meId)) return false;
   return Date.now() - new Date(message.created_at).getTime() < EDIT_WINDOW_MS;
+}
+
+/* ---------- Online / last seen ---------- */
+
+/*
+ * presence: { "<id>": { online, last_seen_at } }, adminsOnline: number.
+ * Refreshes when someone comes online / goes offline, and on catch-up.
+ * team: also count the admins online (member's "Admin team" chat).
+ */
+export function usePresence(ids, { team = false } = {}) {
+  const key = [...new Set((ids || []).filter((id) => id != null).map(String))].sort().join(',');
+  const [state, setState] = useState({ presence: {}, adminsOnline: 0 });
+  const { subscribe } = useLiveEvents();
+
+  const load = useCallback(async () => {
+    if (!key && !team) return;
+    try {
+      const { data } = await api.get('/messages/presence', { params: { ids: key, team: team ? 1 : undefined }, silent: true });
+      setState({ presence: data?.presence || {}, adminsOnline: data?.admins_online || 0 });
+    } catch {
+      /* presence is a nice-to-have: keep the last state */
+    }
+  }, [key, team]);
+
+  useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
+    let timer = null;
+    const unsubscribe = subscribe(PRESENCE_EVENTS, () => {
+      clearTimeout(timer);
+      timer = setTimeout(load, 300);
+    });
+    return () => { unsubscribe(); clearTimeout(timer); };
+  }, [subscribe, load]);
+
+  // "last seen today" becomes "yesterday" after midnight.
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const timer = setInterval(() => setTick((n) => n + 1), 60 * 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  return state;
+}
+
+const LS_TIME = new Intl.DateTimeFormat('en-IN', { hour: 'numeric', minute: '2-digit' });
+const LS_WEEKDAY = new Intl.DateTimeFormat('en-IN', { weekday: 'long' });
+const LS_DATE = new Intl.DateTimeFormat('en-IN', { day: 'numeric', month: 'short' });
+
+// "online", "last seen today at 10:31 am", "last seen yesterday at …",
+// "last seen Monday at …", "last seen 12 Oct at …", or '' when unknown.
+export function presenceLabel(p) {
+  if (!p) return '';
+  if (p.online) return 'online';
+  if (!p.last_seen_at) return '';
+  const date = new Date(p.last_seen_at);
+  if (Number.isNaN(date.getTime())) return '';
+  const start = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const days = Math.round((start(new Date()) - start(date)) / 86400000);
+  const time = LS_TIME.format(date);
+  if (days <= 0) return `last seen today at ${time}`;
+  if (days === 1) return `last seen yesterday at ${time}`;
+  if (days < 7) return `last seen ${LS_WEEKDAY.format(date)} at ${time}`;
+  return `last seen ${LS_DATE.format(date)} at ${time}`;
+}
+
+// Green dot for an avatar. Put it inside a `relative` wrapper.
+export function OnlineDot({ className = 'h-3 w-3' }) {
+  return (
+    <span
+      className={`absolute -bottom-0.5 -right-0.5 rounded-full border-2 border-[color:var(--bg-2)] bg-emerald-500 ${className}`}
+      role="img"
+      aria-label="Online"
+      title="Online"
+    />
+  );
 }
 
 /* ---------- Typing ---------- */

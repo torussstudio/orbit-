@@ -739,8 +739,8 @@ import { useAuth } from '../context/AuthContext';
 import { useLiveRefetch, DIRECT_THREAD_EVENTS, DIRECT_TYPING_EVENTS } from '../hooks/useLiveEvents';
 import { ChatAttachmentCard, ChatMediaPreview, PendingChatAttachment } from '../components/messages/ChatMediaPreview';
 import {
-  ChatSearchBar, Highlight, ReactionChips, ReactionPicker, ReadTicks, TypingBubble, TypingDots,
-  canEditMessage, tickState, toggleReaction, useTypingIndicator, useTypingSender,
+  ChatSearchBar, Highlight, OnlineDot, ReactionChips, ReactionPicker, ReadTicks, TypingBubble, TypingDots,
+  canEditMessage, presenceLabel, tickState, usePresence, toggleReaction, useTypingIndicator, useTypingSender,
 } from '../components/messages/ChatExtras';
 
 const IMAGE_LIMIT = 10 * 1024 * 1024;
@@ -1198,6 +1198,12 @@ export default function DirectMessages() {
   const current = useMemo(() => conversations.find((c) => same(c.id, conversationId)), [conversations, conversationId]);
   const peer = selected?.peer || current?.peer;
 
+  // Online / last seen for everyone in the list and the open chat.
+  const presenceIds = useMemo(() => [...conversations.map((c) => c.peer?.id), peer?.id], [conversations, peer?.id]);
+  const { presence } = usePresence(presenceIds);
+  const peerPresence = peer ? presence[String(peer.id)] : null;
+  const peerStatus = presenceLabel(peerPresence);
+
   // Group messages by calendar day so each day's chip only sticks while its own messages are on screen.
   const dayGroups = useMemo(() => {
     const groups = [];
@@ -1473,7 +1479,10 @@ export default function DirectMessages() {
                   aria-current={active ? 'page' : undefined}
                   className={`relative mb-0.5 flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition duration-200 hover:bg-[var(--bg-3)] active:scale-[0.99] ${focusRing} ${active ? 'bg-[var(--bg-3)] before:absolute before:bottom-3 before:left-0 before:top-3 before:w-[3px] before:rounded-full before:bg-[var(--accent)]' : ''}`}
                 >
-                  <Avatar person={c.peer} className="h-10 w-10 text-sm" />
+                  <span className="relative shrink-0">
+                    <Avatar person={c.peer} className="h-10 w-10 text-sm" />
+                    {presence[String(c.peer.id)]?.online && <OnlineDot />}
+                  </span>
                   <span className="min-w-0 flex-1">
                     <span className={`flex min-w-0 items-center gap-1.5 text-sm tracking-tight text-[color:var(--text)] ${c.unread > 0 ? 'font-semibold' : 'font-medium'}`}><span className="truncate">{c.peer.name}</span>{isVerifiedName(c.peer.name) && <VerifiedBadge className="h-4 w-4" />}</span>
                     <span className={`mt-0.5 block truncate text-xs ${c.unread > 0 ? 'text-[color:var(--text-2)]' : 'text-[color:var(--text-3)]'}`}>{c.last_message?.body || (c.last_message ? 'Attachment' : 'Start chatting')}</span>
@@ -1505,11 +1514,16 @@ export default function DirectMessages() {
                 <Icon name="back" className="h-5 w-5" />
               </button>
               <button type="button" onClick={() => setProfileOpen(true)} aria-label={`View ${peer?.name || 'member'} profile`} className={`flex min-w-0 flex-1 items-center gap-3 rounded-xl p-1 text-left transition duration-200 hover:bg-[var(--bg-3)] ${focusRing}`}>
-                <Avatar person={peer} className="h-10 w-10 text-sm" />
+                <span className="relative shrink-0">
+                  <Avatar person={peer} className="h-10 w-10 text-sm" />
+                  {peerPresence?.online && <OnlineDot />}
+                </span>
                 <span className="min-w-0">
                   <span className="flex min-w-0 items-center gap-1.5 text-sm font-semibold tracking-tight text-[color:var(--text)]"><span className="truncate">{peer?.name || 'Member'}</span>{isVerifiedName(peer?.name) && <VerifiedBadge className="h-4 w-4" />}</span>
                   {peerTyping ? (
                     <span className="mt-0.5 flex items-center gap-1.5 text-[11px] font-medium text-[color:var(--accent)]" aria-live="polite"><TypingDots />typing…</span>
+                  ) : peerStatus ? (
+                    <span className={`mt-0.5 block truncate text-[11px] ${peerPresence?.online ? 'font-medium text-emerald-500' : 'text-[color:var(--text-3)]'}`} aria-live="polite">{peerStatus}</span>
                   ) : (
                     <span className="mt-0.5 flex items-center gap-1 truncate text-[11px] text-[color:var(--text-3)]"><Icon name="lock" className="h-3 w-3" /><span className="truncate">Only you and {peer?.name || 'this member'} can see this chat.</span></span>
                   )}
