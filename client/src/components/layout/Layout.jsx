@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { Outlet, NavLink, useNavigate, Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import NotificationBell from '../ui/NotificationBell';
+import OrbitAssistant from '../assistant/OrbitAssistant';
 import ConfirmModal from '../ui/ConfirmModal';
 import api from '../../api/client';
 import { animateEntrance, preloadMotion } from '../../utils/motion';
@@ -1147,6 +1148,7 @@ export default function Layout() {
               <Icon d={ICONS.search} className="h-[19px] w-[19px]" />
             </button>
 
+            <OrbitAssistant />
             <ThemeToggleButton />
             <NotificationBell />
             <div className="hidden h-6 w-px bg-[var(--border)] sm:block" aria-hidden="true" />

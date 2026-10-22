@@ -314,6 +314,15 @@ app.use(
 );
 
 /*
+ * Orbit AI assistant (services/ai). Off until GEMINI_API_KEY is set; each
+ * person's questions are limited per day (AI_DAILY_LIMIT).
+ */
+app.use(
+  "/api/assistant",
+  require("./routes/assistant"),
+);
+
+/*
  * Time Log: members add their own time entries,
  * managers see / edit / delete them per project
  * and per member.

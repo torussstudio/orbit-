@@ -871,6 +871,64 @@ const initDB = async () => {
       PRIMARY KEY (direct_conversation_id, member_id)
     )
   `);
+
+  // Orbit AI (services/ai): each person's assistant conversation, the
+  // cached morning briefing and daily usage (free-tier limits).
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS ai_messages (
+      id BIGSERIAL PRIMARY KEY,
+      member_id ${refType(memberIdType)} NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+      role TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
+      content TEXT NOT NULL,
+      cards JSONB NOT NULL DEFAULT '[]'::jsonb,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_ai_messages_member_created
+    ON ai_messages (member_id, created_at DESC)
+  `);
+  // Ids of the actions (ai_actions) a reply prepared.
+  await ensureColumn("ai_messages", `actions JSONB NOT NULL DEFAULT '[]'::jsonb`);
+  // Changes Orbit AI prepared; nothing runs until the person confirms.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS ai_actions (
+      id TEXT PRIMARY KEY,
+      member_id ${refType(memberIdType)} NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+      kind TEXT NOT NULL,
+      payload JSONB NOT NULL,
+      preview JSONB NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      result JSONB,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      expires_at TIMESTAMPTZ NOT NULL,
+      done_at TIMESTAMPTZ
+    )
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_ai_actions_member
+    ON ai_actions (member_id, created_at DESC)
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS ai_briefings (
+      member_id ${refType(memberIdType)} NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+      day DATE NOT NULL,
+      text TEXT NOT NULL,
+      cards JSONB NOT NULL DEFAULT '[]'::jsonb,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (member_id, day)
+    )
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS ai_usage (
+      member_id ${refType(memberIdType)} NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+      day DATE NOT NULL,
+      questions INTEGER NOT NULL DEFAULT 0,
+      calls INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (member_id, day)
+    )
+  `);
+
   await pool.query(`
     CREATE TABLE IF NOT EXISTS direct_upload_intents (
       public_id TEXT PRIMARY KEY,
