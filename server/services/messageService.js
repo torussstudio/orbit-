@@ -3,6 +3,7 @@ const liveEvents = require("./liveEvents");
 const { createNotification } = require("../utils/pushNotify");
 const { validateAttachment } = require("./directMessageService");
 const chatExtras = require("../utils/chatExtras");
+const chatDelivery = require("./chatDelivery");
 
 /*
  * Messages between members and the admin team.
@@ -154,6 +155,77 @@ async function otherSideReadAt(conversation, user) {
   return rows[0]?.at || null;
 }
 
+// When the other side last got this conversation on a logged-in Orbit
+// (grey double tick). Same sides as otherSideReadAt.
+async function otherSideDeliveredAt(conversation, user) {
+  const { rows } = isManager(user)
+    ? await db.query(
+        `SELECT last_delivered_at AS at
+           FROM conversation_deliveries
+          WHERE conversation_id = $1 AND member_id = $2`,
+        [conversation.id, conversation.member_id]
+      )
+    : await db.query(
+        `SELECT MAX(last_delivered_at) AS at
+           FROM conversation_deliveries
+          WHERE conversation_id = $1 AND member_id <> $2`,
+        [conversation.id, conversation.member_id]
+      );
+  return rows[0]?.at || null;
+}
+
+// A new message counts as delivered at once when the other side is logged
+// in: the member, or (for a member's message) any active manager.
+async function deliverIfLoggedIn(conversation, senderId, at) {
+  try {
+    let candidates;
+    if (sameId(senderId, conversation.member_id)) {
+      const { rows } = await db.query("SELECT id FROM members WHERE role = 'manager' AND active = true");
+      candidates = rows.map((row) => row.id);
+    } else {
+      candidates = [conversation.member_id];
+    }
+    const active = await chatDelivery.activeMemberIds(candidates.filter((id) => !sameId(id, senderId)));
+    for (const memberId of active) {
+      await db.query(
+        `INSERT INTO conversation_deliveries (conversation_id, member_id, last_delivered_at)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (conversation_id, member_id)
+         DO UPDATE SET last_delivered_at = GREATEST(conversation_deliveries.last_delivered_at, EXCLUDED.last_delivered_at)`,
+        [conversation.id, memberId, at]
+      );
+    }
+  } catch (err) {
+    console.error("[messages] delivery failed:", err?.message);
+  }
+}
+
+// This person has Orbit open: everything waiting for them is delivered.
+// Managers: every conversation. Members: their own. Throttled, never throws.
+function markDelivered(user) {
+  if (!user?.id || !chatDelivery.shouldMark(`t:${user.id}`)) return;
+  db.query(
+    `WITH pending AS (
+       SELECT c.id, c.member_id
+         FROM conversations c
+         LEFT JOIN conversation_deliveries d
+                ON d.conversation_id = c.id AND d.member_id = $1
+        WHERE ($2::boolean OR c.member_id = $1)
+          AND c.last_message_at IS NOT NULL
+          AND c.last_message_at > COALESCE(d.last_delivered_at, '-infinity'::timestamptz)
+     ), ins AS (
+       INSERT INTO conversation_deliveries (conversation_id, member_id, last_delivered_at)
+       SELECT id, $1, NOW() FROM pending
+       ON CONFLICT (conversation_id, member_id) DO UPDATE SET last_delivered_at = EXCLUDED.last_delivered_at
+       RETURNING conversation_id
+     )
+     SELECT p.id, p.member_id FROM pending p JOIN ins ON ins.conversation_id = p.id`,
+    [user.id, isManager(user)]
+  ).then(({ rows }) => {
+    for (const row of rows) liveEvents.messageRead(row);
+  }).catch((err) => console.error("[messages] mark delivered failed:", err?.message));
+}
+
 /* -------------------------------------------------------------------------- */
 /* Lists                                                                      */
 /* -------------------------------------------------------------------------- */
@@ -162,6 +234,7 @@ async function otherSideReadAt(conversation, user) {
 // conversation first. unread = the member's messages this manager has not
 // read yet (replies from other managers never count as unread).
 const listConversations = async (user) => {
+  markDelivered(user);
   const { rows } = await db.query(
     `SELECT m.id AS member_id, m.name, m.email, m.avatar_url, m.bio,
             c.id AS conversation_id, c.last_message_at,
@@ -292,6 +365,7 @@ const listMessages = async (user, conversationId, { before, after, limit } = {})
     messages: order === "DESC" ? page.reverse() : page,
     has_more: hasMore,
     other_read_at: await otherSideReadAt(conversation, user),
+    other_delivered_at: await otherSideDeliveredAt(conversation, user),
   };
 };
 
@@ -372,7 +446,9 @@ const sendMessage = async (user, conversationId, rawBody, rawAttachments = [], r
     client.release();
   }
 
-  // After the commit: live update, then push. Neither can fail the request.
+  // After the commit: delivered state, live update, then push. None of
+  // them can fail the request.
+  await deliverIfLoggedIn(conversation, user.id, message.created_at);
   liveEvents.messageCreated(conversation);
   notifyRecipients(conversation, message).catch((err) => {
     console.error("[messages] push failed:", err?.message);
@@ -405,6 +481,7 @@ const forwardMessage = async (user, sourceConversationId, messageId, targetConve
     [target.id, user.id, original.body, JSON.stringify(original.attachments || []), original.id]);
   const message = inserted.rows[0];
   await query('UPDATE conversations SET last_message_at = $2 WHERE id = $1', [target.id, message.created_at]);
+  await deliverIfLoggedIn(target, user.id, message.created_at);
   liveEvents.messageCreated(target);
   notifyRecipients(target, message).catch((err) => console.error('[messages] push failed:', err?.message));
   return message;
@@ -579,6 +656,7 @@ const typing = async (user, conversationId) => {
 //   manager: members' messages this manager has not read, active members only
 //   member:  admin team messages in their own conversation not read yet
 const unreadCount = async (user) => {
+  markDelivered(user);
   const { rows } = isManager(user)
     ? await db.query(
         `SELECT COUNT(*)::int AS count

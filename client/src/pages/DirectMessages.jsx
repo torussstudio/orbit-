@@ -740,7 +740,7 @@ import { useLiveRefetch, DIRECT_THREAD_EVENTS, DIRECT_TYPING_EVENTS } from '../h
 import { ChatAttachmentCard, ChatMediaPreview, PendingChatAttachment } from '../components/messages/ChatMediaPreview';
 import {
   ChatSearchBar, Highlight, ReactionChips, ReactionPicker, ReadTicks, TypingBubble, TypingDots,
-  canEditMessage, toggleReaction, useTypingIndicator, useTypingSender,
+  canEditMessage, tickState, toggleReaction, useTypingIndicator, useTypingSender,
 } from '../components/messages/ChatExtras';
 
 const IMAGE_LIMIT = 10 * 1024 * 1024;
@@ -947,6 +947,7 @@ export default function DirectMessages() {
   const [deleteMenuId, setDeleteMenuId] = useState(null);
   const [deleteConfirmation, setDeleteConfirmation] = useState(null);
   const [otherReadAt, setOtherReadAt] = useState(null);
+  const [otherDeliveredAt, setOtherDeliveredAt] = useState(null);
   const [hasMore, setHasMore] = useState(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [editing, setEditing] = useState(null);
@@ -997,6 +998,7 @@ export default function DirectMessages() {
       setMessages(next);
       if (!older.length) setHasMore(Boolean(data.has_more));
       setOtherReadAt(data.other_read_at || null);
+      setOtherDeliveredAt(data.other_delivered_at || null);
       setError('');
       await api.post(`/messages/direct/conversations/${cid}/read`, null, { silent: true });
     } catch (e) {
@@ -1056,6 +1058,7 @@ export default function DirectMessages() {
     messagesRef.current = [];
     setHasMore(false);
     setOtherReadAt(null);
+    setOtherDeliveredAt(null);
     setEditing(null);
     setReactPickerId(null);
     setChatSearchOpen(false);
@@ -1400,10 +1403,10 @@ export default function DirectMessages() {
   const pendingInLastGroup = dayGroups.length > 0 && dayGroups[dayGroups.length - 1].key === dayKey(new Date());
   const renderPending = (pending) => (
     <div key={pending.id} className="mb-3 flex justify-end">
-      <div className="max-w-[88%] rounded-2xl rounded-br-md bg-[var(--accent)] px-3.5 py-2.5 text-white opacity-90 sm:max-w-[68%]">
+      <div className="max-w-[88%] rounded-2xl rounded-br-md bg-[var(--chat-out-bg)] px-3.5 py-2.5 text-[color:var(--chat-out-text)] opacity-90 shadow-[var(--chat-out-shadow)] sm:max-w-[68%]">
         {pending.body && <p className="whitespace-pre-wrap break-words text-[13.5px] leading-relaxed">{pending.body}</p>}
         {pending.files.map((file, index) => <PendingChatAttachment key={`${pending.id}-${index}`} file={file} />)}
-        <p className="mt-1 text-right text-[10px] text-white/70">Sending…</p>
+        <p className="mt-1 text-right text-[10px] text-[color:var(--chat-out-meta)]">Sending…</p>
       </div>
     </div>
   );
@@ -1555,15 +1558,15 @@ export default function DirectMessages() {
                   const mine = same(message.sender_id, user?.id);
                   const menuOpen = same(deleteMenuId, message.id);
                   const pickerOpen = same(reactPickerId, message.id);
-                  const seen = mine && otherReadAt && new Date(otherReadAt) >= new Date(message.created_at);
+                  const ticks = mine ? tickState(message.created_at, otherDeliveredAt, otherReadAt) : null;
                   const flashing = same(flashId?.id, message.id);
                   return (
                     <Fragment key={message.id}>
                       <div id={`dm-msg-${message.id}`} className={`mb-3 flex scroll-mt-16 flex-col ${mine ? 'items-end' : 'items-start'}`}>
-                        <div onClick={() => setActiveMessageId((id) => (same(id, message.id) ? null : message.id))} className={`group relative max-w-[88%] px-3.5 py-2.5 transition-shadow duration-300 sm:max-w-[68%] ${mine ? 'rounded-2xl rounded-br-md bg-[var(--accent)] text-white shadow-[0_10px_24px_-14px_var(--accent)]' : 'rounded-2xl rounded-bl-md border border-[color:var(--border)] bg-[var(--bg-2)] text-[color:var(--text)] shadow-[0_8px_20px_-16px_rgba(15,23,42,0.5)]'} ${flashing ? 'ring-2 ring-amber-400 ring-offset-2 ring-offset-[color:var(--bg)]' : ''}`}>
+                        <div onClick={() => setActiveMessageId((id) => (same(id, message.id) ? null : message.id))} className={`group relative max-w-[88%] px-3.5 py-2.5 transition-shadow duration-300 sm:max-w-[68%] ${mine ? 'rounded-2xl rounded-br-md bg-[var(--chat-out-bg)] text-[color:var(--chat-out-text)] shadow-[var(--chat-out-shadow)]' : 'rounded-2xl rounded-bl-md border border-[color:var(--border)] bg-[var(--bg-2)] text-[color:var(--text)] shadow-[0_8px_20px_-16px_rgba(15,23,42,0.5)]'} ${flashing ? 'ring-2 ring-amber-400 ring-offset-2 ring-offset-[color:var(--bg)]' : ''}`}>
                           {message.forwarded_from_id && <p className="mb-1 flex items-center gap-1 text-[10px] font-medium italic opacity-75"><Icon name="forward" className="h-3 w-3" />Forwarded</p>}
                           {message.reply_to_message_id && (
-                            <div className={`mb-1.5 rounded-lg border-l-2 bg-black/10 px-2.5 py-1.5 text-[11px] ${mine ? 'border-white/60' : 'border-[color:var(--accent)]'}`}>
+                            <div className={`mb-1.5 rounded-lg border-l-2 px-2.5 py-1.5 text-[11px] ${mine ? 'border-[color:var(--chat-out-meta)] bg-[var(--chat-out-quote)]' : 'border-[color:var(--accent)] bg-black/10'}`}>
                               <span className="font-semibold">{message.reply_sender_name || 'Reply'}</span>
                               <p className="truncate opacity-80">{message.reply_body || 'Attachment'}</p>
                             </div>
@@ -1590,10 +1593,10 @@ export default function DirectMessages() {
                               )}
                             </div>
                           )}
-                          <p className={`mt-1 flex items-center justify-end gap-1 text-[10px] tabular-nums ${mine ? 'text-white/70' : 'text-[color:var(--text-3)]'}`}>
+                          <p className={`mt-1 flex items-center justify-end gap-1 text-[10px] tabular-nums ${mine ? 'text-[color:var(--chat-out-meta)]' : 'text-[color:var(--text-3)]'}`}>
                             {message.edited_at && !message.deleted && <span className="italic" title={`Edited ${new Date(message.edited_at).toLocaleString('en-IN')}`}>edited</span>}
                             <span>{labelTime(message.created_at)}</span>
-                            {mine && !message.deleted && <ReadTicks seen={seen} className={`h-3.5 w-3.5 ${seen ? 'text-sky-200' : ''}`} />}
+                            {mine && !message.deleted && <ReadTicks state={ticks} className="h-4 w-4" />}
                           </p>
                         </div>
                         {!message.deleted && (

@@ -5,6 +5,7 @@ const db = require('../db');
 const liveEvents = require('./liveEvents');
 const { createNotification } = require('../utils/pushNotify');
 const chatExtras = require('../utils/chatExtras');
+const chatDelivery = require('./chatDelivery');
 
 const MAX_BODY = 4000;
 const MAX_ATTACHMENTS = 3;
@@ -145,6 +146,7 @@ async function listMembers(user, search = '') {
 
 async function listConversations(user) {
   requireMember(user);
+  markDelivered(user);
   const { rows } = await db.query(
     `SELECT c.id, c.last_message_at, p.id AS peer_id, p.name AS peer_name, p.avatar_url AS peer_avatar_url, p.bio AS peer_bio,
             lm.body AS last_body, lm.created_at AS last_created_at,
@@ -227,11 +229,16 @@ async function listMessages(user, conversationId, { before, after, limit } = {})
     `SELECT last_read_at FROM direct_conversation_reads WHERE direct_conversation_id = $1 AND member_id = $2`,
     [conversation.id, conversation.peer_id],
   );
+  const delivered = await db.query(
+    `SELECT last_delivered_at FROM direct_conversation_deliveries WHERE direct_conversation_id = $1 AND member_id = $2`,
+    [conversation.id, conversation.peer_id],
+  );
   return {
     conversation: { id: conversation.id, peer: { id: conversation.peer_id, name: conversation.peer_name, avatar_url: conversation.peer_avatar_url, bio: conversation.peer_bio, active: conversation.peer_active } },
     messages: order === 'DESC' ? page.reverse() : page,
     has_more: rows.length > size,
     other_read_at: read.rows[0]?.last_read_at || null,
+    other_delivered_at: delivered.rows[0]?.last_delivered_at || null,
   };
 }
 
@@ -321,6 +328,7 @@ async function sendMessage(user, conversationId, rawBody, rawAttachments = [], r
   }
 
   const eventConversation = { id: conversation.id, member_one_id: conversation.member_one_id, member_two_id: conversation.member_two_id };
+  await deliverIfLoggedIn(conversation, user.id, message.created_at);
   liveEvents.directMessageCreated(eventConversation);
   notifyDirectRecipient(conversation, message).catch((err) => console.error('[direct messages] push failed:', err?.message));
   return message;
@@ -349,6 +357,7 @@ async function forwardMessage(user, sourceConversationId, messageId, targetConve
   const inserted = await db.query(`INSERT INTO direct_messages (direct_conversation_id, sender_id, body, attachments, forwarded_from_id) VALUES ($1, $2, $3, $4::jsonb, $5) RETURNING id, direct_conversation_id AS conversation_id, sender_id, body, attachments, created_at, forwarded_from_id`, [target.id, user.id, original.body, JSON.stringify(original.attachments || []), original.id]);
   const message = inserted.rows[0];
   await db.query('UPDATE direct_conversations SET last_message_at = $2 WHERE id = $1', [target.id, message.created_at]);
+  await deliverIfLoggedIn(target, user.id, message.created_at);
   liveEvents.directMessageCreated(target);
   notifyDirectRecipient(target, message).catch((err) => console.error('[direct messages] push failed:', err?.message));
   return message;
@@ -381,6 +390,53 @@ async function markRead(user, conversationId) {
   const changed = Boolean(last && (!previous || previous < last));
   if (changed) liveEvents.directMessageRead(conversation);
   return { changed };
+}
+
+/* ---------- Delivered (grey double tick), see chatDelivery.js ---------- */
+
+// The recipient is logged in somewhere: the message counts as delivered now.
+async function deliverIfLoggedIn(conversation, senderId, at) {
+  try {
+    const recipientId = sameId(conversation.member_one_id, senderId) ? conversation.member_two_id : conversation.member_one_id;
+    const active = await chatDelivery.activeMemberIds([recipientId]);
+    if (!active.length) return;
+    await db.query(
+      `INSERT INTO direct_conversation_deliveries (direct_conversation_id, member_id, last_delivered_at)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (direct_conversation_id, member_id)
+       DO UPDATE SET last_delivered_at = GREATEST(direct_conversation_deliveries.last_delivered_at, EXCLUDED.last_delivered_at)`,
+      [conversation.id, recipientId, at],
+    );
+  } catch (err) {
+    console.error('[direct messages] delivery failed:', err?.message);
+  }
+}
+
+// This member has Orbit open (signed in again, or the app loaded): every
+// message waiting for them is delivered. Senders get a live update so their
+// single ticks turn into double ticks. Never throws, throttled per person.
+function markDelivered(user) {
+  if (user?.role !== 'member' || !chatDelivery.shouldMark(`d:${user.id}`)) return;
+  db.query(
+    `WITH pending AS (
+       SELECT c.id, c.member_one_id, c.member_two_id
+         FROM direct_conversations c
+         LEFT JOIN direct_conversation_deliveries d
+                ON d.direct_conversation_id = c.id AND d.member_id = $1
+        WHERE (c.member_one_id = $1 OR c.member_two_id = $1)
+          AND c.last_message_at IS NOT NULL
+          AND c.last_message_at > COALESCE(d.last_delivered_at, '-infinity'::timestamptz)
+     ), ins AS (
+       INSERT INTO direct_conversation_deliveries (direct_conversation_id, member_id, last_delivered_at)
+       SELECT id, $1, NOW() FROM pending
+       ON CONFLICT (direct_conversation_id, member_id) DO UPDATE SET last_delivered_at = EXCLUDED.last_delivered_at
+       RETURNING direct_conversation_id
+     )
+     SELECT p.id, p.member_one_id, p.member_two_id FROM pending p JOIN ins ON ins.direct_conversation_id = p.id`,
+    [user.id],
+  ).then(({ rows }) => {
+    for (const row of rows) liveEvents.directMessageRead(row);
+  }).catch((err) => console.error('[direct messages] mark delivered failed:', err?.message));
 }
 
 /* ---------- Reactions, editing, search, typing ---------- */
@@ -457,6 +513,7 @@ async function typing(user, conversationId) {
 
 async function unreadCount(user) {
   requireMember(user);
+  markDelivered(user);
   const { rows } = await db.query(
     `SELECT COUNT(*)::int AS count FROM direct_messages m
        JOIN direct_conversations c ON c.id = m.direct_conversation_id

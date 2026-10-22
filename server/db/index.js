@@ -804,6 +804,17 @@ const initDB = async () => {
       PRIMARY KEY (conversation_id, member_id)
     )
   `);
+  // "Delivered" (grey double tick): the latest time each person's Orbit got
+  // this conversation's messages. Kept apart from reads so it never marks
+  // anything as read. See services/chatDelivery.js.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS conversation_deliveries (
+      conversation_id ${refType(defaultIdType)} NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+      member_id ${refType(memberIdType)} NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+      last_delivered_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (conversation_id, member_id)
+    )
+  `);
   await pool.query(`
     CREATE INDEX IF NOT EXISTS idx_messages_conversation_created
     ON messages (conversation_id, created_at DESC, id DESC)
@@ -847,6 +858,14 @@ const initDB = async () => {
       direct_conversation_id ${refType(defaultIdType)} NOT NULL REFERENCES direct_conversations(id) ON DELETE CASCADE,
       member_id ${refType(memberIdType)} NOT NULL REFERENCES members(id) ON DELETE CASCADE,
       last_read_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (direct_conversation_id, member_id)
+    )
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS direct_conversation_deliveries (
+      direct_conversation_id ${refType(defaultIdType)} NOT NULL REFERENCES direct_conversations(id) ON DELETE CASCADE,
+      member_id ${refType(memberIdType)} NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+      last_delivered_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       PRIMARY KEY (direct_conversation_id, member_id)
     )
   `);

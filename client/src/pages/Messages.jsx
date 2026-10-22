@@ -6,7 +6,7 @@ import { useLiveRefetch, MESSAGE_EVENTS, MESSAGE_THREAD_EVENTS, MESSAGE_TYPING_E
 import { ChatAttachmentCard, ChatMediaPreview, PendingChatAttachment } from '../components/messages/ChatMediaPreview';
 import {
   ChatSearchBar, Highlight, ReactionChips, ReactionPicker, ReadTicks, TypingBubble, TypingDots,
-  canEditMessage, toggleReaction, useTypingIndicator, useTypingSender,
+  canEditMessage, tickState, toggleReaction, useTypingIndicator, useTypingSender,
 } from '../components/messages/ChatExtras';
 
 /*
@@ -240,6 +240,7 @@ function Thread({ conversationId, memberId, header, onBack, onActivity, forwardT
   const [pending, setPending] = useState([]); // { tempId, body, status, error, created_at }
   const [hasMore, setHasMore] = useState(false);
   const [otherReadAt, setOtherReadAt] = useState(null);
+  const [otherDeliveredAt, setOtherDeliveredAt] = useState(null);
   const [readOnly, setReadOnly] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -318,6 +319,7 @@ function Thread({ conversationId, memberId, header, onBack, onActivity, forwardT
       setMessages(next);
       if (!older.length) setHasMore(Boolean(data.has_more));
       setOtherReadAt(data.other_read_at || null);
+      setOtherDeliveredAt(data.other_delivered_at || null);
       setReadOnly(data.conversation?.member_active === false);
       setError('');
       markRead();
@@ -340,6 +342,7 @@ function Thread({ conversationId, memberId, header, onBack, onActivity, forwardT
     setPending([]);
     setHasMore(false);
     setOtherReadAt(null);
+    setOtherDeliveredAt(null);
     setReadOnly(false);
     setShowJump(false);
     setDraft('');
@@ -871,12 +874,10 @@ function Thread({ conversationId, memberId, header, onBack, onActivity, forwardT
                   <MessageRow
                     key={row.key}
                     row={row}
-                    seen={Boolean(row.right && !row.m.pending && otherReadAt && new Date(otherReadAt) >= new Date(row.m.created_at))}
+                    ticks={row.right && !row.m.pending ? tickState(row.m.created_at, otherDeliveredAt, otherReadAt) : null}
                     status={
                       row.key === lastOwnKey
-                        ? otherReadAt && new Date(otherReadAt) >= new Date(row.m.created_at)
-                          ? 'Seen'
-                          : 'Sent'
+                        ? { seen: 'Seen', delivered: 'Delivered', sent: 'Sent' }[tickState(row.m.created_at, otherDeliveredAt, otherReadAt)]
                         : null
                     }
                     onRetry={send}
@@ -1066,7 +1067,7 @@ function Thread({ conversationId, memberId, header, onBack, onActivity, forwardT
 }
 
 const MessageRow = memo(function MessageRow({
-  row, status, seen, onRetry, onDiscard, onReply, onDelete, onForward, onOpenAttachment, canForward,
+  row, status, ticks, onRetry, onDiscard, onReply, onDelete, onForward, onOpenAttachment, canForward,
   meId, nameOf, onReact, onEdit, pickerOpen, onOpenPicker, searchQuery, flashing,
 }) {
   const { m, right, mine, grouped, name } = row;
@@ -1076,7 +1077,7 @@ const MessageRow = memo(function MessageRow({
 
   const bubble = right
     ? mine
-      ? 'rounded-br-md bg-[var(--accent)] text-white shadow-[0_10px_24px_-14px_var(--accent)]'
+      ? 'rounded-br-md bg-[var(--chat-out-bg)] text-[color:var(--chat-out-text)] shadow-[var(--chat-out-shadow)]'
       : // Another admin's reply on a manager's screen: team side, softer.
         'rounded-br-md bg-[var(--accent-light)] text-[color:var(--text)]'
     : 'rounded-bl-md border border-[color:var(--border)] bg-[var(--bg-2)] text-[color:var(--text)] shadow-[0_8px_20px_-16px_rgba(15,23,42,0.5)]';
@@ -1097,7 +1098,7 @@ const MessageRow = memo(function MessageRow({
       >
         {m.forwarded_from_id && <p className="mb-1 flex items-center gap-1 text-[10px] font-medium italic opacity-75"><Icon name="forward" className="h-3 w-3" />Forwarded</p>}
         {m.reply_to_message_id && (
-          <div className={`mb-1.5 rounded-lg border-l-2 bg-black/10 px-2.5 py-1.5 text-[11px] ${mine ? 'border-white/60' : 'border-[color:var(--accent)]'}`}>
+          <div className={`mb-1.5 rounded-lg border-l-2 px-2.5 py-1.5 text-[11px] ${mine ? 'border-[color:var(--chat-out-meta)] bg-[var(--chat-out-quote)]' : 'border-[color:var(--accent)] bg-black/10'}`}>
             <span className="font-semibold">{m.reply_sender_name || 'Reply'}</span>
             <p className="truncate opacity-80">{m.reply_body || 'Message'}</p>
           </div>
@@ -1155,9 +1156,9 @@ const MessageRow = memo(function MessageRow({
           </time>
         )}
         {!p && right && !m.deleted && (
-          <ReadTicks seen={seen} className={`-mx-1 h-3.5 w-3.5 ${seen ? 'text-[color:var(--accent)]' : ''}`} />
+          <ReadTicks state={ticks || 'sent'} className="-mx-1 h-4 w-4" />
         )}
-        {!p && status && <span className={status === 'Seen' ? 'font-medium text-[color:var(--accent)]' : ''}>· {status}</span>}
+        {!p && status && <span className={status === 'Seen' ? 'font-medium text-[color:var(--chat-tick-read)]' : ''}>· {status}</span>}
       </div>
     </li>
   );

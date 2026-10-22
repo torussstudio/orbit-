@@ -44,6 +44,14 @@
     /* Lightness for per-name colors (avatars, project marks) */
     --hue-text-l: 38%;
     --hue-fill-l: 56%;
+
+    /* Chat: my own message bubbles (WhatsApp-style green) and the ticks */
+    --chat-out-bg: #d9fdd3;
+    --chat-out-text: #111b21;
+    --chat-out-meta: #667781;
+    --chat-out-quote: rgba(17,27,33,0.06);
+    --chat-out-shadow: 0 6px 16px -12px rgba(17,27,33,0.35);
+    --chat-tick-read: #53bdeb;
   }
 
   /* ---------------------------------------------------------------- */
@@ -63,6 +71,13 @@
     --accent-2: #d0d4d8;
     --accent-light: rgba(183,189,196,0.14);
     --accent-glow: rgba(183,189,196,0.1);
+
+    --chat-out-bg: #005c4b;
+    --chat-out-text: #e9edef;
+    --chat-out-meta: rgba(233,237,239,0.62);
+    --chat-out-quote: rgba(0,0,0,0.18);
+    --chat-out-shadow: 0 6px 16px -12px rgba(0,0,0,0.6);
+    --chat-tick-read: #53bdeb;
     --text: #f1f2f3;
     --text-2: #c2c6ca;
     --text-3: #969ca2;

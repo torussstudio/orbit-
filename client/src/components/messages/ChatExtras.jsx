@@ -123,12 +123,27 @@ export function TypingBubble({ label }) {
 
 /* ---------- Read ticks ---------- */
 
-// ✓ sent, ✓✓ seen.
-export function ReadTicks({ seen, className = 'h-3.5 w-3.5' }) {
+/*
+ * 'sent'      ✓        the recipient is logged out of Orbit
+ * 'delivered' ✓✓ grey  the recipient is logged in (or has opened Orbit since)
+ * 'seen'      ✓✓ blue  the recipient opened the chat
+ */
+export function tickState(createdAt, deliveredAt, readAt) {
+  const at = new Date(createdAt).getTime();
+  if (readAt && new Date(readAt).getTime() >= at) return 'seen';
+  if (deliveredAt && new Date(deliveredAt).getTime() >= at) return 'delivered';
+  return 'sent';
+}
+
+const TICK_LABEL = { sent: 'Sent', delivered: 'Delivered', seen: 'Seen' };
+
+// Colour: inherits the time's colour, blue (--chat-tick-read) once seen.
+export function ReadTicks({ state = 'sent', className = 'h-3.5 w-3.5' }) {
+  const label = TICK_LABEL[state] || 'Sent';
   return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" className={`inline-block shrink-0 ${className}`} role="img" aria-label={seen ? 'Seen' : 'Sent'}>
-      <title>{seen ? 'Seen' : 'Sent'}</title>
-      {seen ? (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" className={`inline-block shrink-0 ${state === 'seen' ? 'text-[color:var(--chat-tick-read)]' : ''} ${className}`} role="img" aria-label={label}>
+      <title>{label}</title>
+      {state !== 'sent' ? (
         <>
           <path d="M1.5 12.5l4.5 4.5L16.5 6.5" />
           <path d="M10 15.5l1.5 1.5L22 6.5" />
