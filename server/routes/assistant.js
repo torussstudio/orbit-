@@ -77,6 +77,9 @@ router.get("/usage", auth, handle(async (req, res) => res.json(await assistant.u
 
 // Phase 2: run or drop a change the assistant prepared. Only the person it
 // was prepared for can confirm it, once, within 30 minutes.
+// Several cards of one reply at once ("Confirm all" / "Cancel all"), body { ids }.
+router.post("/actions/confirm-all", auth, handle(async (req, res) => res.json(await assistant.confirmActions(req.user, req.body?.ids))));
+router.post("/actions/cancel-all", auth, handle(async (req, res) => res.json(await assistant.cancelActions(req.user, req.body?.ids))));
 router.post("/actions/:id/confirm", auth, handle(async (req, res) => res.json(await assistant.confirmAction(req.user, req.params.id))));
 router.post("/actions/:id/cancel", auth, handle(async (req, res) => res.json(await assistant.cancelAction(req.user, req.params.id))));
 

@@ -44,6 +44,11 @@ const accessControl = lazy('../accessControl');
 
 const istToday = () => new Intl.DateTimeFormat('en-CA', { timeZone: tools.TZ }).format(new Date());
 const prettyDate = (d) => (d ? new Intl.DateTimeFormat('en-IN', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' }).format(new Date(`${d}T00:00:00Z`)) : null);
+// A date pasted next to a task (e.g. the day it was noted down) is not a
+// deadline. A due date in the past is sent back to the model instead of
+// being saved.
+const PAST_DUE = 'That due date is in the past. If it was only the date written next to the task (not a deadline), prepare it again without due_date. If the person really meant it as the deadline, ask them for a new date.';
+
 const validDate = (d) => DATE_RE.test(String(d || '')) && !Number.isNaN(new Date(`${d}T00:00:00Z`).getTime());
 
 /* ---------- Declarations ---------- */
@@ -164,6 +169,7 @@ async function prepareCreateTask(user, a) {
     if (resolved.error) return resolved;
     const projectName = resolved.name;
     if (a.due_date && !validDate(a.due_date)) return fail('Due date must be YYYY-MM-DD.');
+    if (a.due_date && a.due_date < istToday()) return fail(PAST_DUE);
     const description = String(a.description || '').trim().slice(0, 5000);
     return {
       kind: 'task_request',
@@ -187,6 +193,7 @@ async function prepareCreateTask(user, a) {
   }
   const project = projects[0];
   if (a.due_date && !validDate(a.due_date)) return fail('Due date must be YYYY-MM-DD.');
+  if (a.due_date && a.due_date < istToday()) return fail(PAST_DUE);
   const priority = PRIORITIES.includes(String(a.priority || '').toLowerCase()) ? String(a.priority).toLowerCase() : 'medium';
   const description = String(a.description || '').trim().slice(0, 5000);
 
@@ -380,7 +387,11 @@ async function prepare(user, name, args) {
     const action = { id, kind: prepared.kind, status: 'pending', preview: prepared.preview };
     return {
       action,
-      forModel: { status: 'waiting_for_confirmation', summary: prepared.preview, note: 'Tell the person to press Confirm on the card below. Nothing has changed yet.' },
+      forModel: {
+        status: 'waiting_for_confirmation',
+        summary: prepared.preview,
+        note: 'Card shown; nothing has changed yet. If the person asked for more items in their message, prepare every remaining one now, in this same reply. Then tell them to press Confirm (or Confirm all when there are several cards).',
+      },
     };
   } catch (err) {
     console.error(`[ai] prepare ${name} failed:`, err?.message);
@@ -480,4 +491,32 @@ async function states(user, ids) {
   return new Map(rows.map((r) => [r.id, publicAction(r)]));
 }
 
-module.exports = { declarations, isAction, prepare, confirm, cancel, states };
+// The person's latest actions (last 2 hours), so a follow-up like a second
+// set of task details is understood as "the same again". Newest first.
+const KIND_LABEL = {
+  create_task: 'create task',
+  task_request: 'task request',
+  update_task: 'update task',
+  add_comment: 'comment',
+  log_time: 'log time',
+  create_event: 'calendar event',
+};
+
+async function recent(user, limit = 5) {
+  const { rows } = await db.query(
+    `SELECT kind, preview,
+            CASE WHEN status = 'pending' AND expires_at < NOW() THEN 'expired' ELSE status END AS status,
+            GREATEST(0, ROUND(EXTRACT(EPOCH FROM NOW() - created_at) / 60))::int AS minutes_ago
+       FROM ai_actions
+      WHERE member_id = $1 AND created_at > NOW() - INTERVAL '2 hours'
+      ORDER BY created_at DESC
+      LIMIT $2`,
+    [user.id, limit],
+  );
+  return rows.map((r) => {
+    const first = (r.preview?.lines || [])[0] || r.preview?.title || '';
+    return `${KIND_LABEL[r.kind] || r.kind} — ${String(first).slice(0, 90)} — ${r.status === 'pending' ? 'waiting for Confirm' : r.status}, ${r.minutes_ago} min ago`;
+  });
+}
+
+module.exports = { declarations, isAction, prepare, confirm, cancel, states, recent };

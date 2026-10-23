@@ -28,7 +28,8 @@ const actions = require('./assistantActions');
 const MAX_INPUT = 4000;
 const HISTORY_FOR_MODEL = 14;
 const MAX_TOOL_ROUNDS = 5;
-const MAX_ACTIONS_PER_REPLY = 5;
+// Cards one reply may prepare (a pasted list of tasks becomes one card each).
+const MAX_ACTIONS_PER_REPLY = 10;
 const fail = (status, message) => Object.assign(new Error(message), { status });
 const dailyLimit = () => Math.max(1, Number.parseInt(process.env.AI_DAILY_LIMIT, 10) || 40);
 
@@ -63,7 +64,7 @@ async function snapshotFor(user) {
   return data;
 }
 
-function systemPrompt(user, snapshot) {
+function systemPrompt(user, snapshot, recentActions = []) {
   const admin = tools.isManager(user);
   return [
     'You are Orbit AI, the assistant inside Orbit — the project, task, time and team app of Toruss, a creative agency in Palakkad, Kerala (web, branding, design, SEO, social media).',
@@ -75,6 +76,7 @@ function systemPrompt(user, snapshot) {
       ? `You are talking to ${user.name || 'an admin'}, an ADMIN. Admins see and manage everything: every project, task, member, the review queue, task requests, time logs, rework, calendar and activity. You also know how each member works in Orbit (member_insights: completion, on-time, rework, hours, activity patterns). Act like a sharp chief-of-staff: spot risks (overdue work, overloaded people, tasks stuck in review, rework), and suggest who/what to act on.`
       : `You are talking to ${user.name || 'a team member'}, a MEMBER. You know everything about their own work: their tasks (with details, comments and history), their projects in depth (details, links, progress counts and the whole Knowledge board, including the text of uploaded files), their time log, their calendar, their task requests and their own work insights (member_insights). Colleagues' public profiles are visible, but not other people's tasks, hours or insights. Act like a helpful senior teammate: help them prioritise, unblock and finish.`,
     snapshot ? `Live snapshot right now (${snapshot.scope}): ${JSON.stringify(snapshot)}` : '',
+    recentActions.length ? `This person's recent Orbit AI actions (newest first): ${recentActions.join(' | ')}` : '',
     '',
     'How to answer:',
     '- For facts beyond the snapshot, call tools. Combine several tools when useful (e.g. task_details + activity). Never invent tasks, people, numbers or dates.',
@@ -90,6 +92,9 @@ function systemPrompt(user, snapshot) {
     '',
     'Doing things (actions):',
     '- You can prepare: create_task, update_task, add_comment, log_time' + (admin ? ', create_event' : '') + '. Nothing changes until the person presses Confirm on the card, so say e.g. "Ready — press Confirm below."',
+    `- Several items in one message (a numbered or pasted list, "create all", "and also …"): prepare ALL of them in the same reply — call the action once per item, together in one turn. Never prepare only the first and wait. Up to ${MAX_ACTIONS_PER_REPLY} per reply; if there are more, prepare the first ${MAX_ACTIONS_PER_REPLY} and say how many are left. Then say e.g. "Ready — N cards below. Press Confirm all, or confirm them one by one." (N = the real number). Use the shared details (project, people, date) for every item unless an item says otherwise.`,
+    '- Follow-ups: when the person has just asked you to do something (see their recent actions and the chat) and their new message only gives the details of another item of the same kind (for example another task title, project, person, date) without saying what to do, do the same thing again and prepare it straight away. Do not ask "should I request this?". If the new message asks for something different, do that instead. If it is truly unclear, ask one short question.',
+    '- A date written next to a task in a pasted list is DD-MM-YYYY. Use it as due_date only when it is in the future or the person calls it the deadline; otherwise leave due_date empty.',
     '- Project names: pass them exactly as the person wrote them. "Orbit" can be a project name too (not only this app). Never swap in a different project (e.g. Toruss for Orbit). If a tool says the name is not found and gives a closest match, ask "Did you mean <name>?" and wait for their yes before preparing anything.',
     '- Resolve names and dates from what they said and the date list above. If something essential is missing or a name is ambiguous, ask one short question instead of guessing.',
     admin ? '' : '- Work insights: members can only see their own. If they ask about someone else, say only admins can see that.',
@@ -198,7 +203,7 @@ async function chat(authUser, rawText, opts = {}) {
   emit?.({ type: 'status', text: 'Thinking' });
 
   // Everything the first model call needs, fetched at the same time.
-  const [user, used, past, snapshot] = await Promise.all([
+  const [user, used, past, snapshot, recentActions] = await Promise.all([
     withName(authUser),
     usage(authUser),
     db.query(
@@ -206,6 +211,7 @@ async function chat(authUser, rawText, opts = {}) {
       [authUser.id],
     ).then((r) => r.rows),
     snapshotFor(authUser),
+    actions.recent(authUser).catch(() => []),
   ]);
   timing.db += Date.now() - started;
   if (used.used >= used.limit) {
@@ -216,7 +222,7 @@ async function chat(authUser, rawText, opts = {}) {
   const contents = past.reverse().map((m) => ({ role: m.role === 'user' ? 'user' : 'model', parts: [{ text: m.content }] }));
   contents.push({ role: 'user', parts: [{ text }] });
 
-  const system = systemPrompt(user, snapshot);
+  const system = systemPrompt(user, snapshot, recentActions);
   // Saved while the model works; awaited before the reply is saved.
   const userMessagePromise = save(user.id, 'user', text);
   const cards = new Map();
@@ -299,7 +305,13 @@ async function chat(authUser, rawText, opts = {}) {
   }
   if (stopped) answer = answer ? `${answer} …` : '(Stopped)';
 
-  if (!answer) answer = prepared.length ? 'Ready — check the details and press Confirm below.' : "I couldn't put an answer together. Try asking in a different way.";
+  if (!answer) {
+    answer = prepared.length > 1
+      ? `Ready — ${prepared.length} cards below. Press Confirm all, or confirm them one by one.`
+      : prepared.length
+        ? 'Ready — check the details and press Confirm below.'
+        : "I couldn't put an answer together. Try asking in a different way.";
+  }
   // Task cards for tasks the answer talks about (at most 8).
   const lower = answer.toLowerCase();
   const shown = prepared.length ? [] : [...cards.values()].filter((c) => lower.includes(String(c.title).toLowerCase().slice(0, 24))).slice(0, 8);
@@ -328,6 +340,51 @@ async function confirmAction(user, id) {
 
 async function cancelAction(user, id) {
   return actions.cancel(user, id);
+}
+
+// "Confirm all" under a reply with several cards. One by one, in the
+// order shown, each through the same confirm as a single card, so every
+// rule still applies and one failure does not stop the rest. One chat
+// message sums it up.
+const MAX_BULK = MAX_ACTIONS_PER_REPLY;
+
+function bulkIds(ids) {
+  const list = Array.isArray(ids) ? [...new Set(ids.map(String))].filter(Boolean) : [];
+  if (!list.length) throw fail(400, 'Nothing to confirm.');
+  if (list.length > MAX_BULK) throw fail(400, `At most ${MAX_BULK} at a time.`);
+  return list;
+}
+
+async function confirmActions(user, ids) {
+  const list = bulkIds(ids);
+  const results = [];
+  for (const id of list) {
+    try {
+      results.push(await actions.confirm(user, id));
+    } catch (err) {
+      // Not found / expired: report it on that card, keep going.
+      const status = err?.status === 410 ? 'expired' : 'failed';
+      results.push({ action: { id, status, result: { text: err?.status && err.status < 500 ? err.message : 'That did not work.' } }, message: `⚠️ ${err?.message || 'That did not work.'}` });
+    }
+  }
+  const lines = results.filter((r) => r.message).map((r) => (r.action.status === 'done' ? `✅ ${r.message}` : r.message));
+  let message = null;
+  if (lines.length) {
+    message = await save(user.id, 'assistant', lines.join('\n'));
+    snapshotCache.delete(String(user.id));
+  }
+  return { actions: results.map((r) => r.action), message };
+}
+
+async function cancelActions(user, ids) {
+  const list = bulkIds(ids);
+  const out = [];
+  for (const id of list) {
+    try {
+      out.push((await actions.cancel(user, id)).action);
+    } catch { /* not this person's / gone: skip */ }
+  }
+  return { actions: out };
 }
 
 /* ---------- Morning briefing ---------- */
@@ -410,4 +467,4 @@ async function briefing(authUser) {
   return { day, text, cards, cached: false };
 }
 
-module.exports = { chat, history, clear, briefing, usage, confirmAction, cancelAction };
+module.exports = { chat, history, clear, briefing, usage, confirmAction, cancelAction, confirmActions, cancelActions };

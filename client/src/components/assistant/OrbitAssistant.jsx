@@ -163,9 +163,9 @@ const ACTION_STATUS = {
 };
 
 // A change Orbit AI prepared. Nothing happens until Confirm.
-function ActionCard({ action, onConfirm, onCancel, onOpenLink, busyId }) {
+function ActionCard({ action, onConfirm, onCancel, onOpenLink, busyId, locked = false }) {
   const pending = action.status === 'pending';
-  const working = busyId === action.id;
+  const working = busyId === action.id || locked;
   const status = ACTION_STATUS[action.status];
   return (
     <div className={`mt-2.5 overflow-hidden rounded-xl border ${pending ? 'border-[color:var(--accent)] shadow-[0_10px_24px_-18px_var(--accent)]' : 'border-[color:var(--border)]'}`}>
@@ -207,6 +207,21 @@ function ActionCard({ action, onConfirm, onCancel, onOpenLink, busyId }) {
           </p>
         )}
       </div>
+    </div>
+  );
+}
+
+// Under a reply with 2+ cards still waiting: confirm or cancel them all.
+function BulkActionBar({ count, busy, onConfirmAll, onCancelAll }) {
+  return (
+    <div className="mt-2.5 flex flex-wrap items-center gap-2 rounded-xl border border-dashed border-[color:var(--accent)] bg-[var(--accent-light)] px-3 py-2">
+      <span className="w-full text-[12px] font-medium text-[color:var(--text-2)] sm:mr-auto sm:w-auto">{count} changes waiting</span>
+      <button type="button" disabled={busy} onClick={onConfirmAll} className={`inline-flex h-8 flex-1 items-center sm:flex-none justify-center gap-1 rounded-lg bg-[var(--accent)] px-3 text-[12px] font-semibold text-white transition hover:brightness-110 active:scale-[0.98] disabled:opacity-60 ${FOCUS_RING}`}>
+        <Icon name="check" className="h-3.5 w-3.5" />{busy ? 'Working…' : `Confirm all (${count})`}
+      </button>
+      <button type="button" disabled={busy} onClick={onCancelAll} className={`h-8 flex-1 rounded-lg sm:flex-none border border-[color:var(--border)] bg-[var(--bg-2)] px-3 text-[12px] font-medium text-[color:var(--text-2)] transition hover:bg-[var(--bg-3)] disabled:opacity-60 ${FOCUS_RING}`}>
+        Cancel all
+      </button>
     </div>
   );
 }
@@ -269,6 +284,8 @@ export default function OrbitAssistant() {
   const [busy, setBusy] = useState(false);
   const [live, setLive] = useState(null); // { text, status } while streaming
   const [actionBusy, setActionBusy] = useState(null);
+  // Message id whose cards are being confirmed / cancelled together.
+  const [bulkBusy, setBulkBusy] = useState(null);
   const [error, setError] = useState(null); // { text, retry }
   const [atBottom, setAtBottom] = useState(true);
   const [unseen, setUnseen] = useState(() => readStore(SEEN_KEY) !== todayKey());
@@ -465,6 +482,36 @@ export default function OrbitAssistant() {
     }
   };
 
+  const pendingIds = (m) => (m.actions || []).filter((a) => a.status === 'pending').map((a) => a.id);
+
+  const confirmAll = async (m) => {
+    const ids = pendingIds(m);
+    if (!ids.length) return;
+    setBulkBusy(m.id);
+    setError(null);
+    try {
+      const { data } = await api.post('/assistant/actions/confirm-all', { ids }, { silent: true });
+      (data?.actions || []).forEach(setAction);
+      if (data?.message) setMessages((old) => [...old, data.message]);
+    } catch (err) {
+      setError({ text: apiError(err, 'That did not work. Nothing was changed.') });
+    } finally {
+      setBulkBusy(null);
+    }
+  };
+
+  const cancelAll = async (m) => {
+    const ids = pendingIds(m);
+    if (!ids.length) return;
+    setBulkBusy(m.id);
+    try {
+      const { data } = await api.post('/assistant/actions/cancel-all', { ids }, { silent: true });
+      (data?.actions || []).forEach(setAction);
+    } catch { /* keep the cards */ } finally {
+      setBulkBusy(null);
+    }
+  };
+
   const cancelAction = async (action) => {
     setActionBusy(action.id);
     try {
@@ -613,8 +660,16 @@ export default function OrbitAssistant() {
                         <Rich text={m.content} />
                         <TaskCards cards={m.cards} onOpen={openCard} />
                         {(m.actions || []).map((a) => (
-                          <ActionCard key={a.id} action={a} busyId={actionBusy} onConfirm={confirmAction} onCancel={cancelAction} onOpenLink={go} />
+                          <ActionCard key={a.id} action={a} busyId={actionBusy} locked={bulkBusy === m.id && a.status === 'pending'} onConfirm={confirmAction} onCancel={cancelAction} onOpenLink={go} />
                         ))}
+                        {pendingIds(m).length > 1 && (
+                          <BulkActionBar
+                            count={pendingIds(m).length}
+                            busy={bulkBusy === m.id || Boolean(actionBusy)}
+                            onConfirmAll={() => confirmAll(m)}
+                            onCancelAll={() => cancelAll(m)}
+                          />
+                        )}
                       </div>
                       <div className="mt-1 flex items-center gap-1 opacity-0 transition group-hover:opacity-100 group-focus-within:opacity-100 max-md:opacity-70">
                         <CopyButton text={m.content} />
