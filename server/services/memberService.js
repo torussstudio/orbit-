@@ -1,5 +1,6 @@
 const bcrypt = require("bcryptjs");
 const db = require("../db");
+const { LEAF_TASK, IN_LIVE_PROJECT } = require("../utils/taskScope");
 const {
   normalizeEmail,
   assertPasswordLength,
@@ -23,6 +24,8 @@ async function getAllMembers() {
        FROM task_assignees ta
        JOIN tasks t ON t.id = ta.task_id
        WHERE t.stage != 'Done'
+         AND ${LEAF_TASK}
+         AND ${IN_LIVE_PROJECT}
        GROUP BY ta.member_id
      ) tc ON tc.member_id = m.id
      ORDER BY m.created_at`,

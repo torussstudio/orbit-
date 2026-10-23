@@ -1,11 +1,18 @@
 const db = require("../db");
+const { LEAF_TASK } = require("../utils/taskScope");
 const { keepStoredDate } = require("../utils/dateInput");
 
 async function getClustersByProject(projectId) {
   const { rows } = await db.query(
-    `SELECT c.*, COUNT(t.id) as task_count FROM clusters c
-     LEFT JOIN tasks t ON t.cluster_id=c.id WHERE c.project_id=$1
-     GROUP BY c.id ORDER BY c.created_at DESC`,
+    // Work items in the cluster: sub tasks (cluster comes from their main
+    // task) and tasks without sub tasks. See utils/taskScope.js.
+    `SELECT c.*,
+       (SELECT COUNT(*)::int FROM tasks t
+          LEFT JOIN tasks pt ON pt.id = t.parent_task_id
+         WHERE COALESCE(t.cluster_id, pt.cluster_id) = c.id
+           AND ${LEAF_TASK}) AS task_count
+     FROM clusters c WHERE c.project_id=$1
+     ORDER BY c.created_at DESC`,
     [projectId],
   );
   return rows;

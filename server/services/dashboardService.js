@@ -1,4 +1,5 @@
 const db = require("../db");
+const { LEAF_TASK, IN_LIVE_PROJECT } = require("../utils/taskScope");
 const { LIST_SAFETY_LIMIT, TOTAL_COLUMN, splitTotal } = require("../utils/listLimit");
 
 /*
@@ -36,6 +37,7 @@ const TASK_PROGRESS_SQL = `
     JOIN projects p ON p.id = t.project_id
     WHERE EXISTS (SELECT 1 FROM task_assignees ta WHERE ta.task_id = t.id AND ta.member_id = $1)
       AND p.trashed_at IS NULL
+      AND ${LEAF_TASK}
   )
   SELECT
     m.stage,
@@ -109,6 +111,7 @@ const TEAM_PROGRESS_SQL = `
     WHERE p.trashed_at IS NULL
       AND m.active = true
       AND m.role = 'member'
+      AND ${LEAF_TASK}
   )
   SELECT
     r.member_id,
@@ -164,16 +167,19 @@ async function getDashboardData(user) {
           COUNT(t.id)::int AS total_tasks,
           COUNT(t.id) FILTER (WHERE t.stage = 'Done')::int AS done_tasks
         FROM projects p
-        LEFT JOIN tasks t ON t.project_id = p.id
-        WHERE p.status != 'archived'
+        LEFT JOIN tasks t ON t.project_id = p.id AND ${LEAF_TASK}
+        WHERE p.status != 'archived' AND p.trashed_at IS NULL
         GROUP BY p.id
         ORDER BY p.created_at DESC
         LIMIT 10`),
       db.query(
-        `SELECT stage, COUNT(*) as count FROM tasks WHERE parent_task_id IS NULL GROUP BY stage ORDER BY count DESC;
+        `SELECT t.stage, COUNT(*) as count FROM tasks t JOIN projects p ON p.id = t.project_id
+           WHERE p.trashed_at IS NULL AND ${LEAF_TASK} GROUP BY t.stage ORDER BY count DESC;
          SELECT COUNT(*) as count FROM projects WHERE status!='archived';
-         SELECT COUNT(*) as count FROM tasks WHERE parent_task_id IS NULL;
-         SELECT COUNT(*) as count FROM tasks WHERE due_date < NOW() AND stage NOT IN ('Done');
+         SELECT COUNT(*) as count FROM tasks t JOIN projects p ON p.id = t.project_id
+           WHERE p.trashed_at IS NULL AND ${LEAF_TASK};
+         SELECT COUNT(*) as count FROM tasks t JOIN projects p ON p.id = t.project_id
+           WHERE p.trashed_at IS NULL AND ${LEAF_TASK} AND t.due_date < NOW() AND t.stage NOT IN ('Done');
          SELECT to_char(d::date, 'YYYY-MM-DD') AS day,
                 COUNT(*) FILTER (WHERE a.event_type = 'task_created')     AS created,
                 COUNT(*) FILTER (WHERE a.event_type = 'task_completed')   AS completed,
@@ -187,6 +193,11 @@ async function getDashboardData(user) {
            LEFT JOIN activity_log a
              ON a.created_at >= d::timestamptz
             AND a.created_at <  d::timestamptz + interval '1 day'
+            -- Leave out main tasks that have sub tasks (their stage only
+            -- mirrors the sub tasks, so their events would count twice).
+            AND (a.entity_type <> 'task' OR a.entity_id IS NULL OR a.entity_id NOT IN (
+              SELECT parent_task_id::text FROM tasks WHERE parent_task_id IS NOT NULL
+            ))
            GROUP BY d
            ORDER BY d`,
       ),
@@ -197,15 +208,16 @@ async function getDashboardData(user) {
           SELECT STRING_AGG(m.name, ', ' ORDER BY m.name) AS assignee_name
           FROM task_assignees ta JOIN members m ON m.id=ta.member_id WHERE ta.task_id=t.id
         ) assignee_agg ON true
-        WHERE t.due_date < NOW() AND t.stage NOT IN ('Done') ORDER BY t.due_date`),
+        WHERE t.due_date < NOW() AND t.stage NOT IN ('Done') AND p.trashed_at IS NULL AND ${LEAF_TASK}
+        ORDER BY t.due_date`),
       db.query(`SELECT id,name,rework_count,status FROM clusters WHERE rework_count > 0
          UNION ALL
          SELECT t.id, t.title as name, t.rework_count, t.stage as status FROM tasks t
-         WHERE t.rework_count > 0 AND t.parent_task_id IS NOT NULL
+         WHERE t.rework_count > 0 AND ${LEAF_TASK}
          ORDER BY rework_count DESC LIMIT 5`),
       db.query(`SELECT m.id,m.name,m.avatar_url,COUNT(DISTINCT t.id) as task_count FROM members m
         LEFT JOIN task_assignees ta ON ta.member_id = m.id
-        LEFT JOIN tasks t ON t.id = ta.task_id AND t.stage NOT IN ('Done')
+        LEFT JOIN tasks t ON t.id = ta.task_id AND t.stage NOT IN ('Done') AND ${LEAF_TASK} AND ${IN_LIVE_PROJECT}
         WHERE m.role='member' AND m.active=true GROUP BY m.id,m.name,m.avatar_url`),
     ]);
     const [
@@ -238,7 +250,7 @@ async function getDashboardData(user) {
       db.query(
         `SELECT t.*,p.name as project_name FROM tasks t JOIN projects p ON t.project_id=p.id
         WHERE EXISTS (SELECT 1 FROM task_assignees ta WHERE ta.task_id=t.id AND ta.member_id=$1)
-          AND t.stage NOT IN ('Done') ORDER BY t.due_date NULLS LAST`,
+          AND t.stage NOT IN ('Done') AND ${LEAF_TASK} AND p.trashed_at IS NULL ORDER BY t.due_date NULLS LAST`,
         [user.id],
       ),
       db.query(
@@ -249,6 +261,8 @@ async function getDashboardData(user) {
           -- yet (same rule as the My Task Progress card).
           AND t.due_date::date < (NOW() AT TIME ZONE 'Asia/Kolkata')::date
           AND t.stage NOT IN ('Done')
+          AND ${LEAF_TASK}
+          AND p.trashed_at IS NULL
         ORDER BY t.due_date`,
         [user.id],
       ),
@@ -276,6 +290,8 @@ async function getMemberTasks(memberId) {
      FROM tasks t JOIN projects p ON t.project_id=p.id
      WHERE EXISTS (SELECT 1 FROM task_assignees ta WHERE ta.task_id=t.id AND ta.member_id=$1)
        AND t.stage NOT IN ('Done')
+       AND ${LEAF_TASK}
+       AND p.trashed_at IS NULL
      ORDER BY t.due_date NULLS LAST`,
     [memberId],
   );
@@ -321,6 +337,8 @@ async function getMyTasks(userId) {
        WHERE e.task_id = t.id
      ) time_totals ON true
      WHERE EXISTS (SELECT 1 FROM task_assignees ta WHERE ta.task_id=t.id AND ta.member_id=$1)
+       AND ${LEAF_TASK}
+       AND p.trashed_at IS NULL
      ORDER BY t.due_date NULLS LAST
      LIMIT $2`,
     [userId, LIST_SAFETY_LIMIT],

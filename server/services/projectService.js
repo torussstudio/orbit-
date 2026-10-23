@@ -363,6 +363,7 @@
 
 
 const db = require("../db");
+const { LEAF_TASK } = require("../utils/taskScope");
 const { assertProjectAccess } = require("./accessControl");
 const liveEvents = require("./liveEvents");
 const { keepStoredDate } = require("../utils/dateInput");
@@ -521,7 +522,7 @@ const getTrashedProjects = async () => {
   const { rows } = await db.query(
     `SELECT p.id, p.name, p.client_name, p.status, p.trashed_at,
             p.trashed_at + make_interval(days => $1) AS purge_at,
-            (SELECT COUNT(*)::int FROM tasks t WHERE t.project_id = p.id) AS task_count
+            (SELECT COUNT(*)::int FROM tasks t WHERE t.project_id = p.id AND ${LEAF_TASK}) AS task_count
      FROM projects p
      WHERE p.trashed_at IS NOT NULL
        AND p.trashed_at > NOW() - make_interval(days => $1)

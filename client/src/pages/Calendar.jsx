@@ -28,6 +28,13 @@ const TYPES = {
     bar: 'border-l-[#0ea5e9]',
     solid: 'bg-[#0ea5e9] text-white',
   },
+  done: {
+    label: 'Completed',
+    dot: 'bg-[#22c55e]',
+    tint: 'bg-[#22c55e]/15 text-[#16a34a]',
+    bar: 'border-l-[#22c55e]',
+    solid: 'bg-[#22c55e] text-white',
+  },
   deadline: {
     label: 'Deadline',
     dot: 'bg-[#a855f7]',
@@ -45,7 +52,7 @@ const TYPES = {
 };
 
 // Order used when listing a day's items inside the day modal.
-const TYPE_ORDER = { event: 0, task: 1, deadline: 2, birthday: 3 };
+const TYPE_ORDER = { event: 0, task: 1, done: 2, deadline: 3, birthday: 4 };
 
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const MONTHS = [
@@ -103,6 +110,33 @@ function toInputValue(date, hour = 9) {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(hour)}:00`;
 }
 
+// 'YYYY-MM-DD' as a local date (new Date('YYYY-MM-DD') is UTC and can shift a day).
+function fromDateOnly(value) {
+  const [y, m, d] = String(value).slice(0, 10).split('-').map(Number);
+  return new Date(y, m - 1, d);
+}
+
+// 200 -> "3h 20m", 45 -> "45m", 120 -> "2h".
+function formatMinutes(total) {
+  const minutes = Math.max(0, Math.round(Number(total) || 0));
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  if (!h) return `${m}m`;
+  return m ? `${h}h ${m}m` : `${h}h`;
+}
+
+// Completed tasks on a day and the time logged on them.
+function completedSummary(items) {
+  let count = 0;
+  let minutes = 0;
+  items.forEach((item) => {
+    if (item.itemType !== 'done') return;
+    count += 1;
+    minutes += Number(item.minutes) || 0;
+  });
+  return { count, minutes };
+}
+
 function startOfWeek(date) {
   const d = new Date(date);
   d.setHours(0, 0, 0, 0);
@@ -144,6 +178,15 @@ function buildCalendarItems(data, currentYear) {
       hasTime: false,
     }));
 
+  // Tasks the viewed member(s) completed, on the day they were marked Done.
+  const completed = (data.completed || []).map((task) => ({
+    ...task,
+    itemType: 'done',
+    date: fromDateOnly(task.completed_on),
+    displayTitle: task.title,
+    hasTime: false,
+  }));
+
   const deadlines = data.projects.map((project) => ({
     ...project,
     itemType: 'deadline',
@@ -165,7 +208,7 @@ function buildCalendarItems(data, currentYear) {
     };
   });
 
-  return [...events, ...tasks, ...deadlines, ...birthdays];
+  return [...events, ...tasks, ...completed, ...deadlines, ...birthdays];
 }
 
 // Projects that appear on the calendar currently loaded (tasks + project deadlines).
@@ -173,6 +216,12 @@ function buildProjectOptions(data) {
   const byId = new Map();
 
   data.tasks.forEach((task) => {
+    if (task.project_id != null && task.project_name) {
+      byId.set(String(task.project_id), task.project_name);
+    }
+  });
+
+  (data.completed || []).forEach((task) => {
     if (task.project_id != null && task.project_name) {
       byId.set(String(task.project_id), task.project_name);
     }
@@ -190,6 +239,7 @@ function buildProjectOptions(data) {
 }
 
 function formatCellLabel(item) {
+  if (item.itemType === 'done') return `✓ ${item.displayTitle}`;
   if (item.itemType === 'task' && item.assignee_name) {
     return `${item.displayTitle} - ${item.assignee_name}`;
   }
@@ -201,6 +251,10 @@ function formatDayMeta(item) {
     return TIME_FMT.format(item.date);
   }
   if (item.itemType === 'task' && item.project_name) return item.project_name;
+  if (item.itemType === 'done') {
+    const logged = Number(item.minutes) > 0 ? `${formatMinutes(item.minutes)} logged` : 'No time logged';
+    return item.project_name ? `${item.project_name} · ${logged}` : logged;
+  }
   if (item.itemType === 'deadline' && item.client_name) return item.client_name;
   return '';
 }
@@ -220,7 +274,7 @@ const stageKey = (stage) => stage?.toLowerCase().replace(/\s/g, '');
 /* ------------------------------------------------------------------ */
 
 const EMPTY_ITEMS = [];
-const EMPTY_DATA = { events: [], tasks: [], projects: [], birthdays: [] };
+const EMPTY_DATA = { events: [], tasks: [], projects: [], birthdays: [], completed: [] };
 
 // Intl formatters are expensive to build, so they are created once.
 const DAY_LONG_FMT = new Intl.DateTimeFormat('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
@@ -345,6 +399,30 @@ const PlusIcon = () => <Icon><path d="M12 5v14M5 12h14" /></Icon>;
 const CloseIcon = () => <Icon className="h-3.5 w-3.5"><path d="M6 6l12 12M18 6 6 18" /></Icon>;
 const AlertIcon = () => <Icon className="h-3.5 w-3.5 shrink-0"><path d="M12 4 2.5 20h19L12 4Z" /><path d="M12 10v4M12 17.5v.01" /></Icon>;
 
+const ClockIcon = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" className="h-2.5 w-2.5 shrink-0" aria-hidden="true">
+    <circle cx="12" cy="12" r="9" />
+    <path d="M12 7v5l3 2" />
+  </svg>
+);
+
+// Total time logged on the day's completed tasks.
+function TimePill({ minutes, count, size = 'sm', className = '' }) {
+  if (!count) return null;
+  const label = `${count} completed · ${formatMinutes(minutes)} logged`;
+  const sizeCls = size === 'md' ? 'px-2 py-0.5 text-[11px]' : 'px-1.5 py-px text-[9px] sm:text-[10px]';
+  return (
+    <span
+      title={label}
+      aria-label={label}
+      className={`inline-flex shrink-0 items-center gap-0.5 whitespace-nowrap rounded-full font-semibold tabular-nums ${TYPES.done.tint} ${sizeCls} ${className}`}
+    >
+      <ClockIcon />
+      {formatMinutes(minutes)}
+    </span>
+  );
+}
+
 function FieldError({ id, children }) {
   if (!children) return null;
   return (
@@ -436,7 +514,7 @@ export default function Calendar() {
     if (selectedProjectIds.length === 0) return allItems;
     const selected = new Set(selectedProjectIds);
     return allItems.filter((item) => {
-      if (item.itemType === 'task') return selected.has(String(item.project_id));
+      if (item.itemType === 'task' || item.itemType === 'done') return selected.has(String(item.project_id));
       if (item.itemType === 'deadline') return selected.has(String(item.id));
       return true;
     });
@@ -997,6 +1075,7 @@ const ProjectFilterBar = memo(function ProjectFilterBar({ projects, selectedIds,
 const DayCell = memo(function DayCell({ date, items, isToday, onDayClick }) {
   const visible = items.slice(0, 3);
   const dots = items.slice(0, 4);
+  const done = useMemo(() => completedSummary(items), [items]);
 
   return (
     <button
@@ -1009,13 +1088,16 @@ const DayCell = memo(function DayCell({ date, items, isToday, onDayClick }) {
         'focus-visible:relative focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[color:var(--accent)]',
       ].join(' ')}
     >
-      <span
-        className={[
-          'grid h-6 w-6 place-items-center rounded-full text-xs tabular-nums',
-          isToday ? 'bg-[var(--accent)] font-semibold text-white' : 'text-[color:var(--text)]',
-        ].join(' ')}
-      >
-        {date.getDate()}
+      <span className="flex min-w-0 flex-wrap items-center justify-between gap-1">
+        <span
+          className={[
+            'grid h-6 w-6 shrink-0 place-items-center rounded-full text-xs tabular-nums',
+            isToday ? 'bg-[var(--accent)] font-semibold text-white' : 'text-[color:var(--text)]',
+          ].join(' ')}
+        >
+          {date.getDate()}
+        </span>
+        <TimePill minutes={done.minutes} count={done.count} />
       </span>
 
       {/* Full pills on larger screens */}
@@ -1148,6 +1230,7 @@ const WeekView = memo(function WeekView({ current, getItemsForDate, onDayClick, 
 
   const todayKey = dateKey(new Date());
   const cellBorder = 'border-b border-r border-[color:var(--border)]';
+  const doneByDay = useMemo(() => days.map((date) => completedSummary(getItemsForDate(date))), [days, getItemsForDate]);
 
   return (
     <div ref={scrollRef} className="max-h-[70vh] overflow-auto">
@@ -1171,6 +1254,7 @@ const WeekView = memo(function WeekView({ current, getItemsForDate, onDayClick, 
               >
                 {date.getDate()}
               </span>
+              <TimePill minutes={doneByDay[dayIndex].minutes} count={doneByDay[dayIndex].count} />
             </button>
           );
         })}
@@ -1330,7 +1414,7 @@ const ItemRow = memo(function ItemRow({ item, isManager, onEdit, onDelete, onOpe
   const type = TYPES[item.itemType];
   const meta = formatDayMeta(item);
   const isEditable = isManager && item.itemType === 'event';
-  const isTask = item.itemType === 'task' && item.project_id != null && Boolean(onOpenTask);
+  const isTask = (item.itemType === 'task' || item.itemType === 'done') && item.project_id != null && Boolean(onOpenTask);
 
   // Members get the same stage dropdown as Task View instead of a plain badge.
   const isMemberTask = !isManager && item.itemType === 'task';
@@ -1365,7 +1449,7 @@ const ItemRow = memo(function ItemRow({ item, isManager, onEdit, onDelete, onOpe
         ) : (
           <div className={titleCls}>{item.displayTitle}</div>
         )}
-        {!isMemberTask && item.itemType === 'task' && item.assignee_name && (
+        {isManager && (item.itemType === 'task' || item.itemType === 'done') && item.assignee_name && (
           <div className="mt-0.5 text-xs text-[color:var(--text-2)]">Assigned to {item.assignee_name}</div>
         )}
         {item.description && (
@@ -1377,6 +1461,10 @@ const ItemRow = memo(function ItemRow({ item, isManager, onEdit, onDelete, onOpe
       <div className="flex flex-wrap items-center gap-2">
         {showStageDropdown ? (
           <StageDropdown task={item} onChange={onStageSelect} />
+        ) : item.itemType === 'done' ? (
+          <span className={`whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-semibold ${TYPES.done.tint}`}>
+            ✓ Done
+          </span>
         ) : item.itemType === 'task' && item.stage ? (
           <span className={`badge badge-${stageKey(item.stage)}`}>{item.stage}</span>
         ) : (
@@ -1408,6 +1496,7 @@ const ItemRow = memo(function ItemRow({ item, isManager, onEdit, onDelete, onOpe
 const DayModal = memo(function DayModal({ date, items, isManager, onClose, onShiftDay, onAdd, onEdit, onDelete, onOpenTask, onStageSelect, notice }) {
   const title = DAY_LONG_FMT.format(date);
   const summary = items.length === 0 ? 'Nothing scheduled' : pluralItems(items.length);
+  const done = useMemo(() => completedSummary(items), [items]);
 
   return (
     <Modal title={title} onClose={onClose}>
@@ -1415,7 +1504,10 @@ const DayModal = memo(function DayModal({ date, items, isManager, onClose, onShi
         <button type="button" className={iconBtn} onClick={() => onShiftDay(-1)} aria-label="Previous day">
           <ChevronLeft />
         </button>
-        <span className="flex-1 text-center text-xs text-[color:var(--text-3)]">{summary}</span>
+        <span className="flex flex-1 flex-wrap items-center justify-center gap-2 text-center text-xs text-[color:var(--text-3)]">
+          {summary}
+          <TimePill minutes={done.minutes} count={done.count} size="md" />
+        </span>
         <button type="button" className={iconBtn} onClick={() => onShiftDay(1)} aria-label="Next day">
           <ChevronRight />
         </button>
@@ -1460,8 +1552,15 @@ const DayModal = memo(function DayModal({ date, items, isManager, onClose, onShi
 });
 
 const DayView = memo(function DayView({ items, isManager, onEdit, onDelete, onOpenTask, onStageSelect }) {
+  const done = useMemo(() => completedSummary(items), [items]);
   return (
     <div className="min-h-72 p-4 sm:p-6">
+      {done.count > 0 && (
+        <div className="mb-3 flex items-center gap-2 text-xs text-[color:var(--text-2)]">
+          {done.count} completed
+          <TimePill minutes={done.minutes} count={done.count} size="md" />
+        </div>
+      )}
       {items.length === 0 ? (
         <div className="px-3 py-12 text-center text-[13px] text-[color:var(--text-3)]">
           <div className="mb-1 text-sm font-semibold text-[color:var(--text-2)]">Nothing on this day</div>

@@ -18,6 +18,7 @@
 
 const db = require('../../db');
 const { userHasTaskAccess } = require('../accessControl');
+const { LEAF_TASK, IN_LIVE_PROJECT } = require('../../utils/taskScope');
 
 let presence = null;
 try { presence = require('../presence'); } catch { /* presence is optional */ }
@@ -284,7 +285,7 @@ const declarations = [
 
 async function myTasks(user, { when = 'all', stage } = {}) {
   const params = [user.id];
-  const where = [OPEN, LIVE_PROJECT, 'EXISTS (SELECT 1 FROM task_assignees a WHERE a.task_id = t.id AND a.member_id = $1)'];
+  const where = [OPEN, LIVE_PROJECT, LEAF_TASK, 'EXISTS (SELECT 1 FROM task_assignees a WHERE a.task_id = t.id AND a.member_id = $1)'];
   if (DATE_FILTERS[when]) where.push(DATE_FILTERS[when]);
   if (stage) { params.push(text(stage)); where.push(`t.stage ILIKE $${params.length}`); }
   const { rows } = await db.query(
@@ -297,7 +298,7 @@ async function myTasks(user, { when = 'all', stage } = {}) {
 
 async function findTasks(user, { text: words, project, assignee, stage, priority, when = 'all', include_done: includeDone = false } = {}) {
   const params = [];
-  const where = [taskVisibility(user, params), LIVE_PROJECT];
+  const where = [taskVisibility(user, params), LIVE_PROJECT, LEAF_TASK];
   if (!includeDone) where.push(OPEN);
   if (words) { params.push(`%${text(words)}%`); where.push(`(t.title ILIKE $${params.length} OR t.description ILIKE $${params.length})`); }
   if (project) { params.push(`%${text(project)}%`); where.push(`(p.name ILIKE $${params.length} OR p.client_name ILIKE $${params.length})`); }
@@ -375,10 +376,10 @@ async function projectStatus(user, { project } = {}) {
       `SELECT t.stage, COUNT(*)::int AS count,
               COUNT(*) FILTER (WHERE t.due_date::date < ${TODAY} AND ${OPEN})::int AS overdue,
               COALESCE(SUM(t.rework_count), 0)::int AS rework
-         FROM tasks t WHERE t.project_id = $1 AND ${vis} GROUP BY t.stage`,
+         FROM tasks t WHERE t.project_id = $1 AND ${LEAF_TASK} AND ${vis} GROUP BY t.stage`,
       params,
     ),
-    db.query(`${TASK_SELECT} WHERE t.project_id = $1 AND ${OPEN} AND ${vis} ORDER BY t.due_date ASC NULLS LAST LIMIT 12`, params),
+    db.query(`${TASK_SELECT} WHERE t.project_id = $1 AND ${OPEN} AND ${LEAF_TASK} AND ${vis} ORDER BY t.due_date ASC NULLS LAST LIMIT 12`, params),
     db.query(
       `SELECT m.name, m.role FROM project_members pm JOIN members m ON m.id = pm.member_id
         WHERE pm.project_id = $1 AND m.active = true ORDER BY m.name`,
@@ -420,7 +421,7 @@ async function listProjects(user) {
             COUNT(t.id) FILTER (WHERE ${OPEN} AND t.due_date::date < ${TODAY})::int AS overdue,
             COUNT(t.id) FILTER (WHERE t.stage = 'In Review')::int AS in_review
        FROM projects p
-       LEFT JOIN tasks t ON t.project_id = p.id AND ${tvis}
+       LEFT JOIN tasks t ON t.project_id = p.id AND ${LEAF_TASK} AND ${tvis}
       WHERE ${LIVE_PROJECT} AND ${vis}
       GROUP BY p.id ORDER BY overdue DESC, open_tasks DESC LIMIT 40`,
     params,
@@ -444,7 +445,7 @@ async function people(user, { name, skill } = {}) {
             END AS days_to_birthday,
             to_char(m.last_seen_at AT TIME ZONE '${TZ}', 'YYYY-MM-DD HH24:MI') AS last_seen,
             (SELECT COUNT(*)::int FROM task_assignees ta JOIN tasks t ON t.id = ta.task_id
-              WHERE ta.member_id = m.id AND ${OPEN}) AS open_tasks,
+              WHERE ta.member_id = m.id AND ${OPEN} AND ${LEAF_TASK} AND ${IN_LIVE_PROJECT}) AS open_tasks,
             (SELECT string_agg(p.name, ', ') FROM project_members pm JOIN projects p ON p.id = pm.project_id
               WHERE pm.member_id = m.id AND ${LIVE_PROJECT}) AS projects
        FROM members m
@@ -470,7 +471,7 @@ async function teamWorkload(user) {
               WHERE e.member_id = m.id AND e.work_date >= date_trunc('week', ${TODAY})) AS hours_this_week
        FROM members m
        LEFT JOIN task_assignees ta ON ta.member_id = m.id
-       LEFT JOIN tasks t ON t.id = ta.task_id
+       LEFT JOIN tasks t ON t.id = ta.task_id AND ${LEAF_TASK}
        LEFT JOIN projects p ON p.id = t.project_id AND ${LIVE_PROJECT}
       WHERE m.active = true AND m.role = 'member'
         AND (t.id IS NULL OR p.id IS NOT NULL)
@@ -580,7 +581,7 @@ async function timeLogged(user, { period = 'this_week', project, member } = {}) 
 async function reworkReport(user, { project } = {}) {
   const params = [];
   const vis = taskVisibility(user, params);
-  const where = [vis, 'p.trashed_at IS NULL', 'COALESCE(t.rework_count, 0) > 0'];
+  const where = [vis, 'p.trashed_at IS NULL', LEAF_TASK, 'COALESCE(t.rework_count, 0) > 0'];
   if (project) { params.push(`%${text(project)}%`); where.push(`p.name ILIKE $${params.length}`); }
   const [tasks, byPerson] = await Promise.all([
     db.query(`${TASK_SELECT} WHERE ${where.join(' AND ')} ORDER BY t.rework_count DESC LIMIT 15`, params),
@@ -688,10 +689,10 @@ async function snapshot(user) {
     const { rows } = await db.query(
       `SELECT
          (SELECT COUNT(*)::int FROM projects p WHERE ${LIVE_PROJECT}) AS active_projects,
-         (SELECT COUNT(*)::int FROM tasks t JOIN projects p ON p.id = t.project_id WHERE ${LIVE_PROJECT} AND ${OPEN}) AS open_tasks,
-         (SELECT COUNT(*)::int FROM tasks t JOIN projects p ON p.id = t.project_id WHERE ${LIVE_PROJECT} AND ${OPEN} AND t.due_date::date < ${TODAY}) AS overdue,
-         (SELECT COUNT(*)::int FROM tasks t JOIN projects p ON p.id = t.project_id WHERE ${LIVE_PROJECT} AND ${OPEN} AND t.due_date::date = ${TODAY}) AS due_today,
-         (SELECT COUNT(*)::int FROM tasks t JOIN projects p ON p.id = t.project_id WHERE p.trashed_at IS NULL AND t.stage = 'In Review') AS waiting_review,
+         (SELECT COUNT(*)::int FROM tasks t JOIN projects p ON p.id = t.project_id WHERE ${LIVE_PROJECT} AND ${LEAF_TASK} AND ${OPEN}) AS open_tasks,
+         (SELECT COUNT(*)::int FROM tasks t JOIN projects p ON p.id = t.project_id WHERE ${LIVE_PROJECT} AND ${LEAF_TASK} AND ${OPEN} AND t.due_date::date < ${TODAY}) AS overdue,
+         (SELECT COUNT(*)::int FROM tasks t JOIN projects p ON p.id = t.project_id WHERE ${LIVE_PROJECT} AND ${LEAF_TASK} AND ${OPEN} AND t.due_date::date = ${TODAY}) AS due_today,
+         (SELECT COUNT(*)::int FROM tasks t JOIN projects p ON p.id = t.project_id WHERE ${LEAF_TASK} AND p.trashed_at IS NULL AND t.stage = 'In Review') AS waiting_review,
          (SELECT COUNT(*)::int FROM task_requests) AS task_requests,
          (SELECT COUNT(*)::int FROM members WHERE active = true AND role = 'member') AS members,
          (SELECT string_agg(name, ', ' ORDER BY name) FROM projects p WHERE ${LIVE_PROJECT}) AS project_names`,
@@ -700,10 +701,10 @@ async function snapshot(user) {
   }
   const { rows } = await db.query(
     `SELECT
-       (SELECT COUNT(*)::int FROM tasks t JOIN projects p ON p.id = t.project_id JOIN task_assignees a ON a.task_id = t.id AND a.member_id = $1 WHERE ${LIVE_PROJECT} AND ${OPEN}) AS my_open_tasks,
-       (SELECT COUNT(*)::int FROM tasks t JOIN projects p ON p.id = t.project_id JOIN task_assignees a ON a.task_id = t.id AND a.member_id = $1 WHERE ${LIVE_PROJECT} AND ${OPEN} AND t.due_date::date < ${TODAY}) AS my_overdue,
-       (SELECT COUNT(*)::int FROM tasks t JOIN projects p ON p.id = t.project_id JOIN task_assignees a ON a.task_id = t.id AND a.member_id = $1 WHERE ${LIVE_PROJECT} AND ${OPEN} AND t.due_date::date = ${TODAY}) AS my_due_today,
-       (SELECT COUNT(*)::int FROM tasks t JOIN task_assignees a ON a.task_id = t.id AND a.member_id = $1 WHERE t.stage = 'In Review') AS my_in_review,
+       (SELECT COUNT(*)::int FROM tasks t JOIN projects p ON p.id = t.project_id JOIN task_assignees a ON a.task_id = t.id AND a.member_id = $1 WHERE ${LIVE_PROJECT} AND ${LEAF_TASK} AND ${OPEN}) AS my_open_tasks,
+       (SELECT COUNT(*)::int FROM tasks t JOIN projects p ON p.id = t.project_id JOIN task_assignees a ON a.task_id = t.id AND a.member_id = $1 WHERE ${LIVE_PROJECT} AND ${LEAF_TASK} AND ${OPEN} AND t.due_date::date < ${TODAY}) AS my_overdue,
+       (SELECT COUNT(*)::int FROM tasks t JOIN projects p ON p.id = t.project_id JOIN task_assignees a ON a.task_id = t.id AND a.member_id = $1 WHERE ${LIVE_PROJECT} AND ${LEAF_TASK} AND ${OPEN} AND t.due_date::date = ${TODAY}) AS my_due_today,
+       (SELECT COUNT(*)::int FROM tasks t JOIN task_assignees a ON a.task_id = t.id AND a.member_id = $1 WHERE ${LEAF_TASK} AND ${IN_LIVE_PROJECT} AND t.stage = 'In Review') AS my_in_review,
        (SELECT ROUND(COALESCE(SUM(minutes), 0) / 60.0, 1)::float FROM time_entries WHERE member_id = $1 AND work_date >= date_trunc('week', ${TODAY})) AS my_hours_this_week,
        (SELECT string_agg(p.name, ', ' ORDER BY p.name) FROM project_members pm JOIN projects p ON p.id = pm.project_id WHERE pm.member_id = $1 AND ${LIVE_PROJECT}) AS my_projects`,
     [user.id],

@@ -1,5 +1,6 @@
 const db = require("../db");
 const { keepStoredDate } = require("../utils/dateInput");
+const { LEAF_TASK } = require("../utils/taskScope");
 
 async function insertEventAttendees(client, eventId, memberIds) {
   const uniqueIds = [...new Set(memberIds || [])];
@@ -14,6 +15,77 @@ async function insertEventAttendees(client, eventId, memberIds) {
 }
 
 const COMPLETED_TASK_STAGES = ["Done"];
+
+/*
+ * Completed tasks for the calendar ("what did I finish on which day").
+ *
+ * - Completed = stage Done (manager approved). The day is the IST date of
+ *   the latest move to Done in task_activity (same rule as Time Log and the
+ *   dashboard), falling back to updated_at for old tasks with no activity.
+ * - A main task that has sub tasks is skipped (its sub tasks are shown
+ *   instead); a main task without sub tasks is shown itself.
+ * - minutes = time logged on the task by the member(s) being viewed only,
+ *   across every work date.
+ * - Members always get their own; managers only when they filter by
+ *   member(s). With no filter a manager sees no completed list.
+ */
+const COMPLETED_SELECT = `
+  WITH viewed AS (
+    SELECT m.id, m.name FROM members m WHERE %WHO%
+  )
+  SELECT
+    t.id,
+    t.project_id,
+    t.parent_task_id,
+    pt.title AS parent_task_title,
+    t.title,
+    t.stage,
+    t.priority,
+    p.name AS project_name,
+    to_char((COALESCE(done.completed_at, t.updated_at) AT TIME ZONE 'Asia/Kolkata')::date, 'YYYY-MM-DD') AS completed_on,
+    COALESCE(logged.minutes, 0)::int AS minutes,
+    who.assignee_name
+  FROM tasks t
+  JOIN projects p ON p.id = t.project_id
+  LEFT JOIN tasks pt ON pt.id = t.parent_task_id
+  LEFT JOIN LATERAL (
+    SELECT MAX(a.created_at) AS completed_at
+    FROM task_activity a
+    WHERE a.task_id = t.id AND lower(trim(a.meta->>'to')) = 'done'
+  ) done ON true
+  LEFT JOIN LATERAL (
+    SELECT SUM(e.minutes) AS minutes
+    FROM time_entries e
+    WHERE e.task_id = t.id AND e.member_id IN (SELECT id FROM viewed)
+  ) logged ON true
+  LEFT JOIN LATERAL (
+    SELECT STRING_AGG(v.name, ', ' ORDER BY v.name) AS assignee_name
+    FROM task_assignees ta
+    JOIN viewed v ON v.id = ta.member_id
+    WHERE ta.task_id = t.id
+  ) who ON true
+  WHERE lower(trim(coalesce(t.stage, ''))) = 'done'
+    AND p.trashed_at IS NULL
+    AND EXISTS (
+      SELECT 1 FROM task_assignees ta
+      WHERE ta.task_id = t.id AND ta.member_id IN (SELECT id FROM viewed)
+    )
+    AND ${LEAF_TASK}
+  ORDER BY completed_on, lower(t.title)
+`;
+
+function completedQuery(userId, isManager, memberEmailList) {
+  if (!isManager) {
+    return db.query(COMPLETED_SELECT.replace("%WHO%", "m.id = $1"), [userId]);
+  }
+  if (memberEmailList.length > 0) {
+    return db.query(
+      COMPLETED_SELECT.replace("%WHO%", "LOWER(m.email) = ANY($1)"),
+      [memberEmailList],
+    );
+  }
+  return Promise.resolve({ rows: [] });
+}
 
 class CalendarService {
   async getCalendarData(userId, isManager, memberEmailList) {
@@ -137,12 +209,14 @@ class CalendarService {
         WHERE ta.task_id = t.id
       ) assignee_agg ON true
       WHERE t.due_date IS NOT NULL
+        AND p.trashed_at IS NULL
+        AND ${LEAF_TASK}
         AND t.stage != ALL($${taskParams.length + 1})
         ${taskVisibilityClause}
       ORDER BY t.due_date, t.created_at
     `;
 
-    const [events, tasks, projects, birthdays] = await Promise.all([
+    const [events, tasks, projects, birthdays, completed] = await Promise.all([
       eventParams.length > 0 ? db.query(eventQuery, eventParams) : db.query(eventQuery),
       db.query(taskQuery, [...taskParams, COMPLETED_TASK_STAGES]),
       isManager
@@ -150,7 +224,7 @@ class CalendarService {
             `
               SELECT id, name, end_date, status, client_name
               FROM projects
-              WHERE end_date IS NOT NULL AND status != 'archived'
+              WHERE end_date IS NOT NULL AND status != 'archived' AND trashed_at IS NULL
               ORDER BY end_date
             `,
           )
@@ -162,6 +236,7 @@ class CalendarService {
               WHERE pm.member_id = $1
                 AND p.end_date IS NOT NULL
                 AND p.status != 'archived'
+                AND p.trashed_at IS NULL
               ORDER BY p.end_date
             `,
             [userId],
@@ -174,6 +249,7 @@ class CalendarService {
           ORDER BY name
         `,
       ),
+      completedQuery(userId, isManager, memberEmailList),
     ]);
 
     return {
@@ -181,6 +257,7 @@ class CalendarService {
       tasks: tasks.rows,
       projects: projects.rows,
       birthdays: birthdays.rows,
+      completed: completed.rows,
     };
   }
 

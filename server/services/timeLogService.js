@@ -1,4 +1,5 @@
 const db = require("../db");
+const { LEAF_TASK } = require("../utils/taskScope");
 const liveEvents = require("./liveEvents");
 
 /*
@@ -100,6 +101,7 @@ async function getMemberOptions(memberId) {
       JOIN projects p ON p.id = t.project_id
       LEFT JOIN tasks pt ON pt.id = t.parent_task_id
       WHERE lower(trim(coalesce(t.stage, ''))) NOT IN ('done', 'in review')
+        AND ${LEAF_TASK}
         AND p.status <> 'archived'
         AND p.trashed_at IS NULL
       ORDER BY coalesce(pt.title, t.title), t.parent_task_id NULLS FIRST, t.title
@@ -319,6 +321,7 @@ const UNLOGGED_SELECT = `
   WHERE lower(trim(coalesce(t.stage, ''))) IN ('done', 'in review')
     AND p.trashed_at IS NULL
     AND NOT EXISTS (SELECT 1 FROM time_entries e WHERE e.task_id = t.id)
+    AND ${LEAF_TASK}
 `;
 
 async function getUnloggedDoneTasks({ from, to } = {}) {
