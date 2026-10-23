@@ -127,6 +127,51 @@ async function findProjects(user, name) {
   return rows;
 }
 
+// Close project names for a misspelt one ("Orbt" -> Orbit, "tourss" -> Toruss).
+// anyProject: every live project (task requests); otherwise only visible ones.
+const normName = (s) => String(s || '').toLowerCase().normalize('NFKD').replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+
+// Edit distance where swapping two neighbouring letters counts as one typo.
+function typoDistance(a, b) {
+  const d = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)]);
+  for (let j = 1; j <= b.length; j += 1) d[0][j] = j;
+  for (let i = 1; i <= a.length; i += 1) {
+    for (let j = 1; j <= b.length; j += 1) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + cost);
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) d[i][j] = Math.min(d[i][j], d[i - 2][j - 2] + 1);
+    }
+  }
+  return d[a.length][b.length];
+}
+const likeness = (a, b) => (a && b ? 1 - typoDistance(a, b) / Math.max(a.length, b.length) : 0);
+
+async function suggestProjects(user, name, { anyProject = false, limit = 3 } = {}) {
+  const asked = normName(name);
+  if (asked.length < 2) return [];
+  const params = [];
+  const vis = anyProject ? 'TRUE' : projectVisibility(user, params);
+  const { rows } = await db.query(
+    `SELECT p.name, p.client_name FROM projects p
+      WHERE p.trashed_at IS NULL AND COALESCE(p.status, 'active') <> 'archived' AND ${vis}`,
+    params,
+  );
+  const compact = asked.replace(/ /g, '');
+  return rows
+    .map((r) => {
+      const options = [r.name, r.client_name].filter(Boolean).flatMap((v) => {
+        const n = normName(v);
+        return [n, n.replace(/ /g, ''), ...n.split(' ').filter((w) => w.length >= 3)];
+      });
+      const score = Math.max(0, ...options.map((o) => Math.max(likeness(asked, o), likeness(compact, o))));
+      return { name: r.name, score };
+    })
+    .filter((r) => r.score >= 0.6)
+    .sort((a, b) => b.score - a.score || a.name.length - b.name.length)
+    .slice(0, limit)
+    .map((r) => r.name);
+}
+
 // Active members by (part of) name. { members } or { error }.
 async function findMembers(names) {
   const list = (Array.isArray(names) ? names : [names]).map((n) => text(n)).filter(Boolean);
@@ -663,4 +708,4 @@ async function snapshot(user) {
   return { scope: 'this member only', ...rows[0] };
 }
 
-module.exports = { declarations, run, cardsFrom, myTasks, snapshot, findTask, findProjects, findMembers, TZ, isManager };
+module.exports = { declarations, run, cardsFrom, myTasks, snapshot, findTask, findProjects, suggestProjects, findMembers, TZ, isManager };

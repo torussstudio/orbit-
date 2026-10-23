@@ -281,9 +281,14 @@ const clip = (value, size) => {
 
 async function projectBrief(user, { project } = {}) {
   if (!project) return fail('Which project?');
-  const { findProjects } = require('./assistantTools');
+  const { findProjects, suggestProjects } = require('./assistantTools');
   const matches = await findProjects(user, project);
-  if (!matches.length) return fail(`No project matching "${project}" that you can see.`);
+  if (!matches.length) {
+    const close = await suggestProjects(user, project);
+    return fail(close.length
+      ? `No project called "${project}". Closest: ${close.map((n) => `"${n}"`).join(', ')}. Ask "Did you mean ${close[0]}?" before answering.`
+      : `No project matching "${project}" that you can see.`);
+  }
   const p = matches[0];
   const admin = isManager(user);
   const pid = p.id;

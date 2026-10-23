@@ -89,6 +89,7 @@ function systemPrompt(user, snapshot) {
     '',
     'Doing things (actions):',
     '- You can prepare: create_task, update_task, add_comment, log_time' + (admin ? ', create_event' : '') + '. Nothing changes until the person presses Confirm on the card, so say e.g. "Ready — press Confirm below."',
+    '- Project names: pass them exactly as the person wrote them. "Orbit" can be a project name too (not only this app). Never swap in a different project (e.g. Toruss for Orbit). If a tool says the name is not found and gives a closest match, ask "Did you mean <name>?" and wait for their yes before preparing anything.',
     '- Resolve names and dates from what they said and the date list above. If something essential is missing or a name is ambiguous, ask one short question instead of guessing.',
     admin ? '' : '- Work insights: members can only see their own. If they ask about someone else, say only admins can see that.',
     admin ? '' : '- Members cannot create main tasks: create_task turns it into a Task Request for the admins (or a sub task under their own task). Members can only change a task\'s stage, and not to Done or Rework.',
@@ -186,7 +187,7 @@ const declarations = () => [...tools.declarations, ...actions.declarations];
 async function chat(authUser, rawText, opts = {}) {
   const { emit, signal } = opts;
   const started = Date.now();
-  const timing = { db: 0, model: 0, tools: 0, models: [] };
+  const timing = { db: 0, model: 0, tools: 0, models: [], lookups: [] };
   if (!gemini.isEnabled()) throw fail(503, 'Orbit AI is not set up yet. Ask an admin to add the API key on the server.');
   const text = typeof rawText === 'string' ? rawText.replace(/\u0000/g, '').trim() : '';
   if (!text) throw fail(400, 'Type a question first.');
@@ -264,6 +265,7 @@ async function chat(authUser, rawText, opts = {}) {
       let actionSlots = MAX_ACTIONS_PER_REPLY - prepared.length;
       const responses = await Promise.all(fnCalls.map(async (part) => {
         const { name, args } = part.functionCall;
+        const lookupStart = Date.now();
         if (emit) emit({ type: 'status', text: actions.isAction(name) ? 'Preparing the change' : (STATUS[name] || 'Looking it up') });
         let result;
         if (actions.isAction(name)) {
@@ -279,6 +281,7 @@ async function chat(authUser, rawText, opts = {}) {
           result = (await tools.run(user, name, args)) || { error: `Unknown tool ${name}` };
           for (const card of tools.cardsFrom(result)) if (!cards.has(String(card.id))) cards.set(String(card.id), card);
         }
+        timing.lookups.push(`${name} ${Date.now() - lookupStart}ms`);
         return { functionResponse: { name, response: { result } } };
       }));
       timing.tools += Date.now() - toolStart;
@@ -303,7 +306,7 @@ async function chat(authUser, rawText, opts = {}) {
   timing.db += Date.now() - saveStart;
   const total = Date.now() - started;
   // One line per question, to see where time goes (model / lookups / database).
-  console.log(`[ai] ${total}ms total · ${calls} model call${calls === 1 ? '' : 's'} ${timing.model}ms (${timing.models.join(', ')}) · lookups ${timing.tools}ms · db ${timing.db}ms`);
+  console.log(`[ai] ${total}ms total · ${calls} model call${calls === 1 ? '' : 's'} ${timing.model}ms (${timing.models.join(', ')}) · lookups ${timing.tools}ms${timing.lookups.length ? ` (${timing.lookups.join(', ')})` : ''} · db ${timing.db}ms`);
   const nextUsage = { ...used, used: used.used + 1 };
   if (nextUsage.team_questions != null) nextUsage.team_questions += 1;
   return { user_message: userMessage, reply: { ...reply, actions: prepared }, usage: nextUsage };

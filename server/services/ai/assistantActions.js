@@ -55,13 +55,14 @@ const declarations = [
     parameters: {
       type: 'object',
       properties: {
-        project: { type: 'string', description: 'Project or client name.' },
+        project: { type: 'string', description: 'The project name exactly as the person wrote it (e.g. "Orbit"). Never replace it with another project.' },
         title: { type: 'string' },
         description: { type: 'string' },
         assignees: { type: 'array', items: { type: 'string' }, description: 'Member names. Admins only.' },
         due_date: { type: 'string', description: 'YYYY-MM-DD' },
         priority: { type: 'string', enum: PRIORITIES },
         parent_task: { type: 'string', description: 'Main task (id or title) to add this under as a sub task.' },
+        confirmed_as_typed: { type: 'boolean', description: 'Members only: true when the person confirmed a project name that is not in Orbit is correct as typed.' },
       },
       required: ['project', 'title'],
     },
@@ -128,11 +129,59 @@ const isAction = (name) => names.has(name);
 
 /* ---------- Prepare (validate + preview, no change) ---------- */
 
+// Task requests (members): the project is free text in the app, and a member
+// may ask for work in any project. Use the matching project's real name when
+// one matches. A misspelt or unknown name is never guessed: the person is
+// asked first ("Did you mean Orbit?"). { name } or { error }.
+async function requestProjectName(user, asked, confirmedAsTyped) {
+  const words = String(asked || '').trim().slice(0, 255);
+  if (!words) return fail('Which project is this for?');
+  const { rows } = await db.query(
+    `SELECT name FROM projects
+      WHERE trashed_at IS NULL AND COALESCE(status, 'active') <> 'archived'
+        AND (lower(name) = lower($1) OR name ILIKE $2 OR client_name ILIKE $2)
+      ORDER BY (lower(name) = lower($1)) DESC, length(name) LIMIT 3`,
+    [words, `%${words.replace(/[\\%_]/g, (c) => `\\${c}`)}%`],
+  );
+  const exact = rows.find((r) => r.name.toLowerCase() === words.toLowerCase());
+  if (exact) return { name: exact.name };
+  if (rows.length === 1) return { name: rows[0].name };
+  if (rows.length > 1) return fail(`"${words}" matches several projects: ${rows.map((r) => r.name).join(', ')}. Ask which one.`);
+  if (confirmedAsTyped) return { name: words };
+  const close = await tools.suggestProjects(user, words, { anyProject: true });
+  if (close.length) {
+    return fail(`There is no project called "${words}". Closest: ${close.map((n) => `"${n}"`).join(', ')}. Ask the person "Did you mean ${close[0]}?" and wait. If yes, prepare again with that name; if they say "${words}" is right as typed, prepare again with confirmed_as_typed: true.`);
+  }
+  return fail(`There is no project called "${words}" in Orbit. Ask the person to check the name. If they say it is right (for example a new project), prepare again with confirmed_as_typed: true.`);
+}
+
 async function prepareCreateTask(user, a) {
   const title = String(a.title || '').trim().slice(0, 255);
   if (!title) return fail('What should the task be called?');
+  if (!tools.isManager(user) && !a.parent_task) {
+    // Members can't create main tasks: send a Task Request instead.
+    const resolved = await requestProjectName(user, a.project, a.confirmed_as_typed === true);
+    if (resolved.error) return resolved;
+    const projectName = resolved.name;
+    if (a.due_date && !validDate(a.due_date)) return fail('Due date must be YYYY-MM-DD.');
+    const description = String(a.description || '').trim().slice(0, 5000);
+    return {
+      kind: 'task_request',
+      payload: { title, project_name: projectName, description, due_date: a.due_date || null },
+      preview: {
+        title: 'Send a task request to the admins',
+        lines: [`Task: ${title}`, `Project: ${projectName}`, a.due_date && `Wanted by: ${prettyDate(a.due_date)}`, description && `Details: ${description.slice(0, 140)}`].filter(Boolean),
+        note: 'Members can’t create main tasks, so this goes to the admins as a request.',
+      },
+    };
+  }
   const projects = await tools.findProjects(user, a.project || '');
-  if (!projects.length) return fail(`No project matching "${a.project}" that this person can see.`);
+  if (!projects.length) {
+    const close = await tools.suggestProjects(user, a.project);
+    return fail(close.length
+      ? `There is no project called "${a.project}". Closest: ${close.map((n) => `"${n}"`).join(', ')}. Ask the person "Did you mean ${close[0]}?" and wait for a yes before preparing it again.`
+      : `No project matching "${a.project}" that this person can see. Ask them to check the name.`);
+  }
   if (projects.length > 1 && projects[0].name.toLowerCase() !== String(a.project).toLowerCase()) {
     return fail(`"${a.project}" matches several projects: ${projects.map((p) => p.name).join(', ')}. Ask which one.`);
   }

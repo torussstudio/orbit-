@@ -14,15 +14,23 @@
  *                    to the lowest level the model allows). "model" leaves
  *                    the model's own default.
  *
- * Free tier: when the main model is rate limited (429) or busy (503), the
- * call is retried on the lite model, and the main model is skipped for a
- * minute so later questions don't wait for a 429 first.
+ * Free tier: when the main model is rate limited (429), busy (500 / 503) or
+ * too slow (504), the call is retried on the lite model, and the main model
+ * is skipped for a while so later questions (and the next tool round) go
+ * straight to the lite one instead of waiting on a busy model again.
+ *
+ * Slow answers: Google sometimes keeps a request hanging for a minute before
+ * saying 503 / 504. A streamed answer that has not started within
+ * AI_FIRST_BYTE_MS (default 12 s), or that stalls for 20 s, is given up and
+ * retried on the lite model, so a busy model costs seconds, not a minute.
  */
 
 const API = 'https://generativelanguage.googleapis.com/v1beta/models';
-const TIMEOUT_MS = 30_000;
-const STREAM_TIMEOUT_MS = 60_000;
-const COOL_DOWN_MS = 60_000;
+const TIMEOUT_MS = 25_000; // one-shot calls (briefing)
+const STREAM_TOTAL_MS = 60_000; // a whole streamed answer
+const STREAM_IDLE_MS = 20_000; // silence between two streamed pieces
+const firstByteMs = () => Math.max(3000, Number.parseInt(process.env.AI_FIRST_BYTE_MS, 10) || 12_000);
+const COOL_DOWN_MS = { 429: 60_000, 500: 120_000, 503: 120_000, 504: 120_000 };
 
 const fail = (status, message, extra = {}) => Object.assign(new Error(message), { status, ...extra });
 const retryable = (err) => [429, 500, 503, 504].includes(err?.status);
@@ -105,7 +113,8 @@ function modelOrder(lite) {
 }
 
 function noteFailure(model, err) {
-  if (err?.status === 429) coolingUntil.set(model, Date.now() + COOL_DOWN_MS);
+  const ms = COOL_DOWN_MS[err?.status];
+  if (ms && !err?.stopped) coolingUntil.set(model, Date.now() + ms);
 }
 
 function finalError(lastError) {
@@ -115,7 +124,7 @@ function finalError(lastError) {
   }
   if (lastError?.upstream) {
     console.error('[ai] Gemini error:', lastError.status, lastError.message);
-    return fail(502, 'Orbit AI is not reachable right now. Try again shortly.');
+    return fail(502, 'Orbit AI (Google Gemini) is busy right now. Try again in a minute.');
   }
   return lastError;
 }
@@ -196,7 +205,14 @@ function mergePart(parts, part) {
 async function streamModel(model, body, onText, signal) {
   const { key } = settings();
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), STREAM_TIMEOUT_MS);
+  // Overall cap, plus a shorter one that is reset by every streamed piece:
+  // first the wait for the answer to start, then the silence between pieces.
+  const total = setTimeout(() => controller.abort(), STREAM_TOTAL_MS);
+  let quiet = setTimeout(() => controller.abort(), firstByteMs());
+  const heardFrom = () => {
+    clearTimeout(quiet);
+    quiet = setTimeout(() => controller.abort(), STREAM_IDLE_MS);
+  };
   const abort = () => controller.abort();
   signal?.addEventListener('abort', abort);
   try {
@@ -226,6 +242,7 @@ async function streamModel(model, body, onText, signal) {
       }
     };
     for await (const value of res.body) {
+      heardFrom();
       buffer += decoder.decode(value, { stream: true });
       const lines = buffer.split(/\r?\n/);
       buffer = lines.pop();
@@ -243,7 +260,8 @@ async function streamModel(model, body, onText, signal) {
     }
     throw err;
   } finally {
-    clearTimeout(timer);
+    clearTimeout(total);
+    clearTimeout(quiet);
     signal?.removeEventListener('abort', abort);
   }
 }
