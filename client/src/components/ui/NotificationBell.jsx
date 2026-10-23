@@ -99,6 +99,7 @@ export default function NotificationBell() {
   const [notifications, setNotifications] = useState([]);
   const [unreadCount,   setUnreadCount]   = useState(0);
   const [showDropdown,  setShowDropdown]  = useState(false);
+  const [panelTop, setPanelTop] = useState(64); // phones: where the panel starts
   const [loading,       setLoading]       = useState(false);
   const [loadError,     setLoadError]     = useState('');
   const [actionLoading, setActionLoading] = useState(null);
@@ -543,7 +544,10 @@ useEffect(() => {
 
       {/* Bell button */}
       <button
-  onClick={async () => {
+  onClick={async (e) => {
+    // Phones: the panel is pinned to the screen just under the bell, so it
+    // never runs off the left edge (the bell is not at the right edge).
+    setPanelTop(Math.round(e.currentTarget.getBoundingClientRect().bottom + 8));
     setShowDropdown((v) => !v);
 
     if (!showDropdown) {
@@ -598,7 +602,10 @@ useEffect(() => {
 
       {/* Dropdown */}
       {showDropdown && (
-        <div style={{
+        <div
+          className="max-sm:!fixed max-sm:!left-3 max-sm:!right-3 max-sm:!top-[var(--panel-top)] max-sm:!w-auto max-sm:!max-h-[calc(100dvh-var(--panel-top)-12px)]"
+          style={{
+          '--panel-top': `${panelTop}px`,
           position: 'absolute', top: '40px', right: '0px',
           width: 'min(320px, calc(100vw - 24px))', maxHeight: '440px',
           background: 'var(--bg-2)', borderRadius: '12px',
@@ -669,7 +676,7 @@ useEffect(() => {
                   onClick={() => !n.read && handleMarkAsRead(n.id, n.metadata?.url)}
                 >
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '8px' }}>
-                    <div style={{ flex: 1 }}>
+                    <div style={{ flex: 1, minWidth: 0, overflowWrap: 'anywhere' }}>
                       {/* Unread dot */}
                       {!n.read && (
                         <span style={{
@@ -711,6 +718,8 @@ useEffect(() => {
                       onClick={(e) => handleDelete(n.id, e)}
                       disabled={actionLoading !== null}
                       title="Delete"
+                      aria-label="Delete notification"
+                      className="max-sm:grid max-sm:min-h-8 max-sm:min-w-8 max-sm:place-items-center max-sm:-mr-2 max-sm:-mt-1.5"
                       style={{
                         background: 'none', border: 'none', cursor: 'pointer',
                         color: 'var(--text-3)', fontSize: '14px', padding: '0 2px',

@@ -259,4 +259,7 @@ module.exports = {
   createNotification,
   sendToMany,
   decideDelivery,
+  // Direct push with no bell row and no preference check. Only for
+  // one-off security pushes that must not be saved (password reset code).
+  deliverPush,
 };

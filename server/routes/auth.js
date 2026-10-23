@@ -12,6 +12,8 @@ const {
 const {
   authLimiter,
   refreshLimiter,
+  forgotPasswordLimiter,
+  resetPasswordLimiter,
 } = require("../middleware/rateLimit");
 
 const authController =
@@ -28,6 +30,34 @@ router.post(
   "/login",
   authLimiter,
   authController.login,
+);
+
+/*
+ * FORGOT PASSWORD
+ *
+ * No authentication required.
+ *
+ * POST /forgot-password  { email }
+ *   Sends a 6-digit code (email + push).
+ *   Always answers the same way, whether
+ *   or not the email has an account.
+ *
+ * POST /reset-password   { email, code, password }
+ *   Sets the new password and signs out
+ *   every session.
+ */
+router.post(
+  "/forgot-password",
+  forgotPasswordLimiter,
+  requireClientHeader,
+  authController.forgotPassword,
+);
+
+router.post(
+  "/reset-password",
+  resetPasswordLimiter,
+  requireClientHeader,
+  authController.resetPassword,
 );
 
 /*

@@ -1,4 +1,5 @@
 const authService = require("../services/authService");
+const passwordResetService = require("../services/passwordResetService");
 
 const SESSION_HEADER = "X-Orbit-Session-Id";
 
@@ -437,8 +438,84 @@ async function deleteAccount(
   }
 }
 
+/*
+ * FORGOT PASSWORD: send a code.
+ *
+ * Answers straight away, the same way for every email, and
+ * does the lookup and sending afterwards. So neither the
+ * answer nor its timing shows whether the email has an
+ * account, and a slow mailserver never slows the page.
+ */
+const FORGOT_PASSWORD_MESSAGE =
+  "If this email has an Orbit account, we've sent a 6-digit code to it.";
+
+async function forgotPassword(req, res) {
+  const email = req.body?.email;
+
+  if (
+    typeof email !== "string" ||
+    !email.trim() ||
+    email.length > 255 ||
+    !email.includes("@")
+  ) {
+    return res.status(400).json({
+      error: "Enter your email address",
+    });
+  }
+
+  res.json({
+    ok: true,
+    message: FORGOT_PASSWORD_MESSAGE,
+  });
+
+  passwordResetService
+    .requestReset({
+      email,
+      ipAddress: req.ip || null,
+    })
+    .catch((err) => {
+      console.error(
+        "[password-reset] request failed:",
+        err?.message,
+      );
+    });
+}
+
+/*
+ * FORGOT PASSWORD: code + new password.
+ */
+async function resetPassword(req, res, next) {
+  try {
+    const { email, code, password } =
+      req.body || {};
+
+    if (
+      typeof email !== "string" ||
+      typeof password !== "string" ||
+      (typeof code !== "string" &&
+        typeof code !== "number")
+    ) {
+      return res.status(400).json({
+        error: "Email, code and new password are required",
+      });
+    }
+
+    await passwordResetService.resetPassword({
+      email,
+      code: String(code),
+      password,
+    });
+
+    return res.json({ success: true });
+  } catch (err) {
+    next(err);
+  }
+}
+
 module.exports = {
   login,
+  forgotPassword,
+  resetPassword,
   refresh,
   logout,
   logoutAll,

@@ -245,6 +245,24 @@ const initDB = async () => {
   // created before the column was there. No-op otherwise.
   await ensureColumn("refresh_tokens", "created_at TIMESTAMPTZ DEFAULT NOW()");
 
+  // Forgot password codes (services/passwordResetService.js). Only an HMAC of
+  // the 6-digit code is kept. used_at is set when the code is used or closed
+  // (a newer code was sent / the password was changed). Rows older than a day
+  // are deleted when the next code is requested.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS password_reset_codes (
+      id ${idDefinition(defaultIdType)},
+      member_id ${refType(memberIdType)} NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+      code_hash CHAR(64) NOT NULL,
+      expires_at TIMESTAMPTZ NOT NULL,
+      attempts INTEGER NOT NULL DEFAULT 0,
+      used_at TIMESTAMPTZ,
+      requested_ip TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_password_reset_codes_member ON password_reset_codes(member_id, created_at DESC)`);
+
   await pool.query(`
     CREATE TABLE IF NOT EXISTS projects (
       id ${idDefinition(projectIdType)},
