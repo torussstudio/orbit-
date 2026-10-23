@@ -1,6 +1,9 @@
 const router = require("express").Router();
 const { auth } = require("../middleware/auth");
 const assistant = require("../services/ai/assistantService");
+// Reads the text of Knowledge board files for Orbit AI in the background
+// (files uploaded before this existed, and retries). AI_KNOWLEDGE_INDEX=off stops it.
+require("../services/ai/knowledgeIndex").start();
 
 /*
  * Orbit AI assistant: questions, writing help, and changes that need the

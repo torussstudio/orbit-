@@ -7,6 +7,7 @@ const db = require("../db");
 const { auth, managerOnly } = require("../middleware/auth");
 const { requireProjectAccess } = require("../middleware/projectAccess");
 const crypto = require("crypto");
+const knowledgeIndex = require("../services/ai/knowledgeIndex");
 
 /*
  * ============================================================
@@ -442,6 +443,12 @@ router.post(
             req.user.id,
           ],
         );
+
+      // Orbit AI: read the file's text in the background (never blocks
+      // or fails the upload).
+      knowledgeIndex
+        .indexFile(rows[0], file.buffer)
+        .catch(() => {});
 
       res.status(201).json(
         rows[0],

@@ -929,6 +929,22 @@ const initDB = async () => {
     )
   `);
 
+  // Orbit AI: text pulled out of Knowledge board files (PDF / TXT / MD) so
+  // the assistant can search and read them (services/ai/knowledgeIndex.js).
+  // file_id / project_id are TEXT (work with integer and uuid ids); a row
+  // whose file was deleted is ignored by the joins and costs nothing.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS ai_knowledge_text (
+      file_id TEXT PRIMARY KEY,
+      project_id TEXT,
+      status TEXT NOT NULL DEFAULT 'ok',
+      content TEXT,
+      chars INTEGER NOT NULL DEFAULT 0,
+      error TEXT,
+      extracted_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+
   await pool.query(`
     CREATE TABLE IF NOT EXISTS direct_upload_intents (
       public_id TEXT PRIMARY KEY,

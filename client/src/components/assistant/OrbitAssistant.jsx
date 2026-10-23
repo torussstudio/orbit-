@@ -29,6 +29,8 @@ const MEMBER_STARTERS = [
   { icon: 'clock', label: 'Log time', hint: 'e.g. 1 hour on a task', text: 'Log 1 hour on ', fill: true },
   { icon: 'pen', label: 'Rewrite for client', hint: 'Manglish → polished English', text: 'Rewrite this as a clear, polite message for the client:\n', fill: true },
   { icon: 'chart', label: 'My hours this week', hint: 'Per project', text: 'How many hours have I logged this week, per project?' },
+  { icon: 'note', label: 'Explain a project', hint: 'Brief, brand, files, status', text: 'Tell me everything about the project ', fill: true },
+  { icon: 'pulse', label: 'How am I doing?', hint: 'My work this month', text: 'How am I doing this month? Look at my completed tasks, on-time rate, rework and time logs, and give me 2 tips.' },
 ];
 const ADMIN_STARTERS = [
   { icon: 'pulse', label: 'Agency overview', hint: 'Risks first', text: 'Give me a quick overview of the agency right now: risks first.' },
@@ -37,6 +39,8 @@ const ADMIN_STARTERS = [
   { icon: 'note', label: 'What happened today?', hint: 'Grouped by project', text: 'What happened today across all projects? Group by project.' },
   { icon: 'alert', label: 'Projects at risk', hint: 'Overdue · rework · deadlines', text: 'Which projects are at risk (overdue tasks, rework, close end dates)?' },
   { icon: 'plus', label: 'Create a task', hint: 'e.g. for Hari, due Friday', text: 'Create a task in ', fill: true },
+  { icon: 'users', label: 'Team behaviour', hint: 'Who is doing well, who needs help', text: 'How is the team working this month? Completion, on-time rate, rework and time logs: who is doing well and who needs help?' },
+  { icon: 'eye', label: 'How is someone doing?', hint: 'One member in depth', text: 'How is this person doing this month? Name: ', fill: true },
 ];
 const QUICK_CHIPS = { member: [0, 1, 4, 3], admin: [0, 1, 2, 5] };
 

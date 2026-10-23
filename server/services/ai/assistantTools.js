@@ -19,6 +19,10 @@
 const db = require('../../db');
 const { userHasTaskAccess } = require('../accessControl');
 const { LEAF_TASK, IN_LIVE_PROJECT } = require('../../utils/taskScope');
+// Loaded lazily inside the executors (they use findProjects / findMembers from here).
+const lazy = (name) => () => require(name);
+const knowledgeTools = lazy('./assistantKnowledge');
+const insightTools = lazy('./assistantInsights');
 
 let presence = null;
 try { presence = require('../presence'); } catch { /* presence is optional */ }
@@ -188,8 +192,8 @@ const declarations = [
     },
   },
   {
-    name: 'project_status',
-    description: 'One project in depth: client, dates, description, tasks per stage, overdue tasks, next deadlines, milestones (clusters), rework, team, links, hours logged this month.',
+    name: 'project_brief',
+    description: 'Everything about ONE project in one lookup: client, dates, description, Docs / Milanote links, stages, progress (counts), next open tasks, milestones, team, hours this month, last 7 days of activity, and the whole Knowledge board (folders, every note and file with a short preview). Use first for any question about a project: what it is, its status, brand, process, links, files, who works on it.',
     parameters: {
       type: 'object',
       properties: { project: { type: 'string', description: 'Project or client name (or part of it).' } },
@@ -269,14 +273,38 @@ const declarations = [
   },
   {
     name: 'knowledge',
-    description: "Search the projects' Knowledge base (notes and file names): logins are NOT here, but processes, brand details, links, how-tos are. Use for 'how do we…', 'what is the brand colour of…', 'where is the file for…'.",
+    description: "Search inside the Knowledge board of the projects (note text, the text inside uploaded PDF/TXT/MD files, file and folder names), plus matching tasks and task comments from the database. Returns the best excerpts. Use for 'how do we…', 'what is the brand colour / font of…', 'where is the file for…', 'what did the client say about…'. Logins are NOT here.",
     parameters: {
       type: 'object',
       properties: {
-        query: { type: 'string', description: 'What to look for.' },
-        project: { type: 'string', description: 'Optional project name.' },
+        query: { type: 'string', description: 'What to look for: the key words (any language).' },
+        project: { type: 'string', description: 'Optional project or client name.' },
       },
       required: ['query'],
+    },
+  },
+  {
+    name: 'knowledge_read',
+    description: 'Read one Knowledge board note or file in full (long documents come in parts of ~8000 characters). Use after knowledge / project_brief when the excerpt is not enough, or to summarise a document.',
+    parameters: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: 'Note title or file name (or part of it).' },
+        project: { type: 'string', description: 'Optional project name, to pick the right one.' },
+        part: { type: 'integer', description: 'Part number for long documents. Default 1.' },
+      },
+      required: ['title'],
+    },
+  },
+  {
+    name: 'member_insights',
+    description: "How someone works in Orbit, from the numbers: tasks completed, on-time %, days from start to review, review wait, rework, open/overdue now, hours logged, days without a time log, active days, busiest hours, comments, task requests, last seen, and the trend vs the previous period. Admins: any member, or member = 'all' for the whole team. Members: only themselves (leave member empty).",
+    parameters: {
+      type: 'object',
+      properties: {
+        member: { type: 'string', description: "Admins: a member's name, or 'all'. Members: leave empty." },
+        period: { type: 'string', enum: ['this_week', 'last_week', 'this_month', 'last_month', 'last_30_days', 'last_90_days'], description: 'Default last_30_days.' },
+      },
     },
   },
 ];
@@ -361,53 +389,6 @@ async function taskDetails(user, { task } = {}) {
     latest_comments: comments.rows,
     recent_activity: activity.rows,
     tasks: [t],
-  };
-}
-
-async function projectStatus(user, { project } = {}) {
-  if (!project) return fail('Which project?');
-  const matches = await findProjects(user, project);
-  if (!matches.length) return fail(`No project matching "${project}" that you can see.`);
-  const p = matches[0];
-  const params = [p.id];
-  const vis = taskVisibility(user, params);
-  const [stages, upcoming, team, clusters, hours] = await Promise.all([
-    db.query(
-      `SELECT t.stage, COUNT(*)::int AS count,
-              COUNT(*) FILTER (WHERE t.due_date::date < ${TODAY} AND ${OPEN})::int AS overdue,
-              COALESCE(SUM(t.rework_count), 0)::int AS rework
-         FROM tasks t WHERE t.project_id = $1 AND ${LEAF_TASK} AND ${vis} GROUP BY t.stage`,
-      params,
-    ),
-    db.query(`${TASK_SELECT} WHERE t.project_id = $1 AND ${OPEN} AND ${LEAF_TASK} AND ${vis} ORDER BY t.due_date ASC NULLS LAST LIMIT 12`, params),
-    db.query(
-      `SELECT m.name, m.role FROM project_members pm JOIN members m ON m.id = pm.member_id
-        WHERE pm.project_id = $1 AND m.active = true ORDER BY m.name`,
-      [p.id],
-    ),
-    db.query(
-      `SELECT name, status, to_char(target_date, 'YYYY-MM-DD') AS target_date, COALESCE(rework_count, 0) AS rework
-         FROM clusters WHERE project_id = $1 ORDER BY target_date NULLS LAST LIMIT 15`,
-      [p.id],
-    ).catch(() => ({ rows: [] })),
-    isManager(user)
-      ? db.query(
-        `SELECT ROUND(COALESCE(SUM(minutes), 0) / 60.0, 1)::float AS hours FROM time_entries
-          WHERE project_id = $1 AND work_date >= date_trunc('month', ${TODAY})`,
-        [p.id],
-      ).catch(() => ({ rows: [{ hours: null }] }))
-      : Promise.resolve({ rows: [{ hours: undefined }] }),
-  ]);
-  return {
-    today: await todayString(),
-    project: { ...p, description: (p.description || '').slice(0, 800) },
-    other_matches: matches.slice(1).map((m) => m.name),
-    by_stage: stages.rows,
-    next_open_tasks: upcoming.rows,
-    milestones: clusters.rows,
-    team: team.rows,
-    hours_this_month: hours.rows[0]?.hours,
-    note: isManager(user) ? undefined : 'Counts include only tasks assigned to this member.',
   };
 }
 
@@ -612,44 +593,12 @@ async function taskRequests(user) {
   return { count: rows.length, requests: rows };
 }
 
-async function knowledge(user, { query, project } = {}) {
-  const q = text(query, 120);
-  if (q.length < 2) return fail('What should I look for?');
-  const params = [`%${q}%`];
-  const vis = projectVisibility(user, params);
-  let projectFilter = '';
-  if (project) { params.push(`%${text(project)}%`); projectFilter = `AND p.name ILIKE $${params.length}`; }
-  const [notes, files] = await Promise.all([
-    db.query(
-      `SELECT n.title, p.name AS project, LEFT(n.content, 1200) AS content,
-              to_char(n.updated_at AT TIME ZONE '${TZ}', 'YYYY-MM-DD') AS updated
-         FROM knowledge_notes n JOIN projects p ON p.id = n.project_id
-        WHERE (n.title ILIKE $1 OR n.content ILIKE $1) AND p.trashed_at IS NULL AND ${vis} ${projectFilter}
-        ORDER BY (n.title ILIKE $1) DESC, n.updated_at DESC LIMIT 6`,
-      params,
-    ),
-    db.query(
-      `SELECT f.name, p.name AS project, f.mime_type
-         FROM knowledge_files f JOIN projects p ON p.id = f.project_id
-        WHERE f.name ILIKE $1 AND p.trashed_at IS NULL AND ${vis} ${projectFilter}
-        ORDER BY f.created_at DESC LIMIT 8`,
-      params,
-    ),
-  ]);
-  // Never pass anything that looks like a secret to the model.
-  const scrub = (s) => String(s || '').replace(/(password|passwd|pwd|api[_ -]?key|secret|token)\s*[:=]\s*\S+/gi, '$1: [hidden]');
-  return {
-    notes: notes.rows.map((n) => ({ ...n, content: scrub(n.content) })),
-    files: files.rows,
-    note: notes.rows.length || files.rows.length ? undefined : 'Nothing found in the Knowledge base.',
-  };
-}
-
 const executors = {
   my_tasks: myTasks,
   find_tasks: findTasks,
   task_details: taskDetails,
-  project_status: projectStatus,
+  project_status: (user, args) => knowledgeTools().projectBrief(user, args), // old name, kept for safety
+  project_brief: (user, args) => knowledgeTools().projectBrief(user, args),
   list_projects: listProjects,
   people,
   team_workload: teamWorkload,
@@ -659,7 +608,9 @@ const executors = {
   time_logged: timeLogged,
   rework_report: reworkReport,
   task_requests: taskRequests,
-  knowledge,
+  knowledge: (user, args) => knowledgeTools().knowledge(user, args),
+  knowledge_read: (user, args) => knowledgeTools().knowledgeRead(user, args),
+  member_insights: (user, args) => insightTools().memberInsights(user, args),
 };
 
 // Runs one lookup. Never throws: errors go back to the model as data.
