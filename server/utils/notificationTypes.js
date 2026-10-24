@@ -34,6 +34,7 @@ const TYPES = [
   { key: 'task_due_date_updated', group: 'tasks', label: 'Due date changed' },
   { key: 'task_in_review', group: 'tasks', label: 'Task submitted for review', audience: 'manager' },
   { key: 'task_request', group: 'tasks', label: 'New task request', audience: 'manager' },
+  { key: 'task_request_update', group: 'tasks', label: 'Your task request approved or declined' },
 
   { key: 'project_member_added', group: 'projects', label: 'Added to a project' },
   { key: 'project_member_removed', group: 'projects', label: 'Removed from a project' },

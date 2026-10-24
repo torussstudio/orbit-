@@ -754,8 +754,8 @@ const initDB = async () => {
     await pool.query(`CREATE INDEX IF NOT EXISTS ${name} ON ${definition}`);
   }
 
-  // Task requests: members ask for a task, managers review them on the
-  // "Requested Tasks" page and delete them once handled.
+  // Task requests: members ask for a task, managers approve or decline them
+  // on the "Requested Tasks" page, and members follow them on "My requests".
   await pool.query(`
     CREATE TABLE IF NOT EXISTS task_requests (
       id ${idDefinition(defaultIdType)},
@@ -774,6 +774,29 @@ const initDB = async () => {
   await pool.query(`
     CREATE INDEX IF NOT EXISTS idx_task_requests_requested_by
     ON task_requests (requested_by)
+  `);
+
+  // Request status, so members can follow their own requests.
+  //   status      'pending' | 'approved' | 'declined' (rows from before
+  //               this change become 'pending')
+  //   handled_by  the manager who approved / declined it
+  //   admin_note  optional note to the member (the reason for a decline)
+  //   task_id     the task created from the request, when there is one
+  // Additive and idempotent.
+  await ensureColumn("task_requests", "status VARCHAR(20) NOT NULL DEFAULT 'pending'");
+  await ensureColumn(
+    "task_requests",
+    `handled_by ${refType(memberIdType)} REFERENCES members(id) ON DELETE SET NULL`,
+  );
+  await ensureColumn("task_requests", "handled_at TIMESTAMPTZ");
+  await ensureColumn("task_requests", "admin_note TEXT");
+  await ensureColumn(
+    "task_requests",
+    `task_id ${refType(taskIdType)} REFERENCES tasks(id) ON DELETE SET NULL`,
+  );
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_task_requests_status
+    ON task_requests (status, created_at DESC)
   `);
 
   // -------------------------------------------------------------------

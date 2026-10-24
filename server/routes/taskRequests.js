@@ -1,18 +1,40 @@
 const express = require('express');
 const router = express.Router();
 
-// ADJUST THIS IMPORT to match how server/routes/tasks.js does it.
 const { authenticate } = require('../middleware/auth');
 const taskRequestService = require('../services/taskRequestService');
 const { setTotalHeader } = require('../utils/listLimit');
 
-// Only managers can view or delete requests (roles in members: manager / member).
+// Only managers can view all requests, approve, decline or delete them
+// (roles in members: manager / member).
 const requireManager = (req, res, next) => {
   if (req.user?.role !== 'manager') {
     return res.status(403).json({ error: 'Not allowed.' });
   }
   next();
 };
+
+// task_requests.id follows the members id type: integer or UUID.
+function validId(req, res) {
+  const id = String(req.params.id);
+  const isIntegerId = /^\d{1,18}$/.test(id);
+  const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+  if (!isIntegerId && !isUuid) {
+    res.status(400).json({ error: 'Invalid id.' });
+    return null;
+  }
+  return id;
+}
+
+// Errors with a status (400 / 403 / 404 / 409) carry a message meant for the
+// person; anything else is logged and answered with `fallback`.
+function sendError(res, err, label, fallback) {
+  if (err?.status && err.status < 500) {
+    return res.status(err.status).json({ error: err.message });
+  }
+  console.error(`${label} failed:`, err);
+  return res.status(500).json({ error: fallback });
+}
 
 // POST /task-requests: a member submits a request
 router.post('/', authenticate, async (req, res) => {
@@ -48,32 +70,82 @@ router.post('/', authenticate, async (req, res) => {
   }
 });
 
-// GET /task-requests: managers see all requests, newest first
-router.get('/', authenticate, requireManager, async (req, res) => {
+// GET /task-requests/mine: the signed-in person's own requests, with status.
+// Registered before the /:id routes.
+router.get('/mine', authenticate, async (req, res) => {
   try {
-    const { rows, total } = await taskRequestService.listRequests();
+    const { rows, total } = await taskRequestService.listMine(req.user);
     setTotalHeader(res, total);
     res.json(rows);
   } catch (err) {
-    console.error('GET /task-requests failed:', err);
-    res.status(500).json({ error: 'Could not load requests.' });
+    sendError(res, err, 'GET /task-requests/mine', 'Could not load your requests.');
   }
 });
 
-// DELETE /task-requests/:id: managers remove a handled request
-router.delete('/:id', authenticate, requireManager, async (req, res) => {
+// GET /task-requests: managers see requests, newest first.
+// ?status=pending | handled. Without it, every request (as before).
+router.get('/', authenticate, requireManager, async (req, res) => {
   try {
-    // task_requests.id follows the members id type: integer or UUID.
-    const id = String(req.params.id);
-    const isIntegerId = /^\d{1,18}$/.test(id);
-    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
-    if (!isIntegerId && !isUuid) return res.status(400).json({ error: 'Invalid id.' });
+    const status = ['pending', 'handled'].includes(req.query.status) ? req.query.status : undefined;
+    const { rows, total } = await taskRequestService.listRequests({ status });
+    setTotalHeader(res, total);
+    res.json(rows);
+  } catch (err) {
+    sendError(res, err, 'GET /task-requests', 'Could not load requests.');
+  }
+});
 
+// POST /task-requests/:id/approve: body { task?, note? }.
+// With `task` ({ project_id, title, description, priority, cluster_id,
+// assignee_ids, due_date }) a main task is created and linked to the request.
+router.post('/:id/approve', authenticate, requireManager, async (req, res) => {
+  const id = validId(req, res);
+  if (!id) return;
+  try {
+    const task = req.body?.task && typeof req.body.task === 'object' ? req.body.task : null;
+    const request = await taskRequestService.approveRequest(id, req.user, {
+      task,
+      note: req.body?.note,
+    });
+    res.json(request);
+  } catch (err) {
+    sendError(res, err, 'POST /task-requests/:id/approve', 'Could not approve the request.');
+  }
+});
+
+// POST /task-requests/:id/decline: body { note? } (the reason, shown to the member).
+router.post('/:id/decline', authenticate, requireManager, async (req, res) => {
+  const id = validId(req, res);
+  if (!id) return;
+  try {
+    const request = await taskRequestService.declineRequest(id, req.user, { note: req.body?.note });
+    res.json(request);
+  } catch (err) {
+    sendError(res, err, 'POST /task-requests/:id/decline', 'Could not decline the request.');
+  }
+});
+
+// POST /task-requests/:id/cancel: the member who asked withdraws a pending request.
+router.post('/:id/cancel', authenticate, async (req, res) => {
+  const id = validId(req, res);
+  if (!id) return;
+  try {
+    await taskRequestService.cancelRequest(id, req.user);
+    res.json({ success: true });
+  } catch (err) {
+    sendError(res, err, 'POST /task-requests/:id/cancel', 'Could not cancel the request.');
+  }
+});
+
+// DELETE /task-requests/:id: managers remove a request (spam, duplicates).
+router.delete('/:id', authenticate, requireManager, async (req, res) => {
+  const id = validId(req, res);
+  if (!id) return;
+  try {
     await taskRequestService.deleteRequest(id);
     res.json({ success: true });
   } catch (err) {
-    console.error('DELETE /task-requests failed:', err);
-    res.status(500).json({ error: 'Could not delete the request.' });
+    sendError(res, err, 'DELETE /task-requests', 'Could not delete the request.');
   }
 });
 

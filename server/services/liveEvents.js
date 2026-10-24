@@ -404,6 +404,33 @@ function memberChanged(memberId) {
     console.error("[liveEvents] member event failed:", err?.message);
   }
 }
+/*
+ * A task request was sent, approved, declined or cancelled. The member who
+ * asked and every active manager refetch their request lists.
+ */
+async function sendTaskRequestEvent(requesterId) {
+  const { rows } = await db.query("SELECT id FROM members WHERE role = 'manager' AND active = true");
+
+  eventBus.publish([...rows.map((row) => row.id), requesterId], {
+    type: "task_request.changed",
+    taskId: null,
+    projectId: null,
+    at: new Date().toISOString(),
+  });
+}
+
+function taskRequestChanged(requesterId) {
+  try {
+    if (shouldSkip()) return;
+
+    sendTaskRequestEvent(requesterId).catch((err) => {
+      console.error("[liveEvents] task request event failed:", err?.message);
+    });
+  } catch (err) {
+    console.error("[liveEvents] task request event failed:", err?.message);
+  }
+}
+
 module.exports = {
   memberChanged,
   accessChanged,
@@ -422,4 +449,5 @@ module.exports = {
   messageUpdated,
   directTyping,
   messageTyping,
+  taskRequestChanged,
 };

@@ -313,8 +313,13 @@ const declarations = [
   },
   {
     name: 'task_requests',
-    description: 'Task requests (tasks members asked admins to create). Admins: all pending requests. Members: their own requests.',
-    parameters: { type: 'object', properties: {} },
+    description: "Task requests (tasks members asked admins to create) with their status: pending, approved (with the task made from it) or declined (with the admin's note). Admins: every member's requests, pending by default. Members: their own requests, all statuses by default. Use for 'my requests', 'was my request approved', 'pending requests'.",
+    parameters: {
+      type: 'object',
+      properties: {
+        status: { type: 'string', enum: ['pending', 'approved', 'declined', 'all'], description: 'Admins default pending; members default all.' },
+      },
+    },
   },
   {
     name: 'knowledge',
@@ -623,19 +628,32 @@ async function reworkReport(user, { project } = {}) {
   return { tasks: tasks.rows, by_person: byPerson.rows };
 }
 
-async function taskRequests(user) {
+async function taskRequests(user, { status } = {}) {
   const params = [];
-  let where = 'TRUE';
-  if (!isManager(user)) { params.push(user.id); where = 'r.requested_by = $1'; }
+  const where = [];
+  if (!isManager(user)) { params.push(user.id); where.push(`r.requested_by = $${params.length}`); }
+  const wanted = ['pending', 'approved', 'declined', 'all'].includes(status)
+    ? status
+    : (isManager(user) ? 'pending' : 'all');
+  if (wanted !== 'all') { params.push(wanted); where.push(`r.status = $${params.length}`); }
   const { rows } = await db.query(
     `SELECT r.title, r.project_name AS project, LEFT(r.description, 300) AS description,
             to_char(r.due_date, 'YYYY-MM-DD') AS due, m.name AS requested_by,
-            to_char(r.created_at AT TIME ZONE '${TZ}', 'YYYY-MM-DD') AS requested_on
-       FROM task_requests r LEFT JOIN members m ON m.id = r.requested_by
-      WHERE ${where} ORDER BY r.created_at DESC LIMIT 30`,
+            to_char(r.created_at AT TIME ZONE '${TZ}', 'YYYY-MM-DD') AS requested_on,
+            r.status, h.name AS handled_by,
+            to_char(r.handled_at AT TIME ZONE '${TZ}', 'YYYY-MM-DD') AS handled_on,
+            LEFT(r.admin_note, 300) AS admin_note,
+            t.title AS created_task, tp.name AS created_task_project
+       FROM task_requests r
+       LEFT JOIN members m ON m.id = r.requested_by
+       LEFT JOIN members h ON h.id = r.handled_by
+       LEFT JOIN tasks t ON t.id = r.task_id
+       LEFT JOIN projects tp ON tp.id = t.project_id
+      WHERE ${where.length ? where.join(' AND ') : 'TRUE'}
+      ORDER BY r.created_at DESC LIMIT 30`,
     params,
   );
-  return { count: rows.length, requests: rows };
+  return { status: wanted, count: rows.length, requests: rows };
 }
 
 const executors = {
@@ -689,7 +707,7 @@ async function snapshot(user) {
          (SELECT COUNT(*)::int FROM tasks t JOIN projects p ON p.id = t.project_id WHERE ${LIVE_PROJECT} AND ${LEAF_TASK} AND ${OPEN} AND t.due_date::date < ${TODAY}) AS overdue,
          (SELECT COUNT(*)::int FROM tasks t JOIN projects p ON p.id = t.project_id WHERE ${LIVE_PROJECT} AND ${LEAF_TASK} AND ${OPEN} AND t.due_date::date = ${TODAY}) AS due_today,
          (SELECT COUNT(*)::int FROM tasks t JOIN projects p ON p.id = t.project_id WHERE ${LEAF_TASK} AND p.trashed_at IS NULL AND t.stage = 'In Review') AS waiting_review,
-         (SELECT COUNT(*)::int FROM task_requests) AS task_requests,
+         (SELECT COUNT(*)::int FROM task_requests WHERE status = 'pending') AS pending_task_requests,
          (SELECT COUNT(*)::int FROM members WHERE active = true AND role = 'member') AS members,
          (SELECT string_agg(name, ', ' ORDER BY name) FROM projects p WHERE ${LIVE_PROJECT}) AS project_names`,
     );

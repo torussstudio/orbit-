@@ -114,7 +114,11 @@ function AssigneePicker({ label, hint, required, members, selectedIds, onSelect,
 
 /* ------------------------------------------------------------------ */
 
-export default function TaskForm({ initial, members, allMembers, clusters, stages, onSave, onCancel, hideCluster, saving = false, userRole, isSubtaskForm = false, emptyMembersMessage, hasExistingSubtasks = false }) {
+// `prefill` (optional): values to start a NEW task with (e.g. from a task
+// request). Unlike `initial`, the form stays in create mode. With
+// prefill.standalone, "Enable subtasks" starts off so the assignee and due
+// date fields show straight away. `submitLabel` replaces "Save task".
+export default function TaskForm({ initial, prefill, members, allMembers, clusters, stages, onSave, onCancel, hideCluster, saving = false, userRole, isSubtaskForm = false, emptyMembersMessage, hasExistingSubtasks = false, submitLabel = 'Save task' }) {
   const uid = useId();
   const ids = {
     title: `${uid}-title`,
@@ -125,19 +129,20 @@ export default function TaskForm({ initial, members, allMembers, clusters, stage
     stageError: `${uid}-stage-error`,
   };
 
+  const seed = initial || prefill;
   const [form, setForm] = useState({
-    title: initial?.title || '',
-    description: initial?.description || initial?.details || initial?.desc || '',
+    title: seed?.title || '',
+    description: seed?.description || seed?.details || seed?.desc || '',
     // Multi-assignee: seed from the new `assignees` array when present,
     // falling back to the old single `assignee_id` for any task that
     // hasn't been touched since the upgrade.
-    assignee_ids: initial?.assignees?.length
-      ? initial.assignees.map(a => a.id)
-      : (initial?.assignee_id ? [initial.assignee_id] : []),
-    priority: initial?.priority || 'medium',
-    stage: initial?.stage || stages[0] || 'Todo',
-    cluster_id: initial?.cluster_id || '',
-    due_date: initial?.due_date || '',
+    assignee_ids: seed?.assignees?.length
+      ? seed.assignees.map(a => a.id)
+      : (seed?.assignee_id ? [seed.assignee_id] : []),
+    priority: seed?.priority || 'medium',
+    stage: seed?.stage || stages[0] || 'Todo',
+    cluster_id: seed?.cluster_id || '',
+    due_date: seed?.due_date || '',
   });
   const [titleError, setTitleError] = useState('');
   // Simple "send to In Review?" confirmation (replaces the old time taken step).
@@ -149,7 +154,7 @@ export default function TaskForm({ initial, members, allMembers, clusters, stage
   // editing an existing task). On = normal flow (subtasks handle their
   // own assignee/due date). Off = this task is standalone, so it needs
   // its own assignee(s) and due date right here.
-  const [hasSubtasks, setHasSubtasks] = useState(true);
+  const [hasSubtasks, setHasSubtasks] = useState(() => !(!initial && prefill?.standalone));
 
   // When editing an existing task, assignees + due date are editable here
   // only if the task is a sub task, or a main task with NO sub tasks
@@ -411,7 +416,7 @@ export default function TaskForm({ initial, members, allMembers, clusters, stage
             focusRing,
           ].join(' ')}
         >
-          {saving ? <Loader label="Saving..." size="sm" variant="button" /> : 'Save task'}
+          {saving ? <Loader label="Saving..." size="sm" variant="button" /> : submitLabel}
         </button>
       </div>
 

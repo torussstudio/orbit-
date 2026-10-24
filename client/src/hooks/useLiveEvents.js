@@ -83,6 +83,10 @@ export const DIRECT_TYPING_EVENTS = ["direct.typing"];
 // Someone came online or went offline (carries their userId only).
 export const PRESENCE_EVENTS = ["presence.changed", ...CATCH_UP];
 
+// Task requests sent / approved / declined / cancelled (My requests and
+// Requested tasks pages).
+export const TASK_REQUEST_EVENTS = ["task_request.changed", ...CATCH_UP];
+
 // The bell keeps its own 30 s refresh, so it does not need "poll" / "resync".
 export const NOTIFICATION_EVENTS = ["notification.created"];
 
