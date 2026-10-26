@@ -929,6 +929,25 @@ const initDB = async () => {
     CREATE INDEX IF NOT EXISTS idx_ai_messages_member_created
     ON ai_messages (member_id, created_at DESC)
   `);
+  // Shared Orbit AI answers learned from reusable, non-personal Q&A. These
+  // are read across members; live work facts stay in the permission-checked tools.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS ai_shared_answers (
+      id BIGSERIAL PRIMARY KEY,
+      question_key TEXT NOT NULL,
+      question TEXT NOT NULL,
+      answer TEXT NOT NULL,
+      role_scope TEXT NOT NULL CHECK (role_scope IN ('shared', 'member', 'manager')),
+      uses INTEGER NOT NULL DEFAULT 0,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE (question_key, role_scope)
+    )
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_ai_shared_answers_updated
+    ON ai_shared_answers (updated_at DESC)
+  `);
   // Ids of the actions (ai_actions) a reply prepared.
   await ensureColumn("ai_messages", `actions JSONB NOT NULL DEFAULT '[]'::jsonb`);
   // Changes Orbit AI prepared; nothing runs until the person confirms.
