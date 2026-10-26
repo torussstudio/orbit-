@@ -26,10 +26,39 @@ if (process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY) {
   );
 }
 
+// ── Anti-spam delivery defaults ──────────────────────────────────
+// Chrome (Android) flags a site's notifications as "Possible spam" when
+// they look bulk/automated: many near-identical pushes in a burst, each
+// stacking as its own notification and buzzing again, emoji/urgency
+// titles, and old pushes arriving together after the phone was offline.
+//
+// - TTL: web-push's default is 4 weeks, so a phone that was offline gets
+//   every queued push at once when it reconnects. Pushes now expire.
+// - urgency: 'normal' (never 'high').
+// - topic: the push service keeps only the newest undelivered push with
+//   the same topic, so queued reminders collapse instead of piling up.
+// - tag/renotify (read by sw.js): a notification with the same tag is
+//   replaced in place instead of stacking, and a replacement does not
+//   buzz again.
+const DEFAULT_TTL_SECONDS = 24 * 60 * 60;
+
+// Web Push "Topic" header: max 32 chars, URL-safe base64 alphabet only.
+function toTopic(value) {
+  if (!value) return undefined;
+  const clean = String(value).replace(/[^A-Za-z0-9_-]/g, '').slice(0, 32);
+  return clean || undefined;
+}
+
 // Sends the actual browser push to every device this member is
 // subscribed on. Matches the payload shape client/public/sw.js expects:
 // { title, body, icon, badge, data }.
-async function deliverPush(userId, title, body, data = {}) {
+//
+// options.ttl       seconds the push service may hold it (default 24h)
+// options.urgency   'very-low' | 'low' | 'normal' | 'high' (default 'normal')
+// options.topic     collapse key at the push service (see toTopic)
+// data.tag          notification tag in sw.js (same tag = replaced)
+// data.renotify     false = replacing the notification is silent
+async function deliverPush(userId, title, body, data = {}, options = {}) {
   if (!vapidConfigured) return;
 
   const { rows: subs } = await db.query(
@@ -46,6 +75,13 @@ async function deliverPush(userId, title, body, data = {}) {
     data,
   });
 
+  const sendOptions = {
+    TTL: Number.isInteger(options.ttl) ? options.ttl : DEFAULT_TTL_SECONDS,
+    urgency: options.urgency || 'normal',
+  };
+  const topic = toTopic(options.topic);
+  if (topic) sendOptions.topic = topic;
+
   await Promise.all(
     subs.map(async (sub) => {
       try {
@@ -55,6 +91,7 @@ async function deliverPush(userId, title, body, data = {}) {
             keys: { p256dh: sub.p256dh, auth: sub.auth },
           },
           payload,
+          sendOptions,
         );
       } catch (err) {
         // Provider rejection means the endpoint is no longer usable. Remove
@@ -172,7 +209,12 @@ async function deliveryFor(userId, type) {
 //
 // Returns the notification row, or null when nothing was saved (the member
 // paused notifications or switched this type off, or the save failed).
-async function createNotification(userId, title, body, data = {}) {
+//
+// options.collectPush  an array: instead of sending the push now, the push
+//                      this notification would send is added to it, so the
+//                      caller can send one grouped push (deadline reminders).
+// options.push         extra deliverPush options (ttl, urgency, topic).
+async function createNotification(userId, title, body, data = {}, options = {}) {
   try {
     const type = data.type || "general";
     const delivery = await deliveryFor(userId, type);
@@ -232,9 +274,21 @@ async function createNotification(userId, title, body, data = {}) {
     // Fire-and-forget: don't let a push delivery failure block the
     // in-app notification from being saved/returned.
     if (created && delivery.push) {
-      deliverPush(userId, title, body, metadata).catch((err) => {
-        console.error('[pushNotify] deliverPush failed:', err.message);
-      });
+      // The notification id gives it a stable tag in sw.js, so a repeat of
+      // the same notification replaces it instead of stacking.
+      const pushData = {
+        ...metadata,
+        notificationId: notification.id,
+        tag: metadata.tag || `orbit-${notification.id}`,
+      };
+
+      if (Array.isArray(options.collectPush)) {
+        options.collectPush.push({ title, body, data: pushData });
+      } else {
+        deliverPush(userId, title, body, pushData, options.push).catch((err) => {
+          console.error('[pushNotify] deliverPush failed:', err.message);
+        });
+      }
     }
 
     return notification;

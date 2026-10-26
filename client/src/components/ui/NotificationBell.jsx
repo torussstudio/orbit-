@@ -4,9 +4,11 @@
  * Notification bell icon + dropdown for the Orbit navbar.
  *
  * Responsibilities:
- *   1. On mount (after login): register the Service Worker, request
- *      push permission, subscribe to Web Push, and save the
- *      subscription to the server.
+ *   1. On mount (after login): if push permission is already granted,
+ *      register the Service Worker, subscribe to Web Push and save the
+ *      subscription. The permission prompt itself is only shown after
+ *      a click (bell / Account settings): Chrome counts prompts without
+ *      a user gesture as abusive, which feeds its "Possible spam" flag.
  *   2. Poll in-app notifications every 30 s (bell dropdown).
  *   3. Render the unread badge count, list, mark-read/all-read.
  *   4. Listen for PUSH_SUBSCRIPTION_CHANGED messages from the SW
@@ -207,7 +209,9 @@ export default function NotificationBell() {
   useLiveRefetch(NOTIFICATION_EVENTS, refreshSilently);
 
   // ── Register SW + subscribe to push ────────────────────────────
-const setupPush = useCallback(async () => {
+// prompt: true only when called from a click. Without it, a browser
+// that has not decided yet ("default") is left alone — no prompt.
+const setupPush = useCallback(async ({ prompt = false } = {}) => {
   if (
     subscribedRef.current &&
     setupUserRef.current === user?.id
@@ -243,6 +247,28 @@ const setupPush = useCallback(async () => {
     return;
   }
 
+  // ==========================================================
+  // 2b. NOT DECIDED YET: ASK ONLY FROM A CLICK
+  // ==========================================================
+
+  if (Notification.permission === "default") {
+    if (!prompt) {
+      setPushStatus("idle");
+      return;
+    }
+
+    // Asked first, before any await, so the click's user activation
+    // is still valid when the browser shows the prompt.
+    setPushStatus("pending");
+
+    const answer = await Notification.requestPermission();
+
+    if (answer !== "granted") {
+      setPushStatus(answer);
+      return;
+    }
+  }
+
   try {
     // ========================================================
     // 3. REGISTER SERVICE WORKER
@@ -272,10 +298,8 @@ const setupPush = useCallback(async () => {
     // 5. REQUEST NOTIFICATION PERMISSION
     // ========================================================
 
-    setPushStatus("pending");
-
-    const permission =
-      await Notification.requestPermission();
+    // Already granted here (checked / asked above).
+    const permission = Notification.permission;
 
     setPushStatus(permission);
 
@@ -409,7 +433,7 @@ const setupPush = useCallback(async () => {
   // read this browser's push status again.
   useEffect(() => {
     const onEnablePush = (event) => {
-      setupPush()
+      setupPush({ prompt: true })
         .catch(() => {})
         .finally(() => event.detail?.done?.());
     };
@@ -445,7 +469,8 @@ useEffect(() => {
   // Load existing in-app notifications
   loadNotifications();
 
-  // Automatically setup browser push after login
+  // After login: subscribe silently if permission is already granted.
+  // Never shows the permission prompt (that needs a click).
   setupPush().catch((error) => {
     console.error(
       "[NotificationBell] Automatic push setup failed:",
@@ -557,7 +582,7 @@ useEffect(() => {
         !subscribedRef.current ||
         setupUserRef.current !== user?.id
       ) {
-        await setupPush();
+        await setupPush({ prompt: true });
       }
     }
   }}

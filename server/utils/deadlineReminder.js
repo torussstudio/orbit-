@@ -1,7 +1,7 @@
 'use strict';
 
 const db = require('../db');
-const { createNotification } = require('./pushNotify');
+const { createNotification, deliverPush } = require('./pushNotify');
 
 /*
  * Deadline reminders for task assignees.
@@ -18,9 +18,9 @@ const { createNotification } = require('./pushNotify');
  * Who gets a reminder: every active assignee of a leaf task (a sub task,
  * or a main task with no sub tasks) that is not Done and not In Review
  * (In Review is waiting for the manager) and whose due date is
- *   - tomorrow            -> "⏰ Task Due Tomorrow"
- *   - today               -> "⏰ Task Due Today"
- *   - yesterday           -> "🚨 Task Overdue" (first overdue day only)
+ *   - tomorrow            -> "Task due tomorrow"
+ *   - today               -> "Task due today"
+ *   - yesterday           -> "Task overdue" (first overdue day only)
  * Tasks in archived projects are skipped.
  *
  * When: the job runs every hour. A member is picked from their reminder
@@ -39,13 +39,13 @@ const { createNotification } = require('./pushNotify');
  * Skipping days off moves reminders, it does not drop them. For a member
  * who skips days off (and only for them):
  *   - the last working day before one or more days off also sends
- *     "⏰ Task Due <weekday>" for tasks due on those days off and on the
+ *     "Task due <weekday>" for tasks due on those days off and on the
  *     first working day after them (the "due tomorrow" reminders they
  *     would have got on the days off), and
- *   - the first working day after also sends "🚨 Task Overdue" for tasks
+ *   - the first working day after also sends "Task overdue" for tasks
  *     whose overdue reminder fell on one of those days off and that are
  *     still not done.
- * With only Sunday off: Saturday also sends "Task Due Monday", and Monday
+ * With only Sunday off: Saturday also sends "Task due Monday", and Monday
  * also sends overdue for tasks that were due on Saturday.
  * See offDayCatchUpDays().
  *
@@ -219,7 +219,7 @@ function buildReminder(row, days) {
     return {
       kind: 'due_ahead',
       type: 'task_due_reminder',
-      title: `⏰ Task Due ${weekday}`,
+      title: `Task due ${weekday}`,
       body: `${title} is due on ${weekday}.`,
     };
   }
@@ -230,7 +230,7 @@ function buildReminder(row, days) {
     return {
       kind: 'overdue',
       type: 'task_overdue',
-      title: '🚨 Task Overdue',
+      title: 'Task overdue',
       body: `${title} was due on ${weekdayName(row.due_day)} and is now overdue.`,
     };
   }
@@ -239,7 +239,7 @@ function buildReminder(row, days) {
     return {
       kind: 'due_tomorrow',
       type: 'task_due_reminder',
-      title: '⏰ Task Due Tomorrow',
+      title: 'Task due tomorrow',
       body: `${title} is due tomorrow.`,
     };
   }
@@ -248,7 +248,7 @@ function buildReminder(row, days) {
     return {
       kind: 'due_today',
       type: 'task_due_reminder',
-      title: '⏰ Task Due Today',
+      title: 'Task due today',
       body: `${title} is due today.`,
     };
   }
@@ -257,12 +257,77 @@ function buildReminder(row, days) {
     return {
       kind: 'overdue',
       type: 'task_overdue',
-      title: '🚨 Task Overdue',
+      title: 'Task overdue',
       body: `${title} was due yesterday and is now overdue.`,
     };
   }
 
   return null;
+}
+
+/*
+ * One browser push per member per run, not one per task.
+ *
+ * A member with several tasks due used to get several near-identical
+ * "Task due ..." pushes in the same second, each stacking and buzzing.
+ * That burst pattern is what makes Chrome on Android flag the site as
+ * "Possible spam". Now:
+ *   - 1 reminder  -> that reminder's push, opening the task
+ *   - 2+          -> one summary push ("3 tasks need attention"),
+ *                    opening the dashboard
+ * Every push uses the same tag (sw.js replaces the old reminder instead of
+ * adding another), the same push-service topic (undelivered reminders
+ * collapse into the newest), and expires after 12 hours so a phone that
+ * was offline never receives yesterday's reminders in a burst.
+ * The bell still lists every reminder separately.
+ */
+const REMINDER_TAG = 'orbit-deadline-reminders';
+const REMINDER_PUSH = { ttl: 12 * 60 * 60, urgency: 'normal', topic: 'deadline-reminders' };
+
+function summarisePushes(pushes, today) {
+  if (pushes.length === 1) {
+    const [only] = pushes;
+    return {
+      title: only.title,
+      body: only.body,
+      data: { ...only.data, tag: REMINDER_TAG },
+    };
+  }
+
+  const overdue = pushes.filter((p) => p.data.type === 'task_overdue').length;
+  const dueSoon = pushes.length - overdue;
+  const parts = [];
+  if (dueSoon) parts.push(`${dueSoon} due soon`);
+  if (overdue) parts.push(`${overdue} overdue`);
+
+  // Task names, shortest list that fits a notification line.
+  const names = pushes
+    .map((p) => (p.body.match(/^"(.*)" (?:is|was) due/) || [])[1] || p.title)
+    .slice(0, 3)
+    .join(', ');
+  const more = pushes.length > 3 ? ` +${pushes.length - 3} more` : '';
+
+  return {
+    title: `${pushes.length} tasks need attention`,
+    body: `${parts.join(', ')}: ${names}${more}`,
+    data: {
+      type: 'task_due_reminder',
+      tag: REMINDER_TAG,
+      url: '/',
+    },
+  };
+}
+
+async function sendGroupedPushes(pushesByMember, today) {
+  for (const [memberId, pushes] of pushesByMember) {
+    if (!pushes.length) continue;
+    const push = summarisePushes(pushes, today);
+    try {
+      await deliverPush(memberId, push.title, push.body, push.data, REMINDER_PUSH);
+    } catch (err) {
+      console.error(`${LOG} push for member ${memberId} failed:`, err.message);
+    }
+  }
 }
 
 /*
@@ -392,6 +457,8 @@ async function runDeadlineReminders(options = {}) {
 
   let sent = 0;
   let skipped = 0;
+  // member_id -> pushes createNotification would have sent one by one.
+  const pushesByMember = new Map();
 
   for (const { row, reminder } of held) {
     console.log(
@@ -418,6 +485,11 @@ async function runDeadlineReminders(options = {}) {
     // createNotification's ON CONFLICT (member_id, dedupe_key) also
     // blocks a duplicate if two runs overlap. It applies the member's
     // delivery choice (push / in-app / both) for this reminder type.
+    // Each reminder still gets its own bell row; the browser push is
+    // collected and sent once per member below (see sendGroupedPushes).
+    const collected = pushesByMember.get(row.member_id) || [];
+    pushesByMember.set(row.member_id, collected);
+
     const notification = await createNotification(
       row.member_id,
       reminder.title,
@@ -429,10 +501,13 @@ async function runDeadlineReminders(options = {}) {
         eventKey,
         url: `/projects/${row.project_id}/tasks/${row.task_id}`,
       },
+      { collectPush: collected },
     );
 
     if (notification) sent += 1;
   }
+
+  if (!dryRun) await sendGroupedPushes(pushesByMember, today);
 
   console.log(
     `${LOG} ${dryRun ? '[dry run] ' : ''}${today} ${String(now.hour).padStart(2, '0')}:00 IST: ` +

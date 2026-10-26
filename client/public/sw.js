@@ -14,7 +14,7 @@
  * of the app a member gets: index.html is served "no-cache" and brings
  * the new build on the next page load.
  */
-const SW_VERSION = "2026-10-09-sessions";
+const SW_VERSION = "2026-10-26-antispam";
 
 self.addEventListener("install", (event) => {
   console.log(`[SW] Installing ${SW_VERSION}...`);
@@ -94,20 +94,23 @@ self.addEventListener("push", (event) => {
         data: notificationData,
 
         /*
-         * Unique notification tag.
-         * If backend provides notificationId,
-         * notifications can be grouped/replaced correctly.
+         * Stable tag from the backend (data.tag, or the
+         * notification id). The same tag replaces the old
+         * notification instead of stacking a new one —
+         * stacks of near-identical notifications are what
+         * make Chrome flag a site as "Possible spam".
          */
         tag:
-          notificationData?.notificationId
+          notificationData?.tag ||
+          (notificationData?.notificationId
             ? `orbit-${notificationData.notificationId}`
-            : `orbit-${Date.now()}`,
+            : "orbit-general"),
 
         /*
-         * Show a new notification even if
-         * another Orbit notification already exists.
+         * Replacing a notification with the same tag does
+         * not buzz again unless the backend asks for it.
          */
-        renotify: true,
+        renotify: notificationData?.renotify === true,
 
         /*
          * Keep browser notification behavior
