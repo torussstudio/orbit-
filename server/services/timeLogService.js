@@ -12,7 +12,8 @@ const liveEvents = require("./liveEvents");
  *
  * Managers see every entry on the admin Time Log page, filtered by work
  * date (IST calendar days, stored as a DATE), and can edit or delete them.
- * Members never see their old entries.
+ * Members can see their own entries from the last 30 days and change/delete
+ * them for one hour. Older entries remain available to managers.
  */
 
 const IST = "Asia/Kolkata";
@@ -185,7 +186,7 @@ async function createEntry(memberId, body = {}) {
         (member_id, project_id, cluster_id, task_id, task_title, is_misc, minutes, work_date)
       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
       RETURNING id, project_id, task_id, task_title, is_misc, minutes,
-                to_char(work_date, 'YYYY-MM-DD') AS work_date
+                to_char(work_date, 'YYYY-MM-DD') AS work_date, created_at
     `,
     [memberId, project.id, clusterId, taskId, title, isMisc, minutes, workDate],
   );
@@ -453,6 +454,24 @@ async function getMemberDetail(memberId, { from, to }) {
   return { member: memberRows[0], entries };
 }
 
+// Members can manage only their own entries, and only during the first hour.
+async function getMyEntries(memberId) {
+  const { rows } = await db.query(
+    `
+      SELECT ${ENTRY_COLUMNS},
+             (e.created_at >= NOW() - INTERVAL '1 hour') AS can_edit,
+             greatest(0, 60 - floor(extract(epoch FROM (NOW() - e.created_at)) / 60))::int AS minutes_left
+      FROM time_entries e
+      ${ENTRY_JOINS}
+      WHERE e.member_id::text = $1
+        AND e.created_at >= NOW() - INTERVAL '30 days'
+      ORDER BY e.work_date DESC, e.created_at DESC
+    `,
+    [String(memberId)],
+  );
+  return { entries: rows };
+}
+
 /* ------------------------------------------------------------------ */
 /* Admin: edit / delete                                                */
 /* ------------------------------------------------------------------ */
@@ -488,6 +507,50 @@ async function updateEntry(entryId, body = {}) {
   return rows[0];
 }
 
+async function updateMyEntry(memberId, entryId, body = {}) {
+  const workDate = readWorkDate(body.work_date);
+  const minutes = readMinutes(body.minutes);
+  const { rows } = await db.query(
+    `
+      UPDATE time_entries
+      SET work_date = $3, minutes = $4,
+          task_title = CASE WHEN is_misc AND $5::text IS NOT NULL THEN $5 ELSE task_title END,
+          updated_at = NOW()
+      WHERE id::text = $1 AND member_id::text = $2
+        AND created_at >= NOW() - INTERVAL '1 hour'
+      RETURNING id, project_id, member_id, minutes, task_title,
+                to_char(work_date, 'YYYY-MM-DD') AS work_date
+    `,
+    [String(entryId), String(memberId), workDate, minutes,
+      body.task_name !== undefined ? readTitle(body.task_name) : null],
+  );
+  if (!rows[0]) await assertMyEntryEditable(memberId, entryId);
+  liveEvents.timeLogChanged(rows[0].project_id, rows[0].member_id);
+  return rows[0];
+}
+
+async function assertMyEntryEditable(memberId, entryId) {
+  const { rows } = await db.query(
+    `SELECT created_at FROM time_entries WHERE id::text = $1 AND member_id::text = $2 LIMIT 1`,
+    [String(entryId), String(memberId)],
+  );
+  if (!rows[0]) throw httpError(404, 'Entry not found.');
+  throw httpError(403, 'Time entries can only be edited or deleted within one hour of logging them.');
+}
+
+async function deleteMyEntry(memberId, entryId) {
+  const { rows } = await db.query(
+    `DELETE FROM time_entries
+     WHERE id::text = $1 AND member_id::text = $2
+       AND created_at >= NOW() - INTERVAL '1 hour'
+     RETURNING project_id, member_id`,
+    [String(entryId), String(memberId)],
+  );
+  if (!rows[0]) await assertMyEntryEditable(memberId, entryId);
+  liveEvents.timeLogChanged(rows[0].project_id, rows[0].member_id);
+  return { ok: true };
+}
+
 async function deleteEntry(entryId) {
   const { rows } = await db.query(
     `DELETE FROM time_entries WHERE id::text = $1 RETURNING project_id, member_id`,
@@ -507,6 +570,9 @@ module.exports = {
   getProjectDetail,
   getMembers,
   getMemberDetail,
+  getMyEntries,
+  updateMyEntry,
+  deleteMyEntry,
   updateEntry,
   deleteEntry,
 };

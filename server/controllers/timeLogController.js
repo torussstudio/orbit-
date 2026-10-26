@@ -35,6 +35,9 @@ module.exports = {
   // Member
   getMyOptions: handle((req) => timeLogService.getMemberOptions(req.user.id)),
   createEntry: handle((req) => timeLogService.createEntry(req.user.id, req.body), 201),
+  getMyEntries: handle((req) => timeLogService.getMyEntries(req.user.id)),
+  updateMyEntry: handle((req) => timeLogService.updateMyEntry(req.user.id, req.params.id, req.body)),
+  deleteMyEntry: handle((req) => timeLogService.deleteMyEntry(req.user.id, req.params.id)),
 
   // Manager
   getProjects: handle((req) => timeLogService.getProjects(readRange(req))),

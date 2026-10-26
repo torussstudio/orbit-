@@ -72,7 +72,8 @@ async function listRequests({ status } = {}) {
   return splitTotal(rows);
 }
 
-// The signed-in person's own requests, newest first.
+// The signed-in person's own requests, newest first. Members see the last
+// 30 days; managers retain their complete personal history.
 // task_open: true when they can open the task made from the request
 // (managers always; members when they are on that project and it is not
 // in the trash). Otherwise the page shows the task name without a link.
@@ -89,6 +90,7 @@ async function listMine(user) {
        from task_requests tr
        ${REQUEST_JOINS}
       where tr.requested_by = $1
+        and ($2::boolean or tr.created_at >= now() - interval '30 days')
       order by tr.created_at desc
       limit $3`,
     [user.id, user.role === 'manager', LIST_SAFETY_LIMIT]

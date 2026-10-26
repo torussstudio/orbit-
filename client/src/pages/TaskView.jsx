@@ -408,9 +408,10 @@ function ReviewConfirm({ task, onClose, onConfirm }) {
   const confirm = async () => {
     if (saving) return;
     setSaving(true);
-    const ok = await onConfirm(task);
-    if (ok) onClose();
-    else setSaving(false);
+    await onConfirm(task);
+    // Both success and failure leave this confirmation. On failure the page
+    // notice is shown after the dialog closes, instead of behind it.
+    onClose();
   };
   return (
     <ConfirmModal
@@ -586,13 +587,15 @@ export default function TaskView() {
     try {
       // Only the changed fields: resending the whole task would also resend
       // its due date, which the server would then store 5 h 30 min earlier.
-      await api.put(`/tasks/${task.id}`, { stage: newStage, ...extra });
+      await api.put(`/tasks/${task.id}`, { stage: newStage, ...extra }, {
+        suppressErrorToast: newStage === "In Review",
+      });
       return true;
     } catch (err) {
       console.error("Failed to update stage:", err.message);
       // Revert on failure.
       setTasks((prev) => prev.map((t) => (t.id === task.id ? task : t)));
-      setNotice(`We couldn't move "${task.title}" to ${newStage}. Please try again.`);
+      setNotice(err.response?.data?.error || `We couldn't move "${task.title}" to ${newStage}. Please try again.`);
       return false;
     } finally {
       pendingSaves.current -= 1;

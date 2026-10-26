@@ -20,6 +20,13 @@ const inputCls = [
   'aria-[invalid=true]:border-[color:var(--danger)]',
 ].join(' ');
 
+/* Cards: hairline ring plus a soft shadow tinted with the accent hue. */
+const cardCls =
+  'rounded-2xl bg-[var(--bg-2)] shadow-[0_0_0_1px_var(--border),0_18px_40px_-24px_color-mix(in_srgb,var(--accent)_30%,transparent)]';
+
+/* Small section label inside the form. */
+const groupCls = 'text-[11px] font-medium tracking-[0.06em] text-[color:var(--text-3)]';
+
 // Long words and URLs wrap instead of widening the page.
 const wrapAnywhere = '[overflow-wrap:anywhere]';
 
@@ -101,7 +108,7 @@ const STATUS_META = {
 function StatusBadge({ status }) {
   const meta = STATUS_META[status] || STATUS_META.pending;
   return (
-    <span className={`inline-flex shrink-0 items-center gap-1.5 rounded-md px-2 py-0.5 text-[11px] font-semibold ${meta.cls}`}>
+    <span className={`inline-flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1 text-[11px] font-semibold ${meta.cls}`}>
       <span className={`h-1.5 w-1.5 rounded-full ${meta.dot}`} aria-hidden="true" />
       {meta.label}
     </span>
@@ -127,7 +134,7 @@ function ExpandableText({ text, className = '' }) {
 
   return (
     <div className={className}>
-      <p ref={ref} className={`whitespace-pre-wrap leading-relaxed ${wrapAnywhere} ${expanded ? '' : 'line-clamp-3'}`}>
+      <p ref={ref} className={`max-w-[65ch] whitespace-pre-wrap leading-relaxed ${wrapAnywhere} ${expanded ? '' : 'line-clamp-3'}`}>
         {text}
       </p>
       {(overflowing || expanded) && (
@@ -168,7 +175,7 @@ function Tabs({ tab, onChange, pendingCount, baseId }) {
       role="tablist"
       aria-label="Task request"
       onKeyDown={onKeyDown}
-      className="mt-6 inline-flex rounded-[10px] bg-[var(--bg-3)] p-1"
+      className="mt-6 inline-flex gap-1 rounded-lg bg-[var(--bg-2)] p-1 shadow-[0_0_0_1px_var(--border)]"
     >
       {TABS.map(t => {
         const active = t.id === tab;
@@ -184,17 +191,17 @@ function Tabs({ tab, onChange, pendingCount, baseId }) {
             tabIndex={active ? 0 : -1}
             onClick={() => onChange(t.id)}
             className={[
-              'inline-flex min-h-9 items-center gap-2 rounded-[8px] px-3.5 text-[13px] font-medium',
-              'transition-[background-color,color,transform] duration-150 active:scale-[0.98] motion-reduce:transition-none',
+              'inline-flex min-h-9 items-center gap-2 rounded-md px-3.5 text-[13px] font-medium',
+              'transition-[background-color,color,transform] duration-200 active:scale-[0.98] motion-reduce:transition-none motion-reduce:active:scale-100',
               active
-                ? 'bg-[var(--bg-2)] text-[var(--text)] shadow-[0_1px_3px_rgba(15,23,42,0.14)]'
+                ? 'bg-[var(--bg-3)] text-[var(--text)] shadow-[0_0_0_1px_var(--border)]'
                 : 'text-[color:var(--text-3)] hover:text-[var(--text)]',
               focusRing,
             ].join(' ')}
           >
             {t.label}
             {t.id === 'mine' && pendingCount > 0 && (
-              <span className="rounded-full bg-[var(--accent)] px-1.5 py-px text-[10px] font-semibold tabular-nums text-white">
+              <span className="rounded-md bg-[var(--accent)] px-1.5 py-px text-[10px] font-semibold tabular-nums text-white">
                 {pendingCount}
                 <span className="sr-only"> pending</span>
               </span>
@@ -281,10 +288,12 @@ function NewRequestForm({ onSent }) {
     <form
       noValidate
       onSubmit={handleSubmit}
-      className="rounded-xl bg-[var(--bg-2)] p-5 shadow-[0_0_0_1px_var(--border)] sm:p-6"
+      className={`p-5 sm:p-7 ${cardCls}`}
     >
       <fieldset disabled={saving} className="m-0 flex min-w-0 flex-col gap-6 border-0 p-0">
         <legend className="sr-only">New task request</legend>
+
+        <p className={`${groupCls} -mb-2`}>The task</p>
 
         <div>
           <label htmlFor={ids.title} className={labelCls}>
@@ -338,6 +347,9 @@ function NewRequestForm({ onSent }) {
           />
         </div>
 
+        <div className="border-t border-[color:var(--border)]" aria-hidden="true" />
+        <p className={`${groupCls} -mb-2`}>Timeline</p>
+
         <div>
           <span className={labelCls}>
             Due date
@@ -361,12 +373,12 @@ function NewRequestForm({ onSent }) {
         </div>
       )}
 
-      <div className="mt-6 flex items-center justify-end gap-2 border-t border-[color:var(--border)] pt-5">
+      <div className="mt-7 flex items-center justify-end gap-2 border-t border-[color:var(--border)] pt-5">
         {dirty && !saving && (
           <button
             type="button"
             onClick={handleClear}
-            className={`rounded-lg px-3.5 py-2 text-sm font-medium text-[color:var(--text-2)] transition-[color,background-color,transform] duration-150 hover:bg-[var(--bg-3)] hover:text-[var(--text)] active:scale-[0.98] motion-reduce:transition-none ${focusRing}`}
+            className={`rounded-lg px-3.5 py-2 text-sm font-medium text-[color:var(--text-2)] transition-[color,background-color,transform] duration-150 hover:bg-[var(--bg-3)] hover:text-[var(--text)] active:scale-[0.98] motion-reduce:transition-none motion-reduce:active:scale-100 ${focusRing}`}
           >
             Clear
           </button>
@@ -410,8 +422,8 @@ function FilterChips({ value, onChange, counts }) {
             aria-pressed={active}
             onClick={() => onChange(f.id)}
             className={[
-              'inline-flex min-h-8 items-center gap-1.5 rounded-full border px-3 text-xs font-medium',
-              'transition-[background-color,border-color,color,transform] duration-150 active:scale-[0.97] motion-reduce:transition-none',
+              'inline-flex min-h-8 items-center gap-1.5 rounded-lg border px-3 text-xs font-medium',
+              'transition-[background-color,border-color,color,transform] duration-150 active:scale-[0.97] motion-reduce:transition-none motion-reduce:active:scale-100',
               active
                 ? 'border-[color:var(--accent)] bg-[var(--accent-glow)] text-[color:var(--accent)]'
                 : 'border-[color:var(--border)] text-[color:var(--text-2)] hover:border-[color:var(--text-3)] hover:text-[var(--text)]',
@@ -443,7 +455,7 @@ function RequestOutcome({ r }) {
       </p>
 
       {approved && r.task_title && (
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-lg bg-[var(--bg-3)] px-3 py-2 text-[13px]">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-xl bg-[var(--bg-3)] px-3.5 py-2.5 text-[13px]">
           <span className={`min-w-0 flex-1 ${wrapAnywhere}`}>
             <span className="text-[color:var(--text-3)]">Task: </span>
             <span className="font-medium text-[var(--text)]">{r.task_title}</span>
@@ -453,16 +465,19 @@ function RequestOutcome({ r }) {
           {r.task_open && (
             <Link
               to={`/projects/${r.task_project_id}/tasks/${r.task_id}`}
-              className={`inline-flex shrink-0 items-center gap-1 rounded-md text-xs font-semibold text-[color:var(--accent)] hover:underline ${focusRing}`}
+              className={`group inline-flex shrink-0 items-center gap-1 rounded-md text-xs font-semibold text-[color:var(--accent)] hover:underline ${focusRing}`}
             >
-              Open task <ArrowIcon />
+              Open task
+              <span className="transition-transform duration-150 group-hover:translate-x-0.5 motion-reduce:transition-none motion-reduce:group-hover:translate-x-0">
+                <ArrowIcon />
+              </span>
             </Link>
           )}
         </div>
       )}
 
       {r.admin_note && (
-        <p className={`border-l-2 border-[color:var(--border)] pl-3 text-[13px] italic leading-relaxed text-[color:var(--text-2)] ${wrapAnywhere}`}>
+        <p className={`max-w-[65ch] border-l-2 border-[color:var(--accent)] pl-3 text-[13px] italic leading-relaxed text-[color:var(--text-2)] ${wrapAnywhere}`}>
           {r.admin_note}
         </p>
       )}
@@ -471,15 +486,17 @@ function RequestOutcome({ r }) {
 }
 
 function SkeletonList() {
+  const bar = 'animate-pulse rounded-md bg-[var(--bg-3)] motion-reduce:animate-none';
   return (
     <div role="status" aria-label="Loading your requests" className="divide-y divide-[color:var(--border)]">
       {Array.from({ length: 3 }).map((_, i) => (
-        <div key={i} className="space-y-2.5 px-4 py-4 sm:px-5">
+        <div key={i} className="space-y-3 px-4 py-5 sm:px-5">
           <div className="flex justify-between gap-4">
-            <div className="h-3.5 w-2/5 animate-pulse rounded bg-[var(--bg-3)] motion-reduce:animate-none" />
-            <div className="h-3.5 w-16 animate-pulse rounded bg-[var(--bg-3)] motion-reduce:animate-none" />
+            <div className={`h-4 w-2/5 ${bar}`} />
+            <div className={`h-5 w-20 ${bar}`} />
           </div>
-          <div className="h-3 w-3/5 animate-pulse rounded bg-[var(--bg-3)] motion-reduce:animate-none" />
+          <div className={`h-3 w-3/5 ${bar}`} />
+          <div className={`h-3 w-1/3 ${bar}`} />
         </div>
       ))}
       <span className="sr-only">Loading your requests</span>
@@ -526,14 +543,17 @@ function MyRequests({ requests, loading, error, onRetry, onNew, onCancelled }) {
       {(error || cancelError) && (
         <div
           role="alert"
-          className="flex items-center justify-between gap-3 rounded-lg bg-[color-mix(in_srgb,var(--danger)_10%,transparent)] px-4 py-3 text-[13px] text-[color:var(--danger)]"
+          className="flex items-center justify-between gap-3 rounded-xl bg-[color-mix(in_srgb,var(--danger)_10%,transparent)] px-4 py-3 text-[13px] text-[color:var(--danger)]"
         >
-          <span>{cancelError || `${error} Check your connection and try again.`}</span>
+          <span className="inline-flex items-start gap-2">
+            <AlertIcon />
+            <span>{cancelError || `${error} Check your connection and try again.`}</span>
+          </span>
           {error && (
             <button
               type="button"
               onClick={onRetry}
-              className={`inline-flex shrink-0 items-center gap-1.5 rounded-md px-2.5 py-1.5 font-medium transition-[background-color,transform] duration-150 hover:bg-[color-mix(in_srgb,var(--danger)_14%,transparent)] active:scale-[0.98] motion-reduce:transition-none ${focusRing}`}
+              className={`inline-flex shrink-0 items-center gap-1.5 rounded-md px-2.5 py-1.5 font-medium transition-[background-color,transform] duration-150 hover:bg-[color-mix(in_srgb,var(--danger)_14%,transparent)] active:scale-[0.98] motion-reduce:transition-none motion-reduce:active:scale-100 ${focusRing}`}
             >
               <RefreshIcon />
               Retry
@@ -544,17 +564,17 @@ function MyRequests({ requests, loading, error, onRetry, onNew, onCancelled }) {
 
       <section
         aria-label="My task requests"
-        className="overflow-hidden rounded-xl bg-[var(--bg-2)] shadow-[0_0_0_1px_var(--border)]"
+        className={`overflow-hidden ${cardCls}`}
       >
         {loading ? (
           <SkeletonList />
         ) : shown.length === 0 ? (
           !error && (
             <div className="flex flex-col items-center px-6 py-14 text-center">
-              <span className="grid h-12 w-12 place-items-center rounded-xl bg-[var(--bg-3)] text-[color:var(--text-3)]">
+              <span className="grid h-12 w-12 place-items-center rounded-xl bg-[var(--bg-3)] text-[color:var(--text-3)] shadow-[0_0_0_1px_var(--border)]">
                 <InboxIcon />
               </span>
-              <h2 className="mt-4 text-sm font-semibold text-[var(--text)]">
+              <h2 className="mt-4 text-sm font-semibold tracking-[-0.01em] text-[var(--text)]">
                 {requests.length === 0 ? 'No requests yet' : `No ${filter} requests`}
               </h2>
               <p className="mt-1 max-w-[38ch] text-[13px] leading-relaxed text-[color:var(--text-3)] [text-wrap:pretty]">
@@ -562,13 +582,21 @@ function MyRequests({ requests, loading, error, onRetry, onNew, onCancelled }) {
                   ? 'Tasks you request show up here, with what the admins decided.'
                   : 'Pick another filter to see the rest.'}
               </p>
-              {requests.length === 0 && (
+              {requests.length === 0 ? (
                 <button
                   type="button"
                   onClick={onNew}
-                  className={`mt-4 rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-white transition duration-150 hover:brightness-110 active:scale-[0.98] motion-reduce:transition-none ${focusRing}`}
+                  className={`mt-5 rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-white transition duration-150 hover:brightness-110 active:scale-[0.98] motion-reduce:transition-none motion-reduce:active:scale-100 ${focusRing}`}
                 >
                   Request a task
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setFilter('all')}
+                  className={`mt-4 rounded-md px-2 py-1 text-xs font-medium text-[color:var(--accent)] underline-offset-4 transition-colors hover:underline ${focusRing}`}
+                >
+                  Show all requests
                 </button>
               )}
             </div>
@@ -576,10 +604,10 @@ function MyRequests({ requests, loading, error, onRetry, onNew, onCancelled }) {
         ) : (
           <ul className="divide-y divide-[color:var(--border)]">
             {shown.map(r => (
-              <li key={r.id} className="flex flex-col gap-3 px-4 py-4 sm:px-5">
+              <li key={r.id} className="flex flex-col gap-3 px-4 py-5 transition-colors duration-200 hover:bg-[color-mix(in_srgb,var(--bg-3)_40%,transparent)] motion-reduce:transition-none sm:px-5">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <p className={`text-sm font-semibold text-[var(--text)] ${wrapAnywhere}`}>{r.title}</p>
+                    <p className={`text-sm font-semibold tracking-[-0.01em] text-[var(--text)] ${wrapAnywhere}`}>{r.title}</p>
                     <p className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-[color:var(--text-3)]">
                       <span className={wrapAnywhere}>{r.project_name}</span>
                       {r.due_date && <span className="tabular-nums">Due {fmtDay(r.due_date)}</span>}
@@ -601,7 +629,7 @@ function MyRequests({ requests, loading, error, onRetry, onNew, onCancelled }) {
                     <button
                       type="button"
                       onClick={() => setToCancel(r)}
-                      className={`rounded-md px-2.5 py-1.5 text-xs font-medium text-[color:var(--text-2)] transition-[color,background-color,transform] duration-150 hover:bg-[color-mix(in_srgb,var(--danger)_12%,transparent)] hover:text-[color:var(--danger)] active:scale-[0.98] motion-reduce:transition-none ${focusRing}`}
+                      className={`rounded-md px-2.5 py-1.5 text-xs font-medium text-[color:var(--text-2)] transition-[color,background-color,transform] duration-150 hover:bg-[color-mix(in_srgb,var(--danger)_12%,transparent)] hover:text-[color:var(--danger)] active:scale-[0.98] motion-reduce:transition-none motion-reduce:active:scale-100 ${focusRing}`}
                     >
                       Cancel request
                     </button>
@@ -671,12 +699,12 @@ export default function TaskRequest() {
   };
 
   return (
-    <div className="mx-auto w-full max-w-[640px] px-4 py-6 sm:px-6 md:py-10">
+    <div className="mx-auto w-full max-w-[640px] px-4 py-6 sm:px-6 md:py-12">
       <header>
-        <h1 className="text-2xl font-semibold leading-tight tracking-[-0.03em] text-[var(--text)] [text-wrap:balance]">
+        <h1 className="text-[28px] font-semibold leading-[1.1] tracking-[-0.035em] text-[var(--text)] [text-wrap:balance]">
           Task request
         </h1>
-        <p className="mt-1.5 max-w-[60ch] text-[13px] leading-relaxed text-[color:var(--text-3)] [text-wrap:pretty]">
+        <p className="mt-2 max-w-[60ch] text-[13px] leading-relaxed text-[color:var(--text-3)] [text-wrap:pretty]">
           Request a task and your manager will review it. Follow what was decided under My requests.
         </p>
       </header>
@@ -694,7 +722,7 @@ export default function TaskRequest() {
             {sent && (
               <div
                 role="status"
-                className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-[var(--accent-glow)] px-4 py-3 text-[13px] text-[color:var(--accent)] shadow-[0_0_0_1px_var(--accent)]"
+                className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-[var(--accent-glow)] px-4 py-3 text-[13px] text-[color:var(--accent)] shadow-[0_0_0_1px_var(--accent)]"
               >
                 <span className="inline-flex items-center gap-2 font-medium">
                   <CheckIcon />
@@ -704,14 +732,14 @@ export default function TaskRequest() {
                   <button
                     type="button"
                     onClick={() => { setSent(false); setTab('mine'); }}
-                    className={`rounded-md px-2.5 py-1.5 text-xs font-semibold transition-[background-color,transform] duration-150 hover:bg-[var(--bg-3)] active:scale-[0.98] motion-reduce:transition-none ${focusRing}`}
+                    className={`rounded-md px-2.5 py-1.5 text-xs font-semibold transition-[background-color,transform] duration-150 hover:bg-[var(--bg-3)] active:scale-[0.98] motion-reduce:transition-none motion-reduce:active:scale-100 ${focusRing}`}
                   >
                     View my requests
                   </button>
                   <button
                     type="button"
                     onClick={() => setSent(false)}
-                    className={`rounded-md px-2.5 py-1.5 text-xs font-medium transition-[background-color,transform] duration-150 hover:bg-[var(--bg-3)] active:scale-[0.98] motion-reduce:transition-none ${focusRing}`}
+                    className={`rounded-md px-2.5 py-1.5 text-xs font-medium transition-[background-color,transform] duration-150 hover:bg-[var(--bg-3)] active:scale-[0.98] motion-reduce:transition-none motion-reduce:active:scale-100 ${focusRing}`}
                   >
                     Dismiss
                   </button>

@@ -552,9 +552,8 @@ api.interceptors.response.use(
           }
 
           if (
-            mutationMessage(
-              originalRequest,
-            )
+            mutationMessage(originalRequest) &&
+            !originalRequest?.suppressErrorToast
           ) {
             emitToast(
               "error",
@@ -579,9 +578,8 @@ api.interceptors.response.use(
      */
 
     if (
-      mutationMessage(
-        originalRequest,
-      )
+      mutationMessage(originalRequest) &&
+      !originalRequest?.suppressErrorToast
     ) {
       emitToast(
         "error",
