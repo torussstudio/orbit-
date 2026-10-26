@@ -16,6 +16,7 @@ const FOCUS_RING = 'focus-visible:outline-none focus-visible:ring-2 focus-visibl
 const SEEN_KEY = 'orbit_ai_briefing_seen';
 const WIDE_KEY = 'orbit_ai_wide';
 const STREAM_URL = `${(import.meta.env.VITE_API_URL || '/api').replace(/\/$/, '')}/assistant/chat/stream`;
+const AI_REQUEST_TIMEOUT_MS = 60_000;
 const todayKey = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date());
 const apiError = (err, fallback) => err?.response?.data?.error || fallback;
 const readStore = (key) => { try { return localStorage.getItem(key); } catch { return null; } };
@@ -382,6 +383,10 @@ export default function OrbitAssistant() {
     abortRef.current = controller;
     let finished = false;
     let streamedSoFar = '';
+    let timedOut = false;
+    let timeoutId = null;
+    let slowWarningId = null;
+    let assistantSlow = false;
 
     const finish = (data) => {
       finished = true;
@@ -395,6 +400,19 @@ export default function OrbitAssistant() {
     };
 
     try {
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+        failWith('No internet connection. Check your connection and try again.');
+        return;
+      }
+      slowWarningId = window.setTimeout(() => {
+        assistantSlow = true;
+        window.dispatchEvent(new CustomEvent('orbit:assistant-network-slow', { detail: { active: true } }));
+      }, 10_000);
+      timeoutId = window.setTimeout(() => {
+        timedOut = true;
+        controller.abort();
+      }, AI_REQUEST_TIMEOUT_MS);
+
       let token = getAccessToken();
       if (!token) token = await refreshAccessToken();
       const request = (bearer) => fetch(STREAM_URL, {
@@ -414,7 +432,11 @@ export default function OrbitAssistant() {
 
       if (!res.ok || !res.body) {
         // Streaming not available: one normal request instead.
-        const { data } = await api.post('/assistant/chat', { message: text }, { silent: true });
+        const { data } = await api.post('/assistant/chat', { message: text }, {
+          silent: true,
+          signal: controller.signal,
+          timeout: AI_REQUEST_TIMEOUT_MS,
+        });
         finish(data);
         return;
       }
@@ -433,13 +455,26 @@ export default function OrbitAssistant() {
       });
       if (!finished) failWith('The answer was cut off. Try again.');
     } catch (err) {
-      if (controller.signal.aborted) {
+      if (timedOut) {
+        const message = 'Orbit took too long to respond. Your network may be slow; check your connection and try again.';
+        window.dispatchEvent(new CustomEvent('orbit:network-error', { detail: { message } }));
+        failWith(message);
+      } else if (controller.signal.aborted) {
         // Stopped: keep what arrived so far.
         setMessages((old) => [...old, { id: `stopped-${Date.now()}`, role: 'assistant', content: streamedSoFar ? `${streamedSoFar} …` : '(Stopped)', cards: [], actions: [], created_at: new Date().toISOString() }]);
+      } else if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+        failWith('No internet connection. Check your connection and try again.');
+      } else if (err instanceof TypeError || err?.name === 'NetworkError') {
+        const message = 'Could not connect to Orbit. Check your network and try again.';
+        window.dispatchEvent(new CustomEvent('orbit:network-error', { detail: { message } }));
+        failWith(message);
       } else {
         failWith(apiError(err, 'Orbit AI could not answer. Check your connection and try again.'));
       }
     } finally {
+      if (timeoutId !== null) window.clearTimeout(timeoutId);
+      if (slowWarningId !== null) window.clearTimeout(slowWarningId);
+      if (assistantSlow) window.dispatchEvent(new CustomEvent('orbit:assistant-network-slow', { detail: { active: false } }));
       abortRef.current = null;
       setLive(null);
       setBusy(false);

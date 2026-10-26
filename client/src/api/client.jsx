@@ -51,6 +51,39 @@ function emitToast(type, message) {
   }
 }
 
+const SLOW_REQUEST_MS = 10_000;
+const slowRequestIds = new Set();
+let nextNetworkRequestId = 0;
+
+function emitSlowRequestCount() {
+  if (typeof window === 'undefined') return;
+  window.dispatchEvent(new CustomEvent('orbit:network-slow', {
+    detail: { count: slowRequestIds.size },
+  }));
+}
+
+function trackApiRequest(config) {
+  if (typeof window === 'undefined') return config;
+  const id = ++nextNetworkRequestId;
+  config.__orbitNetworkRequestId = id;
+  config.__orbitSlowTimer = window.setTimeout(() => {
+    slowRequestIds.add(id);
+    emitSlowRequestCount();
+  }, SLOW_REQUEST_MS);
+  return config;
+}
+
+function finishApiRequest(config) {
+  if (!config || typeof window === 'undefined') return;
+  window.clearTimeout(config.__orbitSlowTimer);
+  if (slowRequestIds.delete(config.__orbitNetworkRequestId)) emitSlowRequestCount();
+}
+
+function emitNetworkError(message) {
+  if (typeof window === 'undefined') return;
+  window.dispatchEvent(new CustomEvent('orbit:network-error', { detail: { message } }));
+}
+
 /*
  * ============================================================
  * MUTATION SUCCESS MESSAGE
@@ -132,6 +165,7 @@ function mutationMessage(config) {
 
 api.interceptors.request.use(
   (config) => {
+    trackApiRequest(config);
     const accessToken =
       getAccessToken();
 
@@ -393,6 +427,7 @@ export function clearClientAuthState() {
 
 api.interceptors.response.use(
   (response) => {
+    finishApiRequest(response.config);
     const message =
       mutationMessage(
         response.config,
@@ -420,6 +455,7 @@ api.interceptors.response.use(
   },
 
   async (error) => {
+    finishApiRequest(error.config);
     const status =
       error.response?.status;
 
@@ -502,6 +538,14 @@ api.interceptors.response.use(
             originalRequest,
           );
         } catch (refreshError) {
+          if ((!refreshError.response && !axios.isCancel(refreshError)) || ['ECONNABORTED', 'ETIMEDOUT'].includes(refreshError.code)) {
+            const message = ['ECONNABORTED', 'ETIMEDOUT'].includes(refreshError.code)
+              ? 'Orbit request timed out. Your network may be slow. Please try again.'
+              : typeof navigator !== 'undefined' && navigator.onLine === false
+                ? 'No internet connection. Check your network and try again.'
+                : 'Could not reach Orbit. Check your network and try again.';
+            emitNetworkError(message);
+          }
           const refreshStatus =
             refreshError.response
               ?.status;
@@ -551,9 +595,12 @@ api.interceptors.response.use(
             );
           }
 
+          const refreshIsNetworkFailure = (!refreshError.response && !axios.isCancel(refreshError))
+            || ['ECONNABORTED', 'ETIMEDOUT'].includes(refreshError.code);
           if (
             mutationMessage(originalRequest) &&
-            !originalRequest?.suppressErrorToast
+            !originalRequest?.suppressErrorToast &&
+            !refreshIsNetworkFailure
           ) {
             emitToast(
               "error",
@@ -577,9 +624,12 @@ api.interceptors.response.use(
      * ========================================================
      */
 
+    const isNetworkFailure = (!error.response && !axios.isCancel(error)) || ['ECONNABORTED', 'ETIMEDOUT'].includes(error.code);
+
     if (
       mutationMessage(originalRequest) &&
-      !originalRequest?.suppressErrorToast
+      !originalRequest?.suppressErrorToast &&
+      !isNetworkFailure
     ) {
       emitToast(
         "error",
@@ -596,7 +646,19 @@ api.interceptors.response.use(
      * ========================================================
      */
 
+    if (['ECONNABORTED', 'ETIMEDOUT'].includes(error.code)) {
+      error.message = 'Orbit request timed out. Your network may be slow. Please try again.';
+      emitNetworkError(error.message);
+      return Promise.reject(error);
+    }
+
     if (!error.response) {
+      if (!axios.isCancel(error)) {
+        const message = typeof navigator !== 'undefined' && navigator.onLine === false
+          ? 'No internet connection. Check your network and try again.'
+          : 'Could not reach Orbit. Check your network and try again.';
+        emitNetworkError(message);
+      }
       error.message =
         "Network error. Please check your connection.";
 
@@ -608,16 +670,6 @@ api.interceptors.response.use(
      * TIMEOUT
      * ========================================================
      */
-
-    if (
-      error.code ===
-      "ECONNABORTED"
-    ) {
-      error.message =
-        "Request timeout. Please try again.";
-
-      return Promise.reject(error);
-    }
 
     return Promise.reject(error);
   },
