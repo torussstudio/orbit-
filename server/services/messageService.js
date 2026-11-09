@@ -38,12 +38,11 @@ const RATE_WINDOW_MS = 10 * 1000;
 const RATE_MAX = 20;
 const sendLog = new Map(); // userId -> recent send timestamps
 
-// Push: at most one per conversation and recipient every PUSH_GAP_MS, and
-// none to someone who has the thread open (their client marks it read every
-// 45 s while it is open, see Messages.jsx).
-const PUSH_GAP_MS = 2 * 60 * 1000;
+// Push: every message pushes, except to someone who has the thread open
+// (their client marks it read every 45 s while it is open, see Messages.jsx).
+// Pushes of one thread share a tag, so a new one replaces the previous one
+// instead of stacking.
 const ACTIVE_READER_MS = 60 * 1000;
-const lastPush = new Map(); // `${conversationId}:${recipientId}` -> ms
 // Who has a thread open on screen right now. Set ONLY by markRead (the
 // client calls it on open and every 45 s while the tab is visible), never by
 // sending, so replying and then leaving does not block the next push.
@@ -520,16 +519,14 @@ async function notifyRecipients(conversation, message) {
   for (const recipientId of recipients) {
     if (isViewing(recipientId)) continue;
 
-    const key = `${conversation.id}:${recipientId}`;
-    if (now - (lastPush.get(key) || 0) < PUSH_GAP_MS) continue;
-    lastPush.set(key, now);
-
     await createNotification(recipientId, title, preview, {
       type: "message",
       entityId: conversation.id,
       entityType: "conversation",
       url,
       eventKey: `message:${message.id}:${recipientId}`,
+      tag: `message-thread-${conversation.id}`,
+      renotify: true,
     });
   }
 }
@@ -548,7 +545,6 @@ const markRead = async (user, conversationId) => {
   // next new message may push again straight away.
   const key = `${conversation.id}:${user.id}`;
   viewing.set(key, Date.now());
-  lastPush.delete(key);
 
   const { rows } = await db.query(
     `WITH prev AS (

@@ -402,6 +402,16 @@ const {
 scheduleDailyReminders();
 
 /*
+ * Daily "log in to Orbit" push at 11:00 IST (LOGIN_REMINDER_HOUR),
+ * except on days off. Off with LOGIN_REMINDER_ENABLED=false.
+ */
+const {
+  scheduleLoginReminders,
+} = require("./utils/loginReminder");
+
+scheduleLoginReminders();
+
+/*
  * Deadline reminders are OFF unless
  * DEADLINE_REMINDERS_ENABLED=true.
  */

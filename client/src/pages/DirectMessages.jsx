@@ -232,7 +232,6 @@ export default function DirectMessages() {
   const tail = useRef(null);
   const messageScroll = useRef(null);
   const messageContent = useRef(null);
-  const [chatHeight, setChatHeight] = useState(null);
   const dragDepth = useRef(0);
   const fileInput = useRef(null);
   const input = useRef(null);
@@ -444,22 +443,6 @@ export default function DirectMessages() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [profileOpen]);
-
-  useEffect(() => {
-    if (!conversationId) return undefined;
-    const resize = () => {
-      const viewport = window.innerHeight;
-      const mobile = window.innerWidth < 768;
-      const max = Math.max(320, Math.min(viewport * (mobile ? 0.88 : 0.78), viewport - (mobile ? 110 : 150)));
-      const min = Math.min(max, viewport * (mobile ? 0.68 : 0.72));
-      const contentHeight = messageContent.current?.scrollHeight || 0;
-      const fixedParts = mobile ? 176 : 190;
-      setChatHeight(Math.round(Math.min(max, Math.max(min, contentHeight + fixedParts))));
-    };
-    const frame = requestAnimationFrame(resize);
-    window.addEventListener('resize', resize);
-    return () => { cancelAnimationFrame(frame); window.removeEventListener('resize', resize); };
-  }, [conversationId, messages, error, replyTo, forwarding, emojiOpen, editing, chatSearchOpen, peerTyping]);
 
   const current = useMemo(() => conversations.find((c) => same(c.id, conversationId)), [conversations, conversationId]);
   const peer = selected?.peer || current?.peer;
@@ -675,7 +658,7 @@ export default function DirectMessages() {
   const pendingInLastGroup = dayGroups.length > 0 && dayGroups[dayGroups.length - 1].key === dayKey(new Date());
   const renderPending = (pending) => (
     <div key={pending.id} className="mb-3 flex justify-end">
-      <div className="max-w-[88%] rounded-2xl rounded-br-md bg-[var(--chat-out-bg)] px-3.5 py-2.5 text-[color:var(--chat-out-text)] opacity-90 shadow-[var(--chat-out-shadow)] sm:max-w-[68%]">
+      <div className="min-w-0 max-w-[88%] rounded-2xl rounded-br-md bg-[var(--chat-out-bg)] px-3.5 py-2.5 text-[color:var(--chat-out-text)] opacity-90 shadow-[var(--chat-out-shadow)] sm:max-w-[68%]">
         {pending.body && <p className="whitespace-pre-wrap break-words text-[13.5px] leading-relaxed">{pending.body}</p>}
         {pending.files.map((file, index) => <PendingChatAttachment key={`${pending.id}-${index}`} file={file} />)}
         <p className="mt-1 text-right text-[10px] text-[color:var(--chat-out-meta)]">Sending…</p>
@@ -684,11 +667,8 @@ export default function DirectMessages() {
   );
 
   return (
-    <div className="flex min-h-full min-w-0 items-start bg-[var(--bg)] md:p-5 lg:p-8">
-      <div
-        className={`mx-auto flex min-h-0 min-w-0 w-full max-w-[1400px] overflow-hidden bg-[var(--bg-2)] md:rounded-3xl md:border md:border-[color:var(--border)] md:shadow-[0_30px_70px_-35px_rgba(15,23,42,0.45)] ${conversationId ? '' : 'min-h-[calc(100dvh-150px)]'}`}
-        style={conversationId && chatHeight ? { height: `${chatHeight}px` } : undefined}
-      >
+    <div className="flex h-full min-h-0 min-w-0 w-full bg-[var(--bg)] md:p-5 lg:p-8">
+      <div className="mx-auto flex min-h-0 min-w-0 w-full max-w-[1400px] flex-1 overflow-hidden bg-[var(--bg-2)] md:rounded-3xl md:border md:border-[color:var(--border)] md:shadow-[0_30px_70px_-35px_rgba(15,23,42,0.45)]">
         {/* ---------- Sidebar ---------- */}
         <aside className={`${conversationId ? 'hidden md:flex' : 'flex'} w-full shrink-0 flex-col border-[color:var(--border)] md:w-[330px] md:border-r lg:w-[360px]`}>
           <div className="flex items-center justify-between gap-3 px-4 pb-3 pt-4">
@@ -716,7 +696,7 @@ export default function DirectMessages() {
                   placeholder="Find a member"
                   aria-label="Find a member"
                   autoFocus
-                  className="h-10 w-full rounded-xl border border-[color:var(--border)] bg-[var(--bg-3)] pl-9 pr-3 text-sm text-[color:var(--text)] outline-none transition duration-200 placeholder:text-[color:var(--text-3)] focus:border-[color:var(--accent)] focus:ring-4 focus:ring-[color:var(--accent-light)]"
+                  className="h-10 w-full rounded-xl border border-[color:var(--border)] bg-[var(--bg-3)] pl-9 pr-3 text-[16px] text-[color:var(--text)] outline-none transition duration-200 placeholder:text-[color:var(--text-3)] focus:border-[color:var(--accent)] focus:ring-4 focus:ring-[color:var(--accent-light)]"
                 />
               </div>
               <div className="mt-2 max-h-48 space-y-0.5 overflow-y-auto">
@@ -815,7 +795,7 @@ export default function DirectMessages() {
               />
             )}
 
-            <div ref={messageScroll} onScroll={onMessagesScroll} className="min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain bg-[var(--bg)] bg-[radial-gradient(45%_35%_at_100%_0%,var(--accent-light),transparent)] px-3 py-4 sm:px-5">
+            <div ref={messageScroll} onScroll={onMessagesScroll} className="min-h-0 min-w-0 max-w-full flex-1 overflow-y-auto overflow-x-hidden overscroll-contain bg-[var(--bg)] bg-[radial-gradient(45%_35%_at_100%_0%,var(--accent-light),transparent)] px-3 py-4 sm:px-5">
               <div ref={messageContent}>
                 {error && <p role="alert" className="mb-3 rounded-xl border border-red-500/20 bg-red-500/10 px-3.5 py-2.5 text-sm text-red-600">{error}</p>}
                 {hasMore && !loading && (
@@ -843,7 +823,7 @@ export default function DirectMessages() {
                   return (
                     <Fragment key={message.id}>
                       <div id={`dm-msg-${message.id}`} className={`mb-3 flex scroll-mt-16 flex-col ${mine ? 'items-end' : 'items-start'}`}>
-                        <div onClick={() => setActiveMessageId((id) => (same(id, message.id) ? null : message.id))} className={`group relative max-w-[88%] px-3.5 py-2.5 transition-shadow duration-300 sm:max-w-[68%] ${mine ? 'rounded-2xl rounded-br-md bg-[var(--chat-out-bg)] text-[color:var(--chat-out-text)] shadow-[var(--chat-out-shadow)]' : 'rounded-2xl rounded-bl-md border border-[color:var(--border)] bg-[var(--bg-2)] text-[color:var(--text)] shadow-[0_8px_20px_-16px_rgba(15,23,42,0.5)]'} ${flashing ? 'ring-2 ring-amber-400 ring-offset-2 ring-offset-[color:var(--bg)]' : ''}`}>
+                        <div onClick={() => setActiveMessageId((id) => (same(id, message.id) ? null : message.id))} className={`group relative min-w-0 max-w-[88%] px-3.5 py-2.5 transition-shadow duration-300 sm:max-w-[68%] ${mine ? 'rounded-2xl rounded-br-md bg-[var(--chat-out-bg)] text-[color:var(--chat-out-text)] shadow-[var(--chat-out-shadow)]' : 'rounded-2xl rounded-bl-md border border-[color:var(--border)] bg-[var(--bg-2)] text-[color:var(--text)] shadow-[0_8px_20px_-16px_rgba(15,23,42,0.5)]'} ${flashing ? 'ring-2 ring-amber-400 ring-offset-2 ring-offset-[color:var(--bg)]' : ''}`}>
                           {message.forwarded_from_id && <p className="mb-1 flex items-center gap-1 text-[10px] font-medium italic opacity-75"><Icon name="forward" className="h-3 w-3" />Forwarded</p>}
                           {message.reply_to_message_id && (
                             <div className={`mb-1.5 rounded-lg border-l-2 px-2.5 py-1.5 text-[11px] ${mine ? 'border-[color:var(--chat-out-meta)] bg-[var(--chat-out-quote)]' : 'border-[color:var(--accent)] bg-black/10'}`}>
@@ -851,7 +831,7 @@ export default function DirectMessages() {
                               <p className="truncate opacity-80">{message.reply_body || 'Attachment'}</p>
                             </div>
                           )}
-                          {message.deleted ? <p className="text-xs italic opacity-70">This message was deleted</p> : message.body && <p className="whitespace-pre-wrap break-words text-[13.5px] leading-relaxed"><Highlight text={message.body} query={chatSearchOpen ? searchQuery : ''} /></p>}
+                          {message.deleted ? <p className="text-xs italic opacity-70">This message was deleted</p> : message.body && <p className="whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-[13.5px] leading-relaxed"><Highlight text={message.body} query={chatSearchOpen ? searchQuery : ''} /></p>}
                           {!message.deleted && message.attachments?.map((file) => <ChatAttachmentCard key={file.public_id} file={file} onOpen={setPreviewAttachment} />)}
                           {!message.deleted && (
                             <div data-react-picker className={`${same(activeMessageId, message.id) || pickerOpen ? 'mt-2 flex' : 'hidden'} items-center gap-0.5 whitespace-normal rounded-lg bg-black/10 p-0.5 md:absolute ${pickerOpen ? 'md:-top-9' : 'md:-top-4'} ${mine ? 'md:right-2' : 'md:left-2'} md:z-10 md:mt-0 md:flex md:border md:border-[color:var(--border)] md:bg-[var(--bg-2)] md:text-[color:var(--text-2)] ${menuOpen || pickerOpen ? 'md:opacity-100' : 'md:opacity-0'} md:shadow-[0_8px_20px_-12px_rgba(15,23,42,0.5)] md:transition-opacity md:duration-200 md:focus-within:opacity-100 md:group-hover:opacity-100`}>
@@ -906,7 +886,7 @@ export default function DirectMessages() {
               </div>
             </div>
 
-            <form onSubmit={send} className="shrink-0 border-t border-[color:var(--border)] bg-[var(--bg-2)] px-3 pb-2.5 pt-3 sm:px-5">
+            <form onSubmit={send} className="shrink-0 border-t border-[color:var(--border)] bg-[var(--bg-2)] px-3 pb-[max(0.625rem,env(safe-area-inset-bottom))] pt-3 sm:px-5">
               {editing && (
                 <div className="mb-2 flex items-center justify-between gap-3 rounded-xl border-l-2 border-amber-400 bg-amber-400/10 px-3 py-2 text-xs text-[color:var(--text-2)]">
                   <span className="flex min-w-0 items-center gap-1.5">
@@ -925,7 +905,7 @@ export default function DirectMessages() {
               {forwarding && (
                 <div className="mb-2 flex flex-wrap items-center gap-2 rounded-xl bg-[var(--accent-light)] p-2.5">
                   <span className="text-xs font-medium text-[color:var(--text-2)]">Forward to</span>
-                  <select value={forwardTarget} onChange={(e) => setForwardTarget(e.target.value)} className="min-w-0 flex-1 rounded-lg border border-[color:var(--border)] bg-[var(--bg-2)] px-2 py-1.5 text-xs text-[color:var(--text)] outline-none focus:border-[color:var(--accent)]">
+                  <select value={forwardTarget} onChange={(e) => setForwardTarget(e.target.value)} className="min-w-0 flex-1 rounded-lg border border-[color:var(--border)] bg-[var(--bg-2)] px-2 py-1.5 text-[16px] sm:text-xs text-[color:var(--text)] outline-none focus:border-[color:var(--accent)]">
                     <option value="">Choose a chat</option>
                     {conversations.filter((c) => !same(c.id, conversationId)).map((c) => <option key={c.id} value={c.id}>{c.peer.name}</option>)}
                   </select>
@@ -936,7 +916,7 @@ export default function DirectMessages() {
               {files.length > 0 && (
                 <div className="mb-2 flex flex-wrap gap-1.5">
                   {files.map((file, index) => (
-                    <span key={`${file.name}-${index}`} className="flex max-w-64 items-center gap-1.5 rounded-lg border border-[color:var(--border)] bg-[var(--bg-3)] py-1 pl-2 pr-1 text-[11px] font-medium text-[color:var(--text-2)]">
+                    <span key={`${file.name}-${index}`} className="flex max-w-[calc(100%-0.25rem)] items-center gap-1.5 sm:max-w-64 rounded-lg border border-[color:var(--border)] bg-[var(--bg-3)] py-1 pl-2 pr-1 text-[11px] font-medium text-[color:var(--text-2)]">
                       <Icon name="file" className="h-3.5 w-3.5" />
                       <span className="truncate">{file.name}</span>
                       <button type="button" aria-label={`Remove ${file.name}`} onClick={() => setFiles((old) => old.filter((_, i) => i !== index))} className={`grid h-5 w-5 place-items-center rounded-md transition duration-200 hover:bg-black/10 ${focusRing}`}><Icon name="close" className="h-3 w-3" /></button>
@@ -975,7 +955,7 @@ export default function DirectMessages() {
                   rows={Math.min(5, draft.split('\n').length)}
                   placeholder={editing ? 'Edit your message' : 'Write a message'}
                   aria-label={editing ? 'Edit your message' : 'Write a message'}
-                  className="min-h-9 min-w-0 flex-1 resize-none bg-transparent px-1.5 py-2 text-sm leading-5 text-[color:var(--text)] outline-none placeholder:text-[color:var(--text-3)]"
+                  className="min-h-9 min-w-0 flex-1 resize-none bg-transparent px-1.5 py-2 text-[16px] leading-5 text-[color:var(--text)] outline-none placeholder:text-[color:var(--text-3)] sm:text-sm"
                 />
                 <button type="submit" disabled={sending || (!draft.trim() && !files.length && !editing?.attachments?.length)} aria-label={sending ? 'Sending' : editing ? 'Save edit' : 'Send message'} className={`grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-[var(--accent)] text-white shadow-[0_8px_18px_-8px_var(--accent)] transition duration-200 hover:brightness-110 active:scale-95 disabled:opacity-40 disabled:shadow-none ${focusRing} ${sending ? 'animate-pulse' : ''}`}><Icon name="send" className="h-[18px] w-[18px]" /></button>
               </div>
@@ -995,12 +975,12 @@ export default function DirectMessages() {
 
       {profileOpen && peer && (
         <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setProfileOpen(false); }}>
-          <section role="dialog" aria-modal="true" aria-label={`${peer.name || 'Member'} profile`} className="w-full max-w-sm overflow-hidden rounded-3xl border border-[color:var(--border)] bg-[var(--bg-2)] shadow-[0_40px_90px_-30px_rgba(0,0,0,0.6)]">
+          <section role="dialog" aria-modal="true" aria-label={`${peer.name || 'Member'} profile`} className="max-h-[92dvh] w-full max-w-sm overflow-y-auto rounded-3xl border border-[color:var(--border)] bg-[var(--bg-2)] shadow-[0_40px_90px_-30px_rgba(0,0,0,0.6)]">
             <div className="relative grid min-h-56 place-items-center bg-[var(--bg-3)] bg-[radial-gradient(70%_80%_at_50%_0%,var(--accent-light),transparent)] p-6">
               <button type="button" aria-label="Close profile" onClick={() => setProfileOpen(false)} className={`absolute right-3 top-3 grid h-9 w-9 place-items-center rounded-xl bg-black/35 text-white transition duration-200 hover:bg-black/50 active:scale-95 ${focusRing}`}><Icon name="close" className="h-4 w-4" /></button>
               {peer.avatar_url
-                ? <img src={peer.avatar_url} alt={`${peer.name || 'Member'} profile`} className="h-40 w-40 rounded-[2rem] object-cover shadow-[0_24px_50px_-20px_rgba(0,0,0,0.55)]" />
-                : <span className="grid h-40 w-40 place-items-center rounded-[2rem] bg-[var(--accent-light)] text-5xl font-semibold text-[color:var(--accent)]">{(peer.name || '?').slice(0, 1).toUpperCase()}</span>}
+                ? <img src={peer.avatar_url} alt={`${peer.name || 'Member'} profile`} className="h-32 w-32 rounded-[2rem] object-cover sm:h-40 sm:w-40 shadow-[0_24px_50px_-20px_rgba(0,0,0,0.55)]" />
+                : <span className="grid h-32 w-32 place-items-center rounded-[2rem] sm:h-40 sm:w-40 bg-[var(--accent-light)] text-5xl font-semibold text-[color:var(--accent)]">{(peer.name || '?').slice(0, 1).toUpperCase()}</span>}
             </div>
             <div className="p-6">
               <h2 className="flex items-center gap-2 text-xl font-semibold tracking-tight text-[color:var(--text)]">{peer.name || 'Member'}{isVerifiedName(peer.name) && <VerifiedBadge className="h-5 w-5" />}</h2>

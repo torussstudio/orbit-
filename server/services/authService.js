@@ -594,36 +594,20 @@ async function refreshSession({
 }
 
 /*
- * After a logout: remove the push subscriptions saved by that
- * session, so the signed-out browser stops getting pushes.
+ * After a logout: the push subscription of that browser/installed app is
+ * KEPT, so the device still gets Orbit notifications (messages, tasks, ...)
+ * while signed out. Tapping one opens Orbit and asks the member to sign in.
  *
- * The logout route has no logged-in user, so the member comes
- * from the rows the logout just revoked. Nothing revoked (an
- * unknown or already revoked session) means nothing to remove.
+ * Subscriptions are still removed where the member asked for a device to
+ * stop: "Sign out" next to a device, "Sign out all other devices", "Log out
+ * everywhere", a password change and account deletion. If someone else signs
+ * in on the same browser, the subscription moves to them (see
+ * savePushSubscription: ON CONFLICT (endpoint) updates member_id).
  *
- * Never throws: the session is already revoked, and a failed
- * clean-up must not turn the logout into an error.
+ * Never throws.
  */
-async function removePushAfterLogout(revokedRows) {
-  try {
-    const row = revokedRows.find(
-      (revoked) => revoked.session_id,
-    );
-
-    if (!row) {
-      return;
-    }
-
-    await removePushSubscriptionsForSessions(
-      row.member_id,
-      [String(row.session_id)],
-    );
-  } catch (err) {
-    console.error(
-      "[auth] push clean-up after logout failed:",
-      err?.message,
-    );
-  }
+async function removePushAfterLogout() {
+  // Intentionally nothing to remove on a plain logout.
 }
 
 /**

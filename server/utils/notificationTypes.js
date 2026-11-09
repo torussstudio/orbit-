@@ -41,12 +41,15 @@ const TYPES = [
   // POST /calendar/notify-guest exists, but the client never calls it.
   { key: 'calendar_invitation', group: 'projects', label: 'Calendar invitation', listed: false },
 
-  // services/messageService.js: at most one per conversation every 2 minutes,
-  // and none while the recipient has that conversation open.
+  // services/messageService.js, directMessageService.js: every message pushes
+  // (one notification per chat, a new one replaces the last), and none while
+  // the recipient has that conversation open.
   { key: 'message', group: 'messages', label: 'New chat message' },
 
   { key: 'task_due_reminder', group: 'reminders', label: 'Task due soon (tomorrow or today)' },
   { key: 'task_overdue', group: 'reminders', label: 'Task overdue' },
+  // utils/loginReminder.js: 11:00 IST every working day, push only.
+  { key: 'login_reminder', group: 'reminders', label: 'Daily login reminder' },
   // utils/dailyReminder.js: its sends are switched off.
   { key: 'daily_digest', group: 'reminders', label: 'Daily summary', listed: false },
 

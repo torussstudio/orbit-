@@ -167,7 +167,9 @@ function decideDelivery(type, prefs, pushConfigured = vapidConfigured) {
 
   // Chat has its own inbox and unread badge. Never fall back to the project
   // bell, even when push is unavailable; the message remains in that inbox.
-  if (type === 'message') {
+  // The daily "log in to Orbit" reminder is push only for the same reason:
+  // it must not fill the bell every day.
+  if (type === 'message' || type === 'login_reminder') {
     if (prefs?.pause_all || prefs?.enabled === false || prefs?.delivery === 'in_app') {
       return SEND_NOTHING;
     }

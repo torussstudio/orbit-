@@ -25,7 +25,11 @@ const RAW_EXTENSIONS = {
 const RATE_WINDOW_MS = 10_000;
 const RATE_MAX = 20;
 const recentSends = new Map();
-const lastPush = new Map();
+// Who has a chat open on screen right now. Set ONLY by markRead (the client calls
+// it on open and every 45 s while the chat is visible), never by sending.
+// In memory: the app runs as one Node process.
+const ACTIVE_READER_MS = 60_000;
+const viewing = new Map(); // `${conversationId}:${memberId}` -> ms
 
 const fail = (status, message) => Object.assign(new Error(message), { status });
 const sameId = (a, b) => String(a) === String(b);
@@ -365,20 +369,22 @@ async function forwardMessage(user, sourceConversationId, messageId, targetConve
 
 async function notifyDirectRecipient(conversation, message) {
   const recipientId = sameId(conversation.member_one_id, message.sender_id) ? conversation.member_two_id : conversation.member_one_id;
-  const key = `${conversation.id}:${recipientId}`;
-  const now = Date.now();
-  if (now - (lastPush.get(key) || 0) < 120_000) return;
-  lastPush.set(key, now);
+  // No push for a chat the recipient has open on screen right now.
+  if (Date.now() - (viewing.get(`${conversation.id}:${recipientId}`) || 0) < ACTIVE_READER_MS) return;
   const flat = message.body.replace(/\s+/g, ' ');
   const preview = flat || (message.attachments?.length ? 'Sent an attachment' : 'New message');
   await createNotification(recipientId, `Message from ${message.sender_name || 'a member'}`, preview.slice(0, 120), {
     type: 'message', entityId: conversation.id, entityType: 'conversation',
     url: `/messages/people/${conversation.id}`, eventKey: `direct-message:${message.id}:${recipientId}`,
+    // Every message pushes, but one chat = one notification: a new message
+    // replaces the previous one (and buzzes again) instead of stacking.
+    tag: `message-direct-${conversation.id}`, renotify: true,
   });
 }
 
 async function markRead(user, conversationId) {
   const conversation = await accessible(user, conversationId);
+  viewing.set(`${conversation.id}:${user.id}`, Date.now());
   const { rows } = await db.query(
     `WITH prev AS (SELECT last_read_at FROM direct_conversation_reads WHERE direct_conversation_id = $1 AND member_id = $2)
      INSERT INTO direct_conversation_reads (direct_conversation_id, member_id, last_read_at) VALUES ($1, $2, NOW())

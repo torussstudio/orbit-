@@ -309,7 +309,7 @@ function FilterTabs({ value, onChange, counts }) {
             aria-pressed={active}
             onClick={() => onChange(f.id)}
             className={[
-              'inline-flex min-h-9 items-center justify-center gap-1.5 rounded-[8px] px-2 text-xs font-medium sm:min-h-8 sm:px-3',
+              'inline-flex min-h-9 min-w-0 items-center justify-center gap-1 rounded-[8px] px-1 text-xs font-medium min-[380px]:gap-1.5 min-[380px]:px-2 sm:min-h-8 sm:px-3',
               'transition-[background-color,color,transform] duration-150 active:scale-[0.97] motion-reduce:transition-none',
               active
                 ? 'bg-[var(--bg-2)] text-[var(--text)] shadow-[0_1px_3px_rgba(15,23,42,0.14)]'
@@ -317,8 +317,8 @@ function FilterTabs({ value, onChange, counts }) {
               focusRing,
             ].join(' ')}
           >
-            {f.label}
-            <span className={`tabular-nums ${f.id === 'pending' && counts.pending > 0 ? 'rounded-full bg-[var(--accent)] px-1.5 text-[10px] font-semibold text-white' : 'opacity-70'}`}>
+            <span className="min-w-0 truncate">{f.label}</span>
+            <span className={`shrink-0 tabular-nums ${f.id === 'pending' && counts.pending > 0 ? 'rounded-full bg-[var(--accent)] px-1.5 text-[10px] font-semibold text-white' : 'opacity-70'}`}>
               {counts[f.id] ?? 0}
             </span>
           </button>
