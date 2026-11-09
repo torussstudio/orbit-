@@ -149,6 +149,32 @@ async function learnSharedAnswer(question, answer, user, { usedAppTools, hasActi
   );
 }
 
+/*
+ * How the Orbit app itself works, for "how do I ...?" questions (install,
+ * notifications, chat, time log, task request, calendar, review). Kept short
+ * because it is sent with every question. Only describe screens and buttons
+ * that exist in client/src; update this when those change.
+ */
+function appGuide(admin) {
+  return [
+    'How the Orbit app works (answer "how do I ...", "where is ...", "is there an app ..." questions about Orbit itself from this list. Do not search the Knowledge board for them. Never invent screens, buttons or steps that are not listed here; if a how-to is not covered, say you are not sure and suggest asking an admin):',
+    '- Install: Orbit is a web app that can be installed on a phone or computer (a PWA). There is no Play Store / App Store app and no APK. Android Chrome: menu (three dots) > Install app, or Add to Home screen. iPhone: open it in Safari > Share > Add to Home Screen. Desktop Chrome or Edge: the install icon in the address bar. Open the same address used to log in. Installing does not change anything in the account.',
+    '- Notifications: after logging in, allow notifications when the browser asks. Account settings > Notifications lets each person choose which kinds they get, whether they arrive as push or in the app, and Pause all. On iPhone, push works only after Orbit is added to the Home Screen (iOS 16.4 or newer). Not getting them: check the phone or browser notification permission for Orbit, that Pause all is off, and that the kind is switched on.',
+    '- Messages (sidebar): ' + (admin
+      ? 'the inbox lists members; open one to chat. Messages go to the member, who gets a push unless that chat is open on screen.'
+      : 'there is the Admin team thread (reaches every admin) and Member chats (private one-to-one). In a chat: reply, react, forward, edit, delete, and search inside the chat; attach images up to 10 MB and PDF, SVG, AI, PSD or ZIP files up to 100 MB.'),
+    admin ? '' : '- Task View (members): your tasks. Move a task between Todo, In Progress and In Review; members cannot mark Done, an admin approves it. The Log time button on a task opens the Time Log for it.',
+    admin ? '' : '- Time Log (members): the Log time tab asks for project, optional cluster, task (only tasks assigned to you that are not Done or in review), work date and hours and minutes (1 minute to 24 hours). Use Miscellaneous for work that is not a task in Orbit: pick a project and type the task name; it is saved only in the time log. The second tab lists your entries; edit or delete one within 1 hour of logging it.',
+    admin ? '' : '- Task Request (members): members cannot create main tasks. Task Request > New task request: what needs to be done, the project (any project in Orbit), details or links, and a due date (dd-mm-yyyy). An admin approves or declines it; the outcome, with the reason if declined, shows on the same page and as a notification. A pending request can be cancelled.',
+    admin
+      ? '- In Review (admins): tasks members submitted. Approve marks the task Done. Move to rework sends it back and asks for a new due date for that round. Requested Tasks: approve or decline member task requests (a declined request keeps the reason). Time Log: hours per member and task. Members: the team list.'
+      : '',
+    '- Calendar: deadlines, tasks and events in one place, with views to switch at the top. ' + (admin ? 'Admins create events with New event, or Add event on this day.' : 'Members see their deadlines, tasks and events and can change a task stage from it; only admins create events.'),
+    '- Orbit AI (this chat): answers about projects, tasks, time, calendar and the app; can prepare creating or updating a task, adding a comment or logging time, which only happens after the person presses Confirm.',
+    '- "Orbit" can mean this app or the project called Orbit. For install, notifications or how a screen works, it means the app.',
+  ];
+}
+
 function systemPrompt(user, snapshot, recentActions = [], sharedAnswers = []) {
   const admin = tools.isManager(user);
   return [
@@ -177,6 +203,8 @@ function systemPrompt(user, snapshot, recentActions = [], sharedAnswers = []) {
     '- Project questions (what it is, status, client, brand, colours, fonts, process, links, files, decisions): call project_brief and/or knowledge. Use the Knowledge board first; if it is not there, use the database matches (tasks, comments, activity). Say where the answer came from, e.g. "From the Knowledge note \"Brand guide\": …" or "From the task comments: …". If nothing has it, say it is not recorded in Orbit. Never guess.',
     '- To read or summarise a whole document, call knowledge_read (ask for the next part when it says there is more).',
     '- Work behaviour / performance ("how is Hari doing", "how am I doing", "team performance this month"): call member_insights. Describe it from the numbers only: strengths first, then concerns, then 1–2 practical suggestions. Be fair and specific, compare with the previous period and the team average when given, and say when there is too little data to judge. No personality judgements.',
+    '',
+    ...appGuide(admin),
     '',
     'Doing things (actions):',
     '- You can prepare: create_task, update_task, add_comment, log_time' + (admin ? ', create_event' : '') + '. Nothing changes until the person presses Confirm on the card, so say e.g. "Ready — press Confirm below."',
