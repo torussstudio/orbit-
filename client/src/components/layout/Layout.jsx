@@ -10,6 +10,7 @@ import Loader from '../ui/Loader';
 import ErrorBoundary from '../ui/ErrorBoundary';
 import { useTheme, useThemeForUser } from '../../utils/theme';
 import { useLiveRefetch, MESSAGE_EVENTS, DIRECT_MESSAGE_EVENTS } from '../../hooks/useLiveEvents';
+import OverdueReasonPrompt from '../overdue/OverdueReasonPrompt';
 
 /* ------------------------------------------------------------------ */
 /* Shared bits                                                         */
@@ -41,6 +42,8 @@ const ICONS = {
   chat: 'M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z',
   // Clock: Time Log (managers: everyone's time, members: log time)
   clock: 'M12 22a10 10 0 100-20 10 10 0 000 20zM12 6v6l4 2',
+  // Bars: Member Activity (managers: daily task counts per member)
+  activity: 'M18 20V10M12 20V4M6 20v-6',
   search: 'M21 21l-4.35-4.35M19 11a8 8 0 11-16 0 8 8 0 0116 0z',
   close: 'M18 6L6 18M6 6l12 12',
   menu: 'M3 12h18M3 6h18M3 18h18',
@@ -961,6 +964,7 @@ export default function Layout() {
           items: [
             { to: '/members', icon: ICONS.members, label: 'Members' },
             { to: '/time-log', icon: ICONS.clock, label: 'Time Log' },
+            { to: '/member-activity', icon: ICONS.activity, label: 'Member Activity' },
           ],
         },
       ]
@@ -1236,6 +1240,8 @@ export default function Layout() {
           tabIndex={-1}
           className="flex-1 overflow-y-auto overflow-x-hidden bg-[var(--bg)] outline-none"
         >
+          {/* Asks the assignee why a task is overdue. Soft: nothing is blocked. */}
+          <OverdueReasonPrompt />
           <ErrorBoundary resetKey={location.pathname}>
             <Outlet />
           </ErrorBoundary>

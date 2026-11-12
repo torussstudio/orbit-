@@ -26,6 +26,7 @@ const TaskRequest = lazy(() => import('./pages/Taskrequest'));
 const RequestedTasks = lazy(() => import('./pages/Requestedtasks'));
 const TimeLog = lazy(() => import('./pages/TimeLog'));
 const MyTimeLog = lazy(() => import('./pages/MyTimeLog'));
+const MemberActivity = lazy(() => import('./pages/MemberActivity'));
 const Messages = lazy(() => import('./pages/Messages'));
 const DirectMessages = lazy(() => import('./pages/DirectMessages'));
 const InviteAcceptance = lazy(() => import('./pages/InviteAcceptance'));
@@ -61,6 +62,8 @@ export default function App() {
             <Route path="requested-tasks" element={<RequireManager><Suspense fallback={<SuspenseFallback />}><RequestedTasks /></Suspense></RequireManager>} />
             {/* Managers: everyone's time. Members: their own "log time" form. */}
             <Route path="time-log" element={<Suspense fallback={<SuspenseFallback />}><ByRole manager={<TimeLog />} member={<MyTimeLog />} /></Suspense>} />
+            {/* Managers: per-member daily task activity (created / in review / done / rework). */}
+            <Route path="member-activity" element={<RequireManager><Suspense fallback={<SuspenseFallback />}><MemberActivity /></Suspense></RequireManager>} />
             {/* Managers: shared inbox (/messages/:memberId opens one thread). Members: their thread with the admin team. */}
             <Route path="messages" element={<Suspense fallback={<SuspenseFallback />}><Messages /></Suspense>} />
             <Route path="messages/people" element={<Suspense fallback={<SuspenseFallback />}><DirectMessages /></Suspense>} />

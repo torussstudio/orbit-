@@ -749,6 +749,8 @@ const initDB = async () => {
     ["idx_knowledge_files_folder_id", "knowledge_files (folder_id)"],
     ["idx_notifications_member_unread", "notifications (member_id) WHERE read = false"],
     ["idx_calendar_events_start_date", "calendar_events (start_date)"],
+    // Member Activity report: stage-change / create rows per actor and day.
+    ["idx_task_activity_actor_created", "task_activity (actor_id, created_at DESC)"],
   ];
   for (const [name, definition] of extraIndexes) {
     await pool.query(`CREATE INDEX IF NOT EXISTS ${name} ON ${definition}`);
@@ -797,6 +799,29 @@ const initDB = async () => {
   await pool.query(`
     CREATE INDEX IF NOT EXISTS idx_task_requests_status
     ON task_requests (status, created_at DESC)
+  `);
+
+  // Why an overdue task is late. The assignee gives a reason, the manager
+  // answers it (services/overdueReasonService.js). One row per task, assignee
+  // and due day, so a task that goes overdue again after a new due date is
+  // asked again. Additive and idempotent.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS task_delay_reasons (
+      id ${idDefinition(defaultIdType)},
+      task_id ${refType(taskIdType)} NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+      member_id ${refType(memberIdType)} NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+      due_day DATE NOT NULL,
+      reason VARCHAR(40) NOT NULL,
+      note TEXT,
+      new_due_date DATE,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW(),
+      decision VARCHAR(20),
+      decision_note TEXT,
+      decided_by ${refType(memberIdType)} REFERENCES members(id) ON DELETE SET NULL,
+      decided_at TIMESTAMPTZ,
+      UNIQUE (task_id, member_id, due_day)
+    )
   `);
 
   // -------------------------------------------------------------------

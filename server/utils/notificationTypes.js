@@ -35,6 +35,8 @@ const TYPES = [
   { key: 'task_in_review', group: 'tasks', label: 'Task submitted for review', audience: 'manager' },
   { key: 'task_request', group: 'tasks', label: 'New task request', audience: 'manager' },
   { key: 'task_request_update', group: 'tasks', label: 'Your task request approved or declined' },
+  // services/overdueReasonService.js: the admin reviewed why your task is overdue.
+  { key: 'overdue_decision', group: 'tasks', label: 'Your admin reviewed an overdue reason' },
 
   { key: 'project_member_added', group: 'projects', label: 'Added to a project' },
   { key: 'project_member_removed', group: 'projects', label: 'Removed from a project' },
@@ -50,6 +52,12 @@ const TYPES = [
   { key: 'task_overdue', group: 'reminders', label: 'Task overdue' },
   // utils/loginReminder.js: 11:00 IST every working day, push only.
   { key: 'login_reminder', group: 'reminders', label: 'Daily login reminder' },
+  // services/memberActivityService.js: a manager taps "Nudge" in Member Activity.
+  // Always reaches the bell (no off switch, not stopped by "Pause all"): an
+  // admin's direct message must not be lost. Push still follows the delivery choice.
+  { key: 'admin_nudge', group: 'reminders', label: 'Reminder from your admin', canDisable: false },
+  // services/overdueReasonService.js: the admin asks why a task is overdue.
+  { key: 'overdue_reason_request', group: 'reminders', label: 'Admin asks why a task is overdue', canDisable: false },
   // utils/dailyReminder.js: its sends are switched off.
   { key: 'daily_digest', group: 'reminders', label: 'Daily summary', listed: false },
 

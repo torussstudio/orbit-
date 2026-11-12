@@ -118,6 +118,22 @@ const istToday = () =>
     day: '2-digit',
   }).format(new Date());
 
+// "Today" / "Yesterday" / "Wednesday" with the date beside it, for the entry groups.
+const addDays = (ymd, n) => {
+  const d = new Date(`${ymd}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+};
+const dayHeading = (ymd) => {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(ymd || '')) return { main: ymd || 'No date', sub: '' };
+  const today = istToday();
+  const date = new Date(`${ymd}T00:00:00Z`);
+  const long = new Intl.DateTimeFormat('en-GB', { timeZone: 'UTC', day: '2-digit', month: 'short', year: 'numeric' }).format(date);
+  if (ymd === today) return { main: 'Today', sub: long };
+  if (ymd === addDays(today, -1)) return { main: 'Yesterday', sub: long };
+  return { main: new Intl.DateTimeFormat('en-GB', { timeZone: 'UTC', weekday: 'long' }).format(date), sub: long };
+};
+
 const sameId = (a, b) => a !== null && a !== undefined && a !== '' && String(a) === String(b);
 
 // Only an in-app path is allowed as a return target (never another site).
@@ -152,6 +168,19 @@ function MyEntriesPanel({ onLogTime }) {
     const timer = window.setInterval(() => setNow(Date.now()), 15000);
     return () => window.clearInterval(timer);
   }, [load]);
+
+  // Entries grouped by the day they were worked, newest day first.
+  const groups = (() => {
+    const byDay = new Map();
+    entries.forEach((entry) => {
+      const day = String(entry.work_date || '').slice(0, 10);
+      if (!byDay.has(day)) byDay.set(day, { day, items: [], total: 0 });
+      const g = byDay.get(day);
+      g.items.push(entry);
+      g.total += Number(entry.minutes) || 0;
+    });
+    return [...byDay.values()].sort((a, b) => (a.day < b.day ? 1 : a.day > b.day ? -1 : 0));
+  })();
 
   const isEditable = (entry) => entry.can_edit && new Date(entry.created_at).getTime() + 60 * 60 * 1000 > now;
   const minutesLeft = (entry) =>
@@ -246,8 +275,22 @@ function MyEntriesPanel({ onLogTime }) {
           </button>
         </div>
       ) : (
+        <div className="flex flex-col gap-7">
+          {groups.map((group) => {
+            const heading = dayHeading(group.day);
+            return (
+          <section key={group.day || 'none'} aria-label={`${heading.main} ${heading.sub}`.trim()}>
+            <div className="mb-2.5 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+              <h3 className="m-0 flex items-baseline gap-2 text-[13px] font-semibold text-[var(--text)]">
+                {heading.main}
+                {heading.sub && <span className="text-xs font-normal tabular-nums text-[color:var(--text-3)]">{heading.sub}</span>}
+              </h3>
+              <span className="text-xs tabular-nums text-[color:var(--text-3)]">
+                {formatMinutes(group.total)} · {group.items.length} {group.items.length === 1 ? 'entry' : 'entries'}
+              </span>
+            </div>
         <ul className="flex flex-col gap-2.5">
-          {entries.map((entry) => {
+          {group.items.map((entry) => {
             const editable = isEditable(entry);
             const editingThis = editing?.id === entry.id;
             return (
@@ -255,7 +298,7 @@ function MyEntriesPanel({ onLogTime }) {
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div className="min-w-0 flex-1">
                     <p className="break-words text-sm font-medium tracking-[-0.005em] text-[var(--text)]">{entry.task_title}</p>
-                    <p className="mt-1 text-xs tabular-nums text-[color:var(--text-3)]">{entry.project_name} · {entry.work_date}</p>
+                    <p className="mt-1 text-xs tabular-nums text-[color:var(--text-3)]">{entry.project_name}</p>
                   </div>
                   <span className="shrink-0 rounded-md bg-[var(--bg-2)] px-2 py-1 text-xs font-semibold tabular-nums text-[var(--text)] shadow-[0_0_0_1px_var(--border)]">
                     {formatMinutes(entry.minutes)}
@@ -292,6 +335,10 @@ function MyEntriesPanel({ onLogTime }) {
             );
           })}
         </ul>
+          </section>
+            );
+          })}
+        </div>
       )}
     </section>
     {deleteTarget && (

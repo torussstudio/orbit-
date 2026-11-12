@@ -58,6 +58,12 @@ const eventRoutes =
 const timeLogRoutes =
   require("./routes/timeLog");
 
+const memberActivityRoutes =
+  require("./routes/memberActivity");
+
+const overdueReasonRoutes =
+  require("./routes/overdueReasons");
+
 const preferenceRoutes =
   require("./routes/preferences");
 
@@ -330,6 +336,23 @@ app.use(
 app.use(
   "/api/time-log",
   timeLogRoutes,
+);
+
+/*
+ * Member Activity report (managers only): per member, tasks
+ * created / sent to In Review / done / sent to rework per IST day.
+ */
+app.use(
+  "/api/member-activity",
+  memberActivityRoutes,
+);
+
+/*
+ * Overdue tasks: the assignee says why, the manager decides.
+ */
+app.use(
+  "/api/overdue-reasons",
+  overdueReasonRoutes,
 );
 
 /*

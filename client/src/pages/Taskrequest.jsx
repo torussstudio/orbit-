@@ -87,6 +87,29 @@ function fmtDay(value) {
   return `${pad(d.getDate())}-${pad(d.getMonth() + 1)}-${d.getFullYear()}`;
 }
 
+// The IST calendar day (YYYY-MM-DD) a request was sent.
+const requestDay = (value) => {
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return '';
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
+};
+
+// "Today" / "Yesterday" / "Wednesday" with the date beside it.
+function dayHeading(ymd) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(ymd || '')) return { main: 'No date', sub: '' };
+  const addDays = (day, n) => {
+    const d = new Date(`${day}T00:00:00Z`);
+    d.setUTCDate(d.getUTCDate() + n);
+    return d.toISOString().slice(0, 10);
+  };
+  const today = requestDay(new Date());
+  const date = new Date(`${ymd}T00:00:00Z`);
+  const long = new Intl.DateTimeFormat('en-GB', { timeZone: 'UTC', day: '2-digit', month: 'short', year: 'numeric' }).format(date);
+  if (ymd === today) return { main: 'Today', sub: long };
+  if (ymd === addDays(today, -1)) return { main: 'Yesterday', sub: long };
+  return { main: new Intl.DateTimeFormat('en-GB', { timeZone: 'UTC', weekday: 'long' }).format(date), sub: long };
+}
+
 const STATUS_META = {
   pending: {
     label: 'Pending',
@@ -518,6 +541,17 @@ function MyRequests({ requests, loading, error, onRetry, onNew, onCancelled }) {
 
   const shown = filter === 'all' ? requests : requests.filter(r => r.status === filter);
 
+  // Requests grouped by the day they were sent, newest day first.
+  const groups = useMemo(() => {
+    const byDay = new Map();
+    shown.forEach(r => {
+      const day = requestDay(r.created_at);
+      if (!byDay.has(day)) byDay.set(day, { day, items: [] });
+      byDay.get(day).items.push(r);
+    });
+    return [...byDay.values()].sort((a, b) => (a.day < b.day ? 1 : a.day > b.day ? -1 : 0));
+  }, [shown]);
+
   const confirmCancel = async () => {
     if (!toCancel) return;
     setCancelling(true);
@@ -602,8 +636,22 @@ function MyRequests({ requests, loading, error, onRetry, onNew, onCancelled }) {
             </div>
           )
         ) : (
+          <div>
+            {groups.map(group => {
+              const heading = dayHeading(group.day);
+              return (
+          <div key={group.day || 'none'} className="border-b border-[color:var(--border)] last:border-b-0">
+            <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 bg-[color:color-mix(in_srgb,var(--bg-3)_55%,transparent)] px-4 py-2.5 sm:px-5">
+              <h3 className="m-0 flex items-baseline gap-2 text-[13px] font-semibold text-[var(--text)]">
+                {heading.main}
+                {heading.sub && <span className="text-xs font-normal tabular-nums text-[color:var(--text-3)]">{heading.sub}</span>}
+              </h3>
+              <span className="text-xs tabular-nums text-[color:var(--text-3)]">
+                {group.items.length} {group.items.length === 1 ? 'request' : 'requests'}
+              </span>
+            </div>
           <ul className="divide-y divide-[color:var(--border)]">
-            {shown.map(r => (
+            {group.items.map(r => (
               <li key={r.id} className="flex flex-col gap-3 px-4 py-5 transition-colors duration-200 hover:bg-[color-mix(in_srgb,var(--bg-3)_40%,transparent)] motion-reduce:transition-none sm:px-5">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
@@ -611,7 +659,6 @@ function MyRequests({ requests, loading, error, onRetry, onNew, onCancelled }) {
                     <p className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-[color:var(--text-3)]">
                       <span className={wrapAnywhere}>{r.project_name}</span>
                       {r.due_date && <span className="tabular-nums">Due {fmtDay(r.due_date)}</span>}
-                      <span className="tabular-nums">Requested {fmtDay(r.created_at)}</span>
                     </p>
                   </div>
                   <StatusBadge status={r.status} />
@@ -638,6 +685,10 @@ function MyRequests({ requests, loading, error, onRetry, onNew, onCancelled }) {
               </li>
             ))}
           </ul>
+          </div>
+              );
+            })}
+          </div>
         )}
       </section>
 

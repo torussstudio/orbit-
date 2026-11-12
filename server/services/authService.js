@@ -70,10 +70,7 @@ function publicUser(row) {
   };
 }
 
-function authError(
-  message,
-  status = 401,
-) {
+function authError(message, status = 401) {
   const err = new Error(message);
 
   err.status = status;
@@ -87,8 +84,10 @@ function authError(
  * takes the same time whether or not the account is real (no user
  * enumeration by timing). Same cost factor as real hashes.
  */
-const DUMMY_PASSWORD_HASH =
-  bcrypt.hashSync(crypto.randomBytes(16).toString("hex"), 12);
+const DUMMY_PASSWORD_HASH = bcrypt.hashSync(
+  crypto.randomBytes(16).toString("hex"),
+  12,
+);
 
 /*
  * Avatars are stored inline as data URLs and rendered as <img src>
@@ -108,10 +107,7 @@ const AVATAR_DATA_URL_PATTERN =
 const AVATAR_MAX_LENGTH = 150 * 1024;
 
 function isValidAvatarDataUrl(value) {
-  return (
-    typeof value === "string" &&
-    AVATAR_DATA_URL_PATTERN.test(value)
-  );
+  return typeof value === "string" && AVATAR_DATA_URL_PATTERN.test(value);
 }
 
 function isAvatarTooLarge(value) {
@@ -149,10 +145,7 @@ const DEFAULT_SESSION_IDLE_DAYS = 7;
  * REFRESH_SESSION_IDLE_DAYS, default 7.
  */
 function sessionIdleDays() {
-  const value = Number.parseInt(
-    process.env.REFRESH_SESSION_IDLE_DAYS,
-    10,
-  );
+  const value = Number.parseInt(process.env.REFRESH_SESSION_IDLE_DAYS, 10);
 
   return Number.isInteger(value) && value > 0
     ? value
@@ -185,12 +178,7 @@ function sameIp(a, b) {
  * wait for it and ignores its failures, so it can never slow
  * down or fail a login.
  */
-async function notifyNewSignIn({
-  memberId,
-  sessionId,
-  userAgent,
-  ipAddress,
-}) {
+async function notifyNewSignIn({ memberId, sessionId, userAgent, ipAddress }) {
   const devices = await listKnownDevices(
     memberId,
     sessionId,
@@ -235,12 +223,7 @@ async function notifyNewSignIn({
  * Every successful login creates a completely
  * independent browser session.
  */
-async function loginWithPassword({
-  email,
-  password,
-  userAgent,
-  ipAddress,
-}) {
+async function loginWithPassword({ email, password, userAgent, ipAddress }) {
   /*
    * Case-insensitive, so members whose stored email has capital
    * letters can still log in (the controller lowercases the input).
@@ -267,9 +250,7 @@ async function loginWithPassword({
   );
 
   if (!member || !valid) {
-    throw authError(
-      "Invalid credentials",
-    );
+    throw authError("Invalid credentials");
   }
 
   const user = publicUser(member);
@@ -277,36 +258,21 @@ async function loginWithPassword({
   /*
    * One session per browser tab/window.
    */
-  const sessionId =
-    crypto.randomUUID();
+  const sessionId = crypto.randomUUID();
 
   /*
    * One refresh-token generation.
    */
-  const refreshJti =
-    crypto.randomUUID();
+  const refreshJti = crypto.randomUUID();
 
-  const accessToken =
-    signAccessToken(
-      user,
-      sessionId,
-    );
+  const accessToken = signAccessToken(user, sessionId);
 
-  const refreshToken =
-    signRefreshToken(
-      user,
-      refreshJti,
-      sessionId,
-    );
+  const refreshToken = signRefreshToken(user, refreshJti, sessionId);
 
-  const refreshExpiresAt =
-    computeRefreshExpiry();
+  const refreshExpiresAt = computeRefreshExpiry();
 
   if (!refreshExpiresAt) {
-    throw authError(
-      "Server refresh expiry misconfigured",
-      500,
-    );
+    throw authError("Server refresh expiry misconfigured", 500);
   }
 
   await createRefreshToken({
@@ -329,10 +295,7 @@ async function loginWithPassword({
     userAgent,
     ipAddress,
   }).catch((err) => {
-    console.error(
-      "[auth] new sign-in alert failed:",
-      err?.message,
-    );
+    console.error("[auth] new sign-in alert failed:", err?.message);
   });
 
   return {
@@ -353,63 +316,38 @@ async function refreshSession({
   ipAddress,
 }) {
   if (!refreshToken) {
-    throw authError(
-      "Not authenticated",
-    );
+    throw authError("Not authenticated");
   }
 
   let payload;
 
   try {
-    payload =
-      verifyRefreshToken(
-        refreshToken,
-      );
+    payload = verifyRefreshToken(refreshToken);
   } catch (_) {
-    throw authError(
-      "Invalid refresh token",
-    );
+    throw authError("Invalid refresh token");
   }
 
   const jti = payload?.jti;
   const memberId = payload?.sub;
-  const tokenSessionId =
-    payload?.sid;
+  const tokenSessionId = payload?.sid;
 
-  if (
-    payload?.type !== "refresh" ||
-    !jti ||
-    !memberId ||
-    !tokenSessionId
-  ) {
-    throw authError(
-      "Invalid refresh token",
-    );
+  if (payload?.type !== "refresh" || !jti || !memberId || !tokenSessionId) {
+    throw authError("Invalid refresh token");
   }
 
   /*
    * The session ID supplied by the browser
    * must match the session ID inside the JWT.
    */
-  if (
-    !sessionId ||
-    String(sessionId) !==
-      String(tokenSessionId)
-  ) {
-    throw authError(
-      "Invalid refresh session",
-    );
+  if (!sessionId || String(sessionId) !== String(tokenSessionId)) {
+    throw authError("Invalid refresh session");
   }
 
   /*
    * Find the exact active refresh generation
    * belonging to this browser session.
    */
-  const session =
-    await findValidRefreshToken(
-      jti,
-      sessionId,
-    );
+  const session = await findValidRefreshToken(jti, sessionId);
 
   /*
    * Refresh-token reuse detection.
@@ -418,20 +356,10 @@ async function refreshSession({
    * Only revoke the affected session.
    */
   if (!session) {
-    const stale =
-      await findRefreshTokenByJti(
-        jti,
-      );
+    const stale = await findRefreshTokenByJti(jti);
 
-    if (
-      stale?.revoked_at &&
-      stale?.replaced_by &&
-      stale?.session_id
-    ) {
-      await revokeRefreshSession(
-        stale.session_id,
-        "refresh_token_reuse",
-      );
+    if (stale?.revoked_at && stale?.replaced_by && stale?.session_id) {
+      await revokeRefreshSession(stale.session_id, "refresh_token_reuse");
     }
 
     /*
@@ -441,24 +369,15 @@ async function refreshSession({
      * code, so this tab can tell the member why it was
      * signed out. Old clients ignore the code.
      */
-    if (
-      stale &&
-      REVOKED_ELSEWHERE_REASONS.has(
-        stale.revoke_reason,
-      )
-    ) {
-      const revokedError = authError(
-        "Refresh token revoked or expired",
-      );
+    if (stale && REVOKED_ELSEWHERE_REASONS.has(stale.revoke_reason)) {
+      const revokedError = authError("Refresh token revoked or expired");
 
       revokedError.code = "SESSION_REVOKED";
 
       throw revokedError;
     }
 
-    throw authError(
-      "Refresh token revoked or expired",
-    );
+    throw authError("Refresh token revoked or expired");
   }
 
   /*
@@ -466,19 +385,12 @@ async function refreshSession({
    * the same member and session.
    */
   if (
-    String(session.member_id) !==
-      String(memberId) ||
-    String(session.session_id) !==
-      String(sessionId)
+    String(session.member_id) !== String(memberId) ||
+    String(session.session_id) !== String(sessionId)
   ) {
-    await revokeRefreshSession(
-      session.session_id,
-      "session_mismatch",
-    );
+    await revokeRefreshSession(session.session_id, "session_mismatch");
 
-    throw authError(
-      "Invalid refresh session",
-    );
+    throw authError("Invalid refresh session");
   }
 
   /*
@@ -515,42 +427,27 @@ async function refreshSession({
   const member = rows[0];
 
   if (!member || !member.active) {
-    await revokeRefreshSession(
-      sessionId,
-      "user_inactive_or_missing",
-    );
+    await revokeRefreshSession(sessionId, "user_inactive_or_missing");
 
-    throw authError(
-      "User not found",
-    );
+    throw authError("User not found");
   }
 
-  const user =
-    publicUser(member);
+  const user = publicUser(member);
 
   /*
    * Same session ID.
    */
-  const accessToken =
-    signAccessToken(
-      user,
-      sessionId,
-    );
+  const accessToken = signAccessToken(user, sessionId);
 
   /*
    * New refresh generation.
    */
-  const newJti =
-    crypto.randomUUID();
+  const newJti = crypto.randomUUID();
 
-  const refreshExpiresAt =
-    computeRefreshExpiry();
+  const refreshExpiresAt = computeRefreshExpiry();
 
   if (!refreshExpiresAt) {
-    throw authError(
-      "Server refresh expiry misconfigured",
-      500,
-    );
+    throw authError("Server refresh expiry misconfigured", 500);
   }
 
   /*
@@ -560,33 +457,20 @@ async function refreshSession({
    * new JTI -> active
    * same sessionId
    */
-  const rotated =
-    await rotateRefreshToken(
-      jti,
-      {
-        newJti,
-        newExpiresAt:
-          refreshExpiresAt,
-      },
-    );
+  const rotated = await rotateRefreshToken(jti, {
+    newJti,
+    newExpiresAt: refreshExpiresAt,
+  });
 
   if (!rotated) {
-    throw authError(
-      "Refresh token revoked or expired",
-    );
+    throw authError("Refresh token revoked or expired");
   }
 
-  const refreshTokenOut =
-    signRefreshToken(
-      user,
-      newJti,
-      sessionId,
-    );
+  const refreshTokenOut = signRefreshToken(user, newJti, sessionId);
 
   return {
     accessToken,
-    refreshToken:
-      refreshTokenOut,
+    refreshToken: refreshTokenOut,
     sessionId,
     user,
     rotated: true,
@@ -613,21 +497,14 @@ async function removePushAfterLogout() {
 /**
  * LOGOUT CURRENT SESSION ONLY
  */
-async function logoutSession({
-  refreshToken,
-  bearerToken,
-  sessionId,
-}) {
+async function logoutSession({ refreshToken, bearerToken, sessionId }) {
   /*
    * Preferred:
    * sessionId is explicitly supplied by the
    * current browser tab.
    */
   if (sessionId) {
-    const revoked = await revokeRefreshSession(
-      sessionId,
-      "logout",
-    );
+    const revoked = await revokeRefreshSession(sessionId, "logout");
 
     await removePushAfterLogout(revoked);
 
@@ -640,33 +517,18 @@ async function logoutSession({
    */
   if (refreshToken) {
     try {
-      const payload =
-        verifyRefreshToken(
-          refreshToken,
-        );
+      const payload = verifyRefreshToken(refreshToken);
 
-      if (
-        payload?.type === "refresh" &&
-        payload?.sid
-      ) {
-        const revoked = await revokeRefreshSession(
-          payload.sid,
-          "logout",
-        );
+      if (payload?.type === "refresh" && payload?.sid) {
+        const revoked = await revokeRefreshSession(payload.sid, "logout");
 
         await removePushAfterLogout(revoked);
 
         return;
       }
 
-      if (
-        payload?.type === "refresh" &&
-        payload?.jti
-      ) {
-        await revokeRefreshToken(
-          payload.jti,
-          "logout",
-        );
+      if (payload?.type === "refresh" && payload?.jti) {
+        await revokeRefreshToken(payload.jti, "logout");
 
         return;
       }
@@ -688,9 +550,7 @@ async function logoutSession({
    */
   if (bearerToken) {
     try {
-      verifyAccessToken(
-        bearerToken,
-      );
+      verifyAccessToken(bearerToken);
     } catch (_) {
       /*
        * Logout remains idempotent.
@@ -702,13 +562,8 @@ async function logoutSession({
 /**
  * Explicit "logout all devices".
  */
-async function logoutAllSessions(
-  memberId,
-) {
-  await revokeAllRefreshTokensForMember(
-    memberId,
-    "logout_all",
-  );
+async function logoutAllSessions(memberId) {
+  await revokeAllRefreshTokensForMember(memberId, "logout_all");
 
   /*
    * No device stays signed in, so none keeps
@@ -716,18 +571,13 @@ async function logoutAllSessions(
    * subscriptions that have no session (saved
    * before they were linked to one).
    */
-  await removeAllPushSubscriptionsForMember(
-    memberId,
-  );
+  await removeAllPushSubscriptionsForMember(memberId);
 
   /*
    * Sessions are revoked: end the
    * member's live streams too.
    */
-  liveEvents.accessChanged(
-    memberId,
-    "logged out everywhere",
-  );
+  liveEvents.accessChanged(memberId, "logged out everywhere");
 }
 
 /**
@@ -742,16 +592,10 @@ async function logoutAllSessions(
  * its verified access token). The entry that contains it gets
  * current: true and is listed first.
  */
-async function listSessions(
-  memberId,
-  currentSessionId,
-) {
+async function listSessions(memberId, currentSessionId) {
   const idleDays = sessionIdleDays();
 
-  const rows = await listActiveSessions(
-    memberId,
-    idleDays,
-  );
+  const rows = await listActiveSessions(memberId, idleDays);
 
   const groups = new Map();
 
@@ -779,28 +623,20 @@ async function listSessions(
 
     group.tabCount += 1;
 
-    group.sessionIds.push(
-      String(row.session_id).toLowerCase(),
-    );
+    group.sessionIds.push(String(row.session_id).toLowerCase());
 
     if (
       row.first_seen_at &&
-      new Date(row.first_seen_at) <
-        new Date(group.firstSeenAt)
+      new Date(row.first_seen_at) < new Date(group.firstSeenAt)
     ) {
       group.firstSeenAt = row.first_seen_at;
     }
 
-    if (
-      new Date(row.last_active_at) >
-      new Date(group.lastActiveAt)
-    ) {
+    if (new Date(row.last_active_at) > new Date(group.lastActiveAt)) {
       group.lastActiveAt = row.last_active_at;
     }
 
-    if (
-      sameSession(row.session_id, currentSessionId)
-    ) {
+    if (sameSession(row.session_id, currentSessionId)) {
       group.current = true;
     }
   }
@@ -808,8 +644,7 @@ async function listSessions(
   const sessions = [...groups.values()].sort(
     (a, b) =>
       Number(b.current) - Number(a.current) ||
-      new Date(b.lastActiveAt) -
-        new Date(a.lastActiveAt),
+      new Date(b.lastActiveAt) - new Date(a.lastActiveAt),
   );
 
   return {
@@ -828,21 +663,10 @@ async function listSessions(
  *
  * Returns the session ids revoked just now.
  */
-async function revokeOwnSessions(
-  memberId,
-  sessionIds,
-  reason,
-) {
-  const revoked = await revokeSessionsForMember(
-    memberId,
-    sessionIds,
-    reason,
-  );
+async function revokeOwnSessions(memberId, sessionIds, reason) {
+  const revoked = await revokeSessionsForMember(memberId, sessionIds, reason);
 
-  await removePushSubscriptionsForSessions(
-    memberId,
-    sessionIds,
-  );
+  await removePushSubscriptionsForSessions(memberId, sessionIds);
 
   liveEvents.sessionsRevoked(revoked, reason);
 
@@ -856,16 +680,9 @@ async function revokeOwnSessions(
  * another member's session id tells the caller nothing. The
  * current session is refused: that is what logout is for.
  */
-async function revokeSession(
-  memberId,
-  sessionId,
-  currentSessionId,
-) {
+async function revokeSession(memberId, sessionId, currentSessionId) {
   if (!isUuid(sessionId)) {
-    throw authError(
-      "Session not found",
-      404,
-    );
+    throw authError("Session not found", 404);
   }
 
   if (sameSession(sessionId, currentSessionId)) {
@@ -882,10 +699,7 @@ async function revokeSession(
   );
 
   if (revoked.length === 0) {
-    throw authError(
-      "Session not found",
-      404,
-    );
+    throw authError("Session not found", 404);
   }
 }
 
@@ -896,51 +710,29 @@ async function revokeSession(
  * nothing is revoked. The current session is skipped if it is
  * in the list, and the response says so.
  */
-async function revokeSessionGroup(
-  memberId,
-  sessionIds,
-  currentSessionId,
-) {
+async function revokeSessionGroup(memberId, sessionIds, currentSessionId) {
   if (
     !Array.isArray(sessionIds) ||
     sessionIds.length === 0 ||
     sessionIds.length > MAX_SESSIONS_PER_REQUEST ||
     !sessionIds.every(isUuid)
   ) {
-    throw authError(
-      "sessionIds must be a list of session ids",
-      400,
-    );
+    throw authError("sessionIds must be a list of session ids", 400);
   }
 
-  const ids = [
-    ...new Set(
-      sessionIds.map((id) => id.toLowerCase()),
-    ),
-  ];
+  const ids = [...new Set(sessionIds.map((id) => id.toLowerCase()))];
 
-  const owned = new Set(
-    await findOwnedSessionIds(memberId, ids),
-  );
+  const owned = new Set(await findOwnedSessionIds(memberId, ids));
 
   if (ids.some((id) => !owned.has(id))) {
-    throw authError(
-      "Session not found",
-      404,
-    );
+    throw authError("Session not found", 404);
   }
 
-  const targets = ids.filter(
-    (id) => !sameSession(id, currentSessionId),
-  );
+  const targets = ids.filter((id) => !sameSession(id, currentSessionId));
 
   const revoked =
     targets.length > 0
-      ? await revokeOwnSessions(
-          memberId,
-          targets,
-          "revoked_by_user",
-        )
+      ? await revokeOwnSessions(memberId, targets, "revoked_by_user")
       : [];
 
   return {
@@ -953,46 +745,31 @@ async function revokeSessionGroup(
  * SIGN OUT ALL OTHER DEVICES: every session of the member
  * except the current one, listed or not.
  */
-async function logoutOtherSessions(
-  memberId,
-  currentSessionId,
-) {
+async function logoutOtherSessions(memberId, currentSessionId) {
   if (!isUuid(currentSessionId)) {
-    throw authError(
-      "No current session",
-      400,
-    );
+    throw authError("No current session", 400);
   }
 
-  const revoked =
-    await revokeOtherSessionsForMember(
-      memberId,
-      currentSessionId,
-      "logout_others",
-    );
+  const revoked = await revokeOtherSessionsForMember(
+    memberId,
+    currentSessionId,
+    "logout_others",
+  );
 
   /*
    * Subscriptions without a session are kept here; only
    * "log out everywhere" and a password change remove those.
    */
-  await removePushSubscriptionsOfOtherSessions(
-    memberId,
-    currentSessionId,
-  );
+  await removePushSubscriptionsOfOtherSessions(memberId, currentSessionId);
 
-  liveEvents.sessionsRevoked(
-    revoked,
-    "signed out from another device",
-  );
+  liveEvents.sessionsRevoked(revoked, "signed out from another device");
 
   return {
     revoked,
   };
 }
 
-async function getProfile(
-  memberId,
-) {
+async function getProfile(memberId) {
   const { rows } = await db.query(
     `
       SELECT
@@ -1022,11 +799,7 @@ async function getProfile(
  * its verified access token). A password change keeps that one
  * session signed in and ends all the others.
  */
-async function updateProfile(
-  memberId,
-  body,
-  { currentSessionId = null } = {},
-) {
+async function updateProfile(memberId, body, { currentSessionId = null } = {}) {
   const {
     name,
     email,
@@ -1040,9 +813,7 @@ async function updateProfile(
     remove_avatar,
   } = body;
 
-  const {
-    rows: current,
-  } = await db.query(
+  const { rows: current } = await db.query(
     `
       SELECT *
       FROM members
@@ -1053,14 +824,10 @@ async function updateProfile(
   );
 
   if (!current[0]) {
-    throw authError(
-      "User not found",
-      404,
-    );
+    throw authError("User not found", 404);
   }
 
-  const newEmail =
-    normalizeEmail(email);
+  const newEmail = normalizeEmail(email);
 
   /*
    * The client always sends the email,
@@ -1068,9 +835,7 @@ async function updateProfile(
    * whether it really changed.
    */
   const emailChanged =
-    newEmail !== undefined &&
-    newEmail !==
-      normalizeEmail(current[0].email);
+    newEmail !== undefined && newEmail !== normalizeEmail(current[0].email);
 
   if (password) {
     assertPasswordLength(password);
@@ -1085,31 +850,21 @@ async function updateProfile(
    */
   if (password || emailChanged) {
     if (!current_password) {
-      throw authError(
-        "Please enter your current password.",
-        400,
-      );
+      throw authError("Please enter your current password.", 400);
     }
 
-    const currentPasswordValid =
-      await bcrypt.compare(
-        String(current_password),
-        current[0].password_hash,
-      );
+    const currentPasswordValid = await bcrypt.compare(
+      String(current_password),
+      current[0].password_hash,
+    );
 
     if (!currentPasswordValid) {
-      throw authError(
-        "Current password is incorrect",
-        400,
-      );
+      throw authError("Current password is incorrect", 400);
     }
   }
 
   if (emailChanged) {
-    await assertEmailAvailable(
-      newEmail,
-      memberId,
-    );
+    await assertEmailAvailable(newEmail, memberId);
   }
 
   const updates = [];
@@ -1118,49 +873,33 @@ async function updateProfile(
   let idx = 1;
 
   if (name !== undefined) {
-    updates.push(
-      `name = $${idx++}`,
-    );
+    updates.push(`name = $${idx++}`);
 
     values.push(name);
   }
 
   if (email !== undefined) {
-    updates.push(
-      `email = $${idx++}`,
-    );
+    updates.push(`email = $${idx++}`);
 
     values.push(newEmail);
   }
 
   if (phone !== undefined) {
-    updates.push(
-      `phone = $${idx++}`,
-    );
+    updates.push(`phone = $${idx++}`);
 
-    values.push(
-      phone || null,
-    );
+    values.push(phone || null);
   }
 
   if (location !== undefined) {
-    updates.push(
-      `location = $${idx++}`,
-    );
+    updates.push(`location = $${idx++}`);
 
-    values.push(
-      location || null,
-    );
+    values.push(location || null);
   }
 
   if (bio !== undefined) {
-    updates.push(
-      `bio = $${idx++}`,
-    );
+    updates.push(`bio = $${idx++}`);
 
-    values.push(
-      bio || null,
-    );
+    values.push(bio || null);
   }
 
   /*
@@ -1169,13 +908,9 @@ async function updateProfile(
    * utils/dateInput.js).
    */
   if (!keepStoredDate(birthday, current[0].birthday)) {
-    updates.push(
-      `birthday = $${idx++}`,
-    );
+    updates.push(`birthday = $${idx++}`);
 
-    values.push(
-      birthday || null,
-    );
+    values.push(birthday || null);
   }
 
   /*
@@ -1194,19 +929,14 @@ async function updateProfile(
   }
 
   if (remove_avatar === true && current[0].avatar_url) {
-    updates.push(
-      `avatar_url = $${idx++}`,
-    );
+    updates.push(`avatar_url = $${idx++}`);
 
     values.push(null);
   }
 
   if (avatar_base64) {
     if (!isValidAvatarDataUrl(avatar_base64)) {
-      throw authError(
-        "Profile photo must be an image file.",
-        400,
-      );
+      throw authError("Profile photo must be an image file.", 400);
     }
 
     if (isAvatarTooLarge(avatar_base64)) {
@@ -1216,27 +946,17 @@ async function updateProfile(
       );
     }
 
-    updates.push(
-      `avatar_url = $${idx++}`,
-    );
+    updates.push(`avatar_url = $${idx++}`);
 
-    values.push(
-      avatar_base64,
-    );
+    values.push(avatar_base64);
   }
 
   let passwordChanged = false;
 
   if (password) {
-    const hash =
-      await bcrypt.hash(
-        password,
-        12,
-      );
+    const hash = await bcrypt.hash(password, 12);
 
-    updates.push(
-      `password_hash = $${idx++}`,
-    );
+    updates.push(`password_hash = $${idx++}`);
 
     values.push(hash);
 
@@ -1244,9 +964,7 @@ async function updateProfile(
   }
 
   if (updates.length === 0) {
-    return publicUser(
-      current[0],
-    );
+    return publicUser(current[0]);
   }
 
   values.push(memberId);
@@ -1254,9 +972,8 @@ async function updateProfile(
   let rows;
 
   try {
-    ({ rows } =
-      await db.query(
-        `
+    ({ rows } = await db.query(
+      `
           UPDATE members
           SET ${updates.join(", ")}
           WHERE id = $${idx}
@@ -1273,8 +990,8 @@ async function updateProfile(
             birthday,
             onboarding_pending
         `,
-        values,
-      ));
+      values,
+    ));
   } catch (err) {
     if (isEmailUniqueViolation(err)) {
       throw emailTakenError();
@@ -1295,32 +1012,26 @@ async function updateProfile(
    * close this session's own stream too.
    */
   if (passwordChanged && isUuid(currentSessionId)) {
-    const revoked =
-      await revokeOtherSessionsForMember(
-        memberId,
-        currentSessionId,
-        "password_changed",
-      );
+    const revoked = await revokeOtherSessionsForMember(
+      memberId,
+      currentSessionId,
+      "password_changed",
+    );
 
     /*
      * Also removes subscriptions that have no
      * session (saved before they were linked
      * to one).
      */
-    await removePushSubscriptionsOfOtherSessions(
-      memberId,
-      currentSessionId,
-      { includeLegacy: true },
-    );
+    await removePushSubscriptionsOfOtherSessions(memberId, currentSessionId, {
+      includeLegacy: true,
+    });
 
     /*
      * Clears the member's cached auth lookup
      * and ends the other sessions' streams.
      */
-    liveEvents.passwordChanged(
-      memberId,
-      revoked,
-    );
+    liveEvents.passwordChanged(memberId, revoked);
   } else if (passwordChanged) {
     /*
      * No session to keep (the auth middleware
@@ -1328,27 +1039,17 @@ async function updateProfile(
      * fallback): sign out everywhere, as
      * before.
      */
-    await revokeAllRefreshTokensForMember(
-      memberId,
-      "password_changed",
-    );
+    await revokeAllRefreshTokensForMember(memberId, "password_changed");
 
-    await removeAllPushSubscriptionsForMember(
-      memberId,
-    );
+    await removeAllPushSubscriptionsForMember(memberId);
 
-    liveEvents.accessChanged(
-      memberId,
-      "password changed",
-    );
+    liveEvents.accessChanged(memberId, "password changed");
   }
 
   // Managers' Members page shows the name / avatar.
   liveEvents.memberChanged(memberId);
 
-  return publicUser(
-    rows[0],
-  );
+  return publicUser(rows[0]);
 }
 
 const LAST_MANAGER_MESSAGE =
@@ -1369,17 +1070,12 @@ const ACCOUNT_LINKED_MESSAGE =
  * `pool` is the db pool by default
  * (a stub can be passed in tests).
  */
-async function deleteAccount(
-  memberId,
-  pool = db,
-) {
+async function deleteAccount(memberId, pool = db) {
   await deleteMemberRecord(
     memberId,
     {
-      lastManagerMessage:
-        LAST_MANAGER_MESSAGE,
-      linkedMessage:
-        ACCOUNT_LINKED_MESSAGE,
+      lastManagerMessage: LAST_MANAGER_MESSAGE,
+      linkedMessage: ACCOUNT_LINKED_MESSAGE,
     },
     pool,
   );
@@ -1389,18 +1085,13 @@ async function deleteAccount(
    * member (ON DELETE CASCADE); this is
    * only a safety net.
    */
-  await revokeAllRefreshTokensForMember(
-    memberId,
-    "account_deleted",
-  );
+  await revokeAllRefreshTokensForMember(memberId, "account_deleted");
 
   /*
    * Same for the push subscriptions: they go
    * with the member, this is the safety net.
    */
-  await removeAllPushSubscriptionsForMember(
-    memberId,
-  );
+  await removeAllPushSubscriptionsForMember(memberId);
 }
 
 module.exports = {
