@@ -20,7 +20,7 @@ import {
   getStoredRefreshToken,
   getSessionId,
   setRefreshToken,
-  setSessionId,
+  storeSession,
 } from "../api/tokenStore";
 
 async function removeCurrentPushSubscription() {
@@ -336,6 +336,7 @@ export function AuthProvider({
   const login = async (
     email,
     password,
+    trustDevice = false,
   ) => {
     try {
       const {
@@ -345,6 +346,7 @@ export function AuthProvider({
         {
           email,
           password,
+          trustDevice: Boolean(trustDevice),
         },
       );
 
@@ -383,17 +385,11 @@ export function AuthProvider({
        * Store refresh token ONLY
        * in this tab's sessionStorage.
        */
-      setRefreshToken(
-        data.refreshToken,
-      );
-
-      /*
-       * Store session ID ONLY
-       * in this tab's sessionStorage.
-       */
-      setSessionId(
-        data.sessionId,
-      );
+      storeSession({
+        sessionId: data.sessionId,
+        refreshToken: data.refreshToken,
+        trusted: Boolean(trustDevice),
+      });
 
       /*
        * Backend already returned the

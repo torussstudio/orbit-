@@ -82,7 +82,14 @@ function accessExpiresIn() {
   return config.accessTokenExpiresIn;
 }
 
-function refreshExpiresIn() {
+function refreshExpiresIn(trusted = false) {
+  // "Trust this device" sessions live much longer. Each refresh pushes the
+  // expiry forward again, so an in-use trusted device effectively stays
+  // signed in until the member logs out. JWT_TRUSTED_REFRESH_EXPIRES_IN, default 90d.
+  if (trusted) {
+    return process.env.JWT_TRUSTED_REFRESH_EXPIRES_IN || "90d";
+  }
+
   return config.refreshTokenExpiresIn;
 }
 
@@ -128,6 +135,7 @@ function signRefreshToken(
   user,
   jti,
   sessionId,
+  { trusted = false } = {},
 ) {
   if (!sessionId) {
     throw new Error(
@@ -141,10 +149,11 @@ function signRefreshToken(
       sid: String(sessionId),
       jti,
       type: "refresh",
+      ...(trusted ? { trusted: true } : {}),
     },
     refreshSecret(),
     {
-      expiresIn: refreshExpiresIn(),
+      expiresIn: refreshExpiresIn(trusted),
       issuer: "orbit-api",
       audience: "orbit-client",
       algorithm: "HS256",
@@ -182,9 +191,9 @@ function computeAccessExpiry() {
   );
 }
 
-function computeRefreshExpiry() {
+function computeRefreshExpiry({ trusted = false } = {}) {
   return nowPlusExpiresIn(
-    refreshExpiresIn(),
+    refreshExpiresIn(trusted),
   );
 }
 

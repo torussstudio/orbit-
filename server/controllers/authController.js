@@ -80,7 +80,7 @@ function logRefreshEvent(
  */
 async function login(req, res, next) {
   try {
-    const { email, password } =
+    const { email, password, trustDevice } =
       req.body || {};
 
     if (!email || !password) {
@@ -96,6 +96,8 @@ async function login(req, res, next) {
           .toLowerCase(),
 
         password,
+
+        trusted: trustDevice === true,
 
         userAgent:
           req.get("user-agent") || null,

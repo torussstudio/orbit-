@@ -9,6 +9,7 @@ import {
   getSessionId,
   clearSession,
   setLogoutNotice,
+  isTrustedDeviceSession,
 } from "./tokenStore";
 
 const api = axios.create({
@@ -243,6 +244,29 @@ let isLoggingOut = false;
  * ============================================================
  */
 
+/*
+ * A trusted device shares ONE session between all its tabs
+ * (localStorage). Refresh tokens rotate, so two tabs must never
+ * refresh with the same token at the same moment. The Web Locks
+ * API makes them take turns, and each turn re-reads the newest
+ * token, so a stale one is never sent. Normal per-tab sessions
+ * skip this.
+ */
+function withRefreshLock(task) {
+  if (
+    typeof navigator !== "undefined" &&
+    navigator.locks?.request &&
+    isTrustedDeviceSession()
+  ) {
+    return navigator.locks.request(
+      "orbit-refresh",
+      task,
+    );
+  }
+
+  return task();
+}
+
 export function refreshAccessToken() {
   if (!refreshPromise) {
     const refreshToken =
@@ -262,11 +286,13 @@ export function refreshAccessToken() {
       );
     }
 
-    refreshPromise = api
+    refreshPromise = withRefreshLock(() => api
       .post(
         "/auth/refresh",
         {
-          refreshToken,
+          refreshToken:
+            getStoredRefreshToken() ||
+            refreshToken,
         },
         {
           headers: {
@@ -278,6 +304,16 @@ export function refreshAccessToken() {
           },
         },
       )
+      .then((response) => {
+        // Save the rotated token before the lock is released.
+        if (response.data?.refreshToken) {
+          setRefreshToken(
+            response.data.refreshToken,
+          );
+        }
+
+        return response;
+      }))
       .then((response) => {
         const newAccessToken =
           response.data?.accessToken;

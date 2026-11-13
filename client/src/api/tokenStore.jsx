@@ -84,58 +84,186 @@ function getSessionStorage() {
 
 /*
  * ============================================================
- * SESSION ID
+ * TRUSTED DEVICE (persistent) STORAGE
+ * ============================================================
+ *
+ * "Trust this device" at login keeps the session id and the
+ * refresh token in localStorage instead, so the member stays
+ * signed in after the tab or browser is closed, until they
+ * press Logout (or the server ends the session).
+ *
+ * Without it nothing changes: the session lives in this tab's
+ * sessionStorage and ends when the tab closes.
+ *
+ * A tab's own sessionStorage session always wins over the
+ * trusted one, so a normal sign-in in one tab never touches
+ * the trusted session used by other tabs.
  * ============================================================
  */
 
-export function getSessionId() {
-  const storage =
-    getSessionStorage();
-
-  if (!storage) {
+function getLocalStorage() {
+  if (
+    typeof window ===
+    "undefined"
+  ) {
     return null;
   }
 
   try {
-    const value =
-      storage.getItem(
-        SESSION_ID_KEY,
-      );
-
-    return value?.trim() || null;
+    return window.localStorage;
   } catch {
     return null;
   }
 }
 
-export function setSessionId(
-  sessionId,
-) {
-  const storage =
-    getSessionStorage();
+function readItem(storage, key) {
+  if (!storage) {
+    return null;
+  }
 
+  try {
+    return storage.getItem(key)?.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+function writeItem(storage, key, value) {
   if (!storage) {
     return;
   }
 
   try {
     if (
-      typeof sessionId ===
+      typeof value ===
         "string" &&
-      sessionId.trim()
+      value.trim()
     ) {
       storage.setItem(
-        SESSION_ID_KEY,
-        sessionId.trim(),
+        key,
+        value.trim(),
       );
     } else {
-      storage.removeItem(
-        SESSION_ID_KEY,
-      );
+      storage.removeItem(key);
     }
   } catch {
     // Ignore storage failures.
   }
+}
+
+function readKey(key) {
+  return (
+    readItem(
+      getSessionStorage(),
+      key,
+    ) ||
+    readItem(
+      getLocalStorage(),
+      key,
+    )
+  );
+}
+
+/*
+ * Rotation and refreshes write back to wherever this
+ * session already lives.
+ */
+function writeKey(key, value) {
+  const session =
+    getSessionStorage();
+
+  const local =
+    getLocalStorage();
+
+  if (
+    readItem(session, key) ||
+    !readItem(local, key)
+  ) {
+    writeItem(session, key, value);
+  } else {
+    writeItem(local, key, value);
+  }
+}
+
+/*
+ * Called once at login with both values.
+ */
+export function storeSession({
+  sessionId,
+  refreshToken,
+  trusted = false,
+}) {
+  const session =
+    getSessionStorage();
+
+  const local =
+    getLocalStorage();
+
+  const target = trusted
+    ? local || session
+    : session;
+
+  const other =
+    target === session
+      ? local
+      : session;
+
+  writeItem(
+    target,
+    SESSION_ID_KEY,
+    sessionId,
+  );
+
+  writeItem(
+    target,
+    REFRESH_TOKEN_KEY,
+    refreshToken,
+  );
+
+  /*
+   * Never leave a second copy behind. A trusted login
+   * replaces this tab's own session, and the other way round.
+   */
+  if (other !== target) {
+    if (trusted || !readItem(other, SESSION_ID_KEY)) {
+      writeItem(other, SESSION_ID_KEY, null);
+      writeItem(other, REFRESH_TOKEN_KEY, null);
+    }
+  }
+}
+
+export function isTrustedDeviceSession() {
+  return (
+    !readItem(
+      getSessionStorage(),
+      SESSION_ID_KEY,
+    ) &&
+    Boolean(
+      readItem(
+        getLocalStorage(),
+        SESSION_ID_KEY,
+      ),
+    )
+  );
+}
+
+/*
+ * ============================================================
+ * SESSION ID
+ * ============================================================
+ */
+
+export function getSessionId() {
+  return readKey(SESSION_ID_KEY);
+}
+
+export function setSessionId(
+  sessionId,
+) {
+  writeKey(
+    SESSION_ID_KEY,
+    sessionId,
+  );
 }
 
 /*
@@ -143,119 +271,91 @@ export function setSessionId(
  * REFRESH TOKEN
  * ============================================================
  *
- * Refresh token is stored only in
- * sessionStorage.
- *
- * It is NOT stored in localStorage.
- *
- * NOTE:
- * This is required for independent
- * same-browser-tab sessions because an
- * HttpOnly cookie is shared across tabs.
+ * Refresh token is stored in sessionStorage (this tab only),
+ * or in localStorage for a trusted device. It is never put
+ * in a cookie.
  * ============================================================
  */
 
 export function getStoredRefreshToken() {
-  const storage =
-    getSessionStorage();
-
-  if (!storage) {
-    return null;
-  }
-
-  try {
-    const value =
-      storage.getItem(
-        REFRESH_TOKEN_KEY,
-      );
-
-    return value?.trim() || null;
-  } catch {
-    return null;
-  }
+  return readKey(
+    REFRESH_TOKEN_KEY,
+  );
 }
 
 export function setRefreshToken(
   token,
 ) {
-  const storage =
-    getSessionStorage();
-
-  if (!storage) {
-    return;
-  }
-
-  try {
-    if (
-      typeof token ===
-        "string" &&
-      token.trim()
-    ) {
-      storage.setItem(
-        REFRESH_TOKEN_KEY,
-        token.trim(),
-      );
-    } else {
-      storage.removeItem(
-        REFRESH_TOKEN_KEY,
-      );
-    }
-  } catch {
-    // Ignore storage failures.
-  }
+  writeKey(
+    REFRESH_TOKEN_KEY,
+    token,
+  );
 }
 
 export function clearRefreshToken() {
-  const storage =
-    getSessionStorage();
-
-  if (!storage) {
-    return;
-  }
-
-  try {
-    storage.removeItem(
-      REFRESH_TOKEN_KEY,
-    );
-  } catch {
-    // Ignore storage failures.
-  }
+  writeItem(
+    getSessionStorage(),
+    REFRESH_TOKEN_KEY,
+    null,
+  );
 }
 
 /*
  * ============================================================
- * CLEAR CURRENT TAB SESSION
+ * CLEAR CURRENT SESSION
  * ============================================================
  *
- * IMPORTANT:
+ * Clears the session this tab is using: its own sessionStorage
+ * session, or else the trusted-device session. A tab that has
+ * its own session never wipes the trusted one.
  *
- * Do NOT use localStorage.
  * Do NOT broadcast a global logout.
- *
- * Only this browser tab's session is cleared.
  * ============================================================
  */
 
 export function clearSession() {
   clearAccessToken();
 
-  const storage =
+  const session =
     getSessionStorage();
 
-  if (!storage) {
-    return;
-  }
-
-  try {
-    storage.removeItem(
+  const target =
+    readItem(
+      session,
       SESSION_ID_KEY,
+    ) ||
+    readItem(
+      session,
+      REFRESH_TOKEN_KEY,
+    )
+      ? session
+      : getLocalStorage();
+
+  writeItem(
+    target,
+    SESSION_ID_KEY,
+    null,
+  );
+
+  writeItem(
+    target,
+    REFRESH_TOKEN_KEY,
+    null,
+  );
+
+  // Make sure nothing half-cleared stays in this tab.
+  if (target !== session) {
+    writeItem(
+      session,
+      SESSION_ID_KEY,
+      null,
     );
 
-    storage.removeItem(
+    writeItem(
+      session,
       REFRESH_TOKEN_KEY,
+      null,
     );
-  } catch {
-    // Ignore storage failures.
   }
 }
 

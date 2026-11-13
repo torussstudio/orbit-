@@ -223,7 +223,7 @@ async function notifyNewSignIn({ memberId, sessionId, userAgent, ipAddress }) {
  * Every successful login creates a completely
  * independent browser session.
  */
-async function loginWithPassword({ email, password, userAgent, ipAddress }) {
+async function loginWithPassword({ email, password, userAgent, ipAddress, trusted = false }) {
   /*
    * Case-insensitive, so members whose stored email has capital
    * letters can still log in (the controller lowercases the input).
@@ -267,9 +267,9 @@ async function loginWithPassword({ email, password, userAgent, ipAddress }) {
 
   const accessToken = signAccessToken(user, sessionId);
 
-  const refreshToken = signRefreshToken(user, refreshJti, sessionId);
+  const refreshToken = signRefreshToken(user, refreshJti, sessionId, { trusted });
 
-  const refreshExpiresAt = computeRefreshExpiry();
+  const refreshExpiresAt = computeRefreshExpiry({ trusted });
 
   if (!refreshExpiresAt) {
     throw authError("Server refresh expiry misconfigured", 500);
@@ -444,7 +444,10 @@ async function refreshSession({
    */
   const newJti = crypto.randomUUID();
 
-  const refreshExpiresAt = computeRefreshExpiry();
+  // A trusted-device session stays trusted (and long-lived) across rotations.
+  const trusted = payload?.trusted === true;
+
+  const refreshExpiresAt = computeRefreshExpiry({ trusted });
 
   if (!refreshExpiresAt) {
     throw authError("Server refresh expiry misconfigured", 500);
@@ -466,7 +469,7 @@ async function refreshSession({
     throw authError("Refresh token revoked or expired");
   }
 
-  const refreshTokenOut = signRefreshToken(user, newJti, sessionId);
+  const refreshTokenOut = signRefreshToken(user, newJti, sessionId, { trusted });
 
   return {
     accessToken,

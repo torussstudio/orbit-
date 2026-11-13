@@ -222,6 +222,7 @@ export default function Login() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [trustDevice, setTrustDevice] = useState(false);
 
   // Forgot password
   const [code, setCode] = useState('');
@@ -258,7 +259,7 @@ export default function Login() {
     e.preventDefault();
     setError(''); setLoading(true);
     try {
-      await login(email, password);
+      await login(email, password, trustDevice);
       clearLogoutNotice();
       navigate('/');
     } catch (err) {
@@ -399,6 +400,22 @@ export default function Login() {
                       <EyeToggle shown={showPassword} onToggle={() => setShowPassword(!showPassword)} />
                     </div>
                   </div>
+
+                  <label className="flex items-start gap-2.5 mb-5 cursor-pointer select-none" htmlFor="login-trust-device">
+                    <input
+                      id="login-trust-device"
+                      type="checkbox"
+                      className="mt-0.5 h-4 w-4 shrink-0 cursor-pointer accent-[color:var(--accent,#6366f1)]"
+                      checked={trustDevice}
+                      onChange={e => setTrustDevice(e.target.checked)}
+                    />
+                    <span className="text-[13px] leading-snug text-[color:var(--text-2,#475569)]">
+                      Trust this device
+                      <span className="block text-xs text-[color:var(--text-3,#94a3b8)]">
+                        Stay signed in until you log out. Use only on your own device.
+                      </span>
+                    </span>
+                  </label>
 
                   <ErrorBox message={error} />
 
