@@ -1,0 +1,299 @@
+<!doctype html>
+<html lang="en" data-resolution="landscape">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1920, height=1080" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Space+Mono:wght@400;700&display=swap" />
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.15.0/dist/gsap.min.js"></script>
+    <style>
+      :root {
+        --ground: #f4f6fb;
+        --surface: #ffffff;
+        --muted: #f0f2f9;
+        --border: #e2e6f3;
+        --accent: #6366f1;
+        --accent2: #8b5cf6;
+        --ink: #1e2047;
+        --ink2: #5b6070;
+        --ok: #10b981;
+        --warn: #f59e0b;
+        --font: 'Inter', system-ui, sans-serif;
+        --mono: 'Space Mono', monospace;
+      }
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body { width: 1920px; height: 1080px; overflow: hidden; background: var(--ground); }
+      #root { position: relative; width: 1920px; height: 1080px; font-family: var(--font); color: var(--ink); overflow: hidden; }
+      .clip { position: absolute; inset: 0; }
+      .center { display: flex; flex-direction: column; align-items: center; justify-content: center; }
+      .bgglow { position: absolute; width: 1400px; height: 1400px; left: 260px; top: -160px; border-radius: 50%;
+        background: radial-gradient(circle, rgba(139,92,246,0.16) 0%, rgba(99,102,241,0.07) 40%, rgba(244,246,251,0) 70%); }
+      .ring { position: absolute; border: 2px solid rgba(99,102,241,0.12); border-radius: 50%; left: 50%; top: 50%; }
+      .card { background: var(--surface); border: 1px solid var(--border); border-radius: 24px;
+        box-shadow: 0 2px 8px rgba(99,102,241,0.08), 0 24px 60px rgba(30,32,71,0.10); }
+      .eyebrow { font-family: var(--mono); font-size: 22px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--accent); }
+      .caption { position: absolute; left: 0; right: 0; bottom: 96px; text-align: center; font-size: 56px; font-weight: 700; letter-spacing: -0.03em; }
+      .grad { background: linear-gradient(90deg, var(--accent), var(--accent2)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+
+      /* Scene 1: hook */
+      #s1 .chat { position: absolute; left: 310px; top: 250px; width: 1300px; padding: 44px 56px 52px; }
+      #s1 .who { display: flex; align-items: center; gap: 18px; margin-bottom: 28px; font-size: 26px; font-weight: 600; color: var(--ink2); }
+      #s1 .av { width: 52px; height: 52px; border-radius: 50%; background: linear-gradient(135deg, #f59e0b, #ef4444); color: #fff; display: grid; place-items: center; font-weight: 700; }
+      #s1 .msgwrap { position: relative; height: 200px; }
+      #s1 .msg { position: absolute; inset: 0; font-size: 62px; line-height: 1.22; font-weight: 600; letter-spacing: -0.02em; }
+      #s1 .msg.raw { color: var(--ink); }
+      #s1 .msg.raw span { opacity: 0; }
+      #s1 .msg.clean { color: var(--ink); opacity: 0; }
+      #s1 .chip { position: absolute; left: 310px; top: 672px; display: inline-flex; align-items: center; gap: 14px; padding: 20px 32px; border-radius: 999px;
+        background: linear-gradient(90deg, var(--accent), var(--accent2)); color: #fff; font-size: 32px; font-weight: 600; box-shadow: 0 14px 36px -10px rgba(99,102,241,0.7); opacity: 0; }
+      #s1 .chip small { font-family: var(--mono); font-size: 22px; opacity: 0.85; font-weight: 400; }
+      #s1 .tag { position: absolute; right: 310px; top: 186px; font-family: var(--mono); font-size: 28px; color: var(--ink2); }
+
+      /* Scene 2: reveal */
+      #s2 .hex { width: 260px; height: 260px; }
+      #s2 .word { margin-top: 36px; font-size: 168px; font-weight: 800; letter-spacing: 0.06em; }
+      #s2 .sub { margin-top: 18px; font-size: 44px; font-weight: 500; color: var(--ink2); letter-spacing: -0.01em; }
+
+      /* Scene 3: flow */
+      #s3 .app { position: absolute; left: 120px; top: 90px; width: 1680px; height: 740px; display: flex; overflow: hidden; }
+      #s3 .side { width: 360px; background: var(--muted); border-right: 1px solid var(--border); padding: 40px 30px; }
+      #s3 .brand { display: flex; align-items: center; gap: 14px; font-size: 30px; font-weight: 800; letter-spacing: 0.06em; margin-bottom: 36px; }
+      #s3 .grp { font-family: var(--mono); font-size: 16px; letter-spacing: 0.14em; color: #5b6070; margin: 22px 0 10px; }
+      #s3 .nav { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-radius: 12px; font-size: 23px; font-weight: 500; color: var(--ink2); }
+      #s3 .nav.on { background: var(--surface); color: var(--accent); font-weight: 600; box-shadow: 0 1px 4px rgba(99,102,241,0.12); }
+      #s3 .badge { min-width: 34px; height: 30px; padding: 0 10px; border-radius: 999px; background: #4f46e5; color: #fff; font-size: 17px; font-weight: 700; display: grid; place-items: center; }
+      #s3 .board { flex: 1; padding: 44px 44px; }
+      #s3 .board h3 { font-size: 36px; font-weight: 700; letter-spacing: -0.02em; margin-bottom: 30px; }
+      #s3 .lanes { display: flex; gap: 22px; position: relative; }
+      #s3 .lane { flex: 1; height: 520px; background: var(--muted); border-radius: 18px; padding: 22px; }
+      #s3 .lane b { display: flex; align-items: center; gap: 10px; font-size: 21px; font-weight: 600; color: var(--ink2); }
+      #s3 .dot { width: 12px; height: 12px; border-radius: 50%; }
+      #s3 .ghost { margin-top: 18px; height: 92px; border-radius: 14px; background: var(--surface); border: 1px solid var(--border); opacity: 0.7; }
+      #s3 .task { position: absolute; left: 22px; top: 300px; width: 251px; padding: 20px; border-radius: 14px; background: var(--surface);
+        border: 2px solid var(--accent); box-shadow: 0 18px 40px -14px rgba(99,102,241,0.55); }
+      #s3 .task .t { font-size: 22px; font-weight: 700; line-height: 1.25; }
+      #s3 .task .m { margin-top: 12px; display: flex; align-items: center; justify-content: space-between; font-family: var(--mono); font-size: 16px; color: var(--ink2); }
+      #s3 .pill { white-space: nowrap; padding: 4px 12px; border-radius: 999px; font-family: var(--font); font-weight: 700; font-size: 15px; color: #fff; }
+
+      /* Scene 4: assistant */
+      #s4 .panel { position: absolute; left: 360px; top: 110px; width: 1200px; height: 700px; padding: 44px 52px; }
+      #s4 .hd { display: flex; align-items: center; gap: 18px; font-size: 34px; font-weight: 700; }
+      #s4 .ic { width: 56px; height: 56px; border-radius: 14px; background: linear-gradient(135deg, var(--accent), var(--accent2)); color: #fff; display: grid; place-items: center; font-size: 30px; box-shadow: 0 10px 22px -10px var(--accent); }
+      #s4 .chips { margin-top: 34px; display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+      #s4 .c { padding: 20px 24px; border-radius: 16px; border: 1px solid var(--border); background: var(--muted); }
+      #s4 .c b { display: block; font-size: 25px; font-weight: 600; }
+      #s4 .c span { display: block; margin-top: 6px; font-size: 21px; color: var(--ink2); }
+      #s4 .c.press { border: 2px solid var(--accent); background: #eef0ff; }
+      #s4 .ans { margin-top: 30px; padding: 26px 30px; border-radius: 16px; background: var(--surface); border: 1px solid var(--border); }
+      #s4 .ans p { font-size: 24px; line-height: 1.45; margin-top: 8px; opacity: 0; }
+      #s4 .ans p:first-child { margin-top: 0; }
+      #s4 .ans em { font-style: normal; font-weight: 700; color: var(--accent); }
+
+      /* Scene 5: stats */
+      #s5 .row { position: absolute; left: 180px; right: 180px; top: 250px; display: flex; gap: 40px; }
+      #s5 .tile { flex: 1; padding: 46px 48px; }
+      #s5 .lab { font-size: 26px; font-weight: 600; color: var(--ink2); }
+      #s5 .num { margin-top: 18px; font-size: 128px; font-weight: 800; letter-spacing: -0.04em; line-height: 1; }
+      #s5 .bar { margin-top: 30px; height: 12px; border-radius: 999px; background: var(--muted); overflow: hidden; }
+      #s5 .fill { height: 100%; width: 0; border-radius: 999px; background: linear-gradient(90deg, var(--accent), var(--accent2)); }
+
+      /* Scene 6: outro */
+      #s6 .hex { width: 200px; height: 200px; }
+      #s6 .word { margin-top: 26px; font-size: 120px; font-weight: 800; letter-spacing: 0.06em; }
+      #s6 .l1 { margin-top: 26px; font-family: var(--mono); font-size: 34px; color: var(--ink2); }
+      #s6 .l2 { margin-top: 14px; font-size: 76px; font-weight: 800; letter-spacing: -0.03em; }
+    </style>
+  </head>
+  <body>
+    <div id="root" data-composition-id="main" data-start="0" data-duration="22.5" data-width="1920" data-height="1080">
+      <div class="bgglow" id="glow"></div>
+      <div class="ring" id="ring1" style="width:1500px;height:1500px;margin:-750px 0 0 -750px"></div>
+      <audio id="music" src="assets/orbit-bed.wav" data-start="0" data-duration="22.5" data-volume="1" data-track-index="1"></audio>
+      <div class="ring" id="ring2" style="width:2100px;height:2100px;margin:-1050px 0 0 -1050px"></div>
+
+      <!-- 1. Hook -->
+      <div id="s1" class="clip" data-start="0" data-duration="5" data-track-index="0">
+        <div class="tag" id="s1tag">Messages · Client – Logo refresh</div>
+        <div class="card chat" id="s1chat">
+          <div class="who"><div class="av">A</div>Arjun · draft reply</div>
+          <div class="msgwrap">
+            <div class="msg raw" id="s1raw"></div>
+            <div class="msg clean" id="s1clean">Hi! The final logo will be ready this evening. <span class="grad">Does that work?</span></div>
+          </div>
+        </div>
+        <div class="chip" id="s1chip">✦ Rewrite for client <small>Manglish → polished English</small></div>
+      </div>
+
+      <!-- 2. Reveal -->
+      <div id="s2" class="clip center" data-start="5" data-duration="2.4" data-track-index="0">
+        <svg class="hex" id="s2hex" viewBox="0 0 100 100">
+          <defs><linearGradient id="g1" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#6366f1"/><stop offset="1" stop-color="#8b5cf6"/></linearGradient></defs>
+          <polygon points="50,6 88,28 88,72 50,94 12,72 12,28" fill="none" stroke="url(#g1)" stroke-width="11" stroke-linejoin="round"/>
+        </svg>
+        <div class="word" id="s2word">ORBIT</div>
+        <div class="sub" id="s2sub">Projects. People. Hours. <span class="grad" style="font-weight:700">One workspace.</span></div>
+      </div>
+
+      <!-- 3. Flow -->
+      <div id="s3" class="clip" data-start="7.4" data-duration="4.4" data-track-index="0">
+        <div class="card app" id="s3app" data-layout-ignore>
+          <div class="side">
+            <div class="brand"><span style="color:var(--accent)">⬡</span>ORBIT</div>
+            <div class="grp">OVERVIEW</div>
+            <div class="nav">Dashboard</div>
+            <div class="nav">Calendar</div>
+            <div class="nav">Messages</div>
+            <div class="grp">WORK</div>
+            <div class="nav">Projects</div>
+            <div class="nav on">In Review <span class="badge" id="b1">2</span></div>
+            <div class="nav">Requested Tasks <span class="badge" id="b2">1</span></div>
+            <div class="grp">TEAM</div>
+            <div class="nav">Members</div>
+            <div class="nav">Time Log</div>
+          </div>
+          <div class="board">
+            <h3>Logo refresh · Brand cluster</h3>
+            <div class="lanes" id="lanes">
+              <div class="lane"><b><i class="dot" style="background:#94a3b8"></i>Requested</b><div class="ghost"></div></div>
+              <div class="lane"><b><i class="dot" style="background:var(--warn)"></i>In Progress</b><div class="ghost"></div><div class="ghost"></div></div>
+              <div class="lane"><b><i class="dot" style="background:var(--accent)"></i>In Review</b><div class="ghost"></div></div>
+              <div class="lane"><b><i class="dot" style="background:var(--ok)"></i>Done</b><div class="ghost"></div><div class="ghost"></div></div>
+              <div class="task" id="s3task">
+                <div class="t">Final logo export for client</div>
+                <div class="m"><span>Due Fri · 3h</span><span class="pill" id="s3pill" style="background:#475569">NEW</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="caption" id="s3cap">Every task, from <span class="grad">request to review.</span></div>
+      </div>
+
+      <!-- 4. Assistant -->
+      <div id="s4" class="clip" data-start="11.8" data-duration="4.4" data-track-index="0">
+        <div class="card panel" id="s4panel">
+          <div class="hd"><div class="ic">✦</div>Ask Orbit</div>
+          <div class="chips">
+            <div class="c" id="c1"><b>What should I do first?</b><span>Prioritise my day</span></div>
+            <div class="c" id="c2"><b>My overdue tasks</b><span>What is late</span></div>
+            <div class="c" id="c3"><b>Write my standup</b><span>Yesterday · today · blockers</span></div>
+            <div class="c" id="c4"><b>Team workload</b><span>Who is overloaded, who has room</span></div>
+          </div>
+          <div class="ans" id="s4ans">
+            <p id="a1">1. <em>Final logo export</em>: the client is waiting, due tonight.</p>
+            <p id="a2">2. <em>Reply to review notes</em> on the brand deck: 2 changes.</p>
+            <p id="a3">3. Log yesterday's <em>3h</em> on Logo refresh before lunch.</p>
+          </div>
+        </div>
+        <div class="caption" id="s4cap" style="bottom:70px">An assistant that <span class="grad">knows your agency.</span></div>
+      </div>
+
+      <!-- 5. Stats -->
+      <div id="s5" class="clip" data-start="16.2" data-duration="2.6" data-track-index="0">
+        <div class="row">
+          <div class="card tile" id="t1"><div class="lab">Hours this week</div><div class="num" id="n1">0</div><div class="bar"><div class="fill" id="f1"></div></div></div>
+          <div class="card tile" id="t2"><div class="lab">On-time rate</div><div class="num"><span id="n2">0</span>%</div><div class="bar"><div class="fill" id="f2"></div></div></div>
+          <div class="card tile" id="t3"><div class="lab">Waiting for review</div><div class="num" id="n3">0</div><div class="bar"><div class="fill" id="f3"></div></div></div>
+        </div>
+        <div class="caption" id="s5cap" style="bottom:200px">Time, calendar, messages. <span class="grad">All in orbit.</span></div>
+      </div>
+
+      <!-- 6. Outro -->
+      <div id="s6" class="clip center" data-start="18.8" data-duration="3.7" data-track-index="0">
+        <svg class="hex" id="s6hex" viewBox="0 0 100 100">
+          <defs><linearGradient id="g2" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#6366f1"/><stop offset="1" stop-color="#8b5cf6"/></linearGradient></defs>
+          <polygon points="50,6 88,28 88,72 50,94 12,72 12,28" fill="none" stroke="url(#g2)" stroke-width="11" stroke-linejoin="round"/>
+        </svg>
+        <div class="word" id="s6word">ORBIT</div>
+        <div class="l1" id="s6l1">Internal use only.</div>
+        <div class="l2 grad" id="s6l2">Externally impressive.</div>
+      </div>
+    </div>
+    <script>
+      window.__timelines = window.__timelines || {};
+      const tl = gsap.timeline({ paused: true });
+      const E = 'power3.out';
+
+      // Ambient: slow ring drift across the whole film
+      tl.fromTo('#ring1', { rotation: 0, scale: 0.9 }, { rotation: 40, scale: 1.05, duration: 22.5, ease: 'none' }, 0);
+      tl.fromTo('#ring2', { rotation: 0 }, { rotation: -30, duration: 22.5, ease: 'none' }, 0);
+
+      // ---- 1. Hook (0 - 5.0): card already on screen at frame 0
+      const raw = "client nu logo innu evening tharam, ok alle?";
+      const rawEl = document.getElementById('s1raw');
+      raw.split('').forEach((ch, i) => { const s = document.createElement('span'); s.textContent = ch; if (i < 6) s.style.opacity = 1; rawEl.appendChild(s); });
+      rawEl.querySelectorAll('span').forEach((s, i) => { if (i >= 6) tl.set(s, { opacity: 1 }, 0.05 + (i - 6) * 0.026); });
+      tl.fromTo('#s1chip', { opacity: 0, y: 24, scale: 0.85 }, { opacity: 1, y: 0, scale: 1, duration: 0.3, ease: 'back.out(2)' }, 1.5);
+      tl.to('#s1chip', { scale: 0.94, duration: 0.08 }, 2.15);
+      tl.to('#s1chip', { scale: 1, duration: 0.12 }, 2.23);
+      tl.to('#s1raw', { opacity: 0, y: -24, duration: 0.22 }, 2.3);
+      tl.fromTo('#s1clean', { opacity: 0, y: 24 }, { opacity: 1, y: 0, duration: 0.3, ease: E }, 2.4);
+      tl.to(['#s1chat', '#s1chip', '#s1tag'], { opacity: 0, y: -30, duration: 0.25, ease: 'power2.in' }, 4.75);
+
+      // ---- 2. Reveal
+      const R = 5.0;
+      tl.fromTo('#s2hex', { scale: 0.2, rotation: -120, opacity: 0 }, { scale: 1, rotation: 0, opacity: 1, duration: 0.6, ease: 'back.out(1.6)' }, R);
+      tl.fromTo('#s2word', { y: 50, opacity: 0 }, { y: 0, opacity: 1, duration: 0.45, ease: E }, R + 0.25);
+      tl.fromTo('#s2sub', { y: 30, opacity: 0 }, { y: 0, opacity: 1, duration: 0.4, ease: E }, R + 0.5);
+      tl.to('#s2hex', { rotation: 30, duration: 1.55, ease: 'none' }, R + 0.6);
+      tl.to(['#s2hex', '#s2word', '#s2sub'], { opacity: 0, scale: 1.06, duration: 0.25, ease: 'power2.in' }, R + 2.15);
+
+      // ---- 3. Flow
+      const F = 7.4;
+      tl.fromTo('#s3app', { y: 60, opacity: 0, scale: 0.96 }, { y: 0, opacity: 1, scale: 1, duration: 0.45, ease: E }, F);
+      tl.fromTo('#s3task', { opacity: 0, y: 30 }, { opacity: 1, y: 0, duration: 0.3, ease: E }, F + 0.3);
+      tl.fromTo('#s3cap', { opacity: 0, y: 24 }, { opacity: 1, y: 0, duration: 0.35, ease: E }, F + 0.4);
+      const laneEl = document.querySelector('#s3 .lane'); const lane = laneEl.offsetWidth + 22; document.getElementById('s3task').style.width = (laneEl.offsetWidth - 44) + 'px';
+      const stages = [
+        { t: F + 1.0, x: lane, label: 'IN PROGRESS', c: '#b45309' },
+        { t: F + 2.0, x: lane * 2, label: 'IN REVIEW', c: '#4f46e5' },
+        { t: F + 3.0, x: lane * 3, label: 'DONE', c: '#047857' },
+      ];
+      stages.forEach((st) => {
+        tl.to('#s3task', { x: st.x, duration: 0.45, ease: 'power3.inOut' }, st.t);
+        tl.to('#s3task', { rotation: 3, duration: 0.2 }, st.t);
+        tl.to('#s3task', { rotation: 0, duration: 0.25 }, st.t + 0.25);
+        tl.set('#s3pill', { textContent: st.label, backgroundColor: st.c }, st.t + 0.3);
+      });
+      tl.set('#b2', { textContent: '0' }, F + 1.3);
+      tl.set('#b1', { textContent: '3' }, F + 2.3);
+      tl.fromTo('#b1', { scale: 1.5 }, { scale: 1, duration: 0.3, ease: 'back.out(3)' }, F + 2.3);
+      tl.set('#b1', { textContent: '2' }, F + 3.3);
+      tl.to(['#s3app', '#s3cap'], { opacity: 0, y: -40, duration: 0.25, ease: 'power2.in' }, F + 4.15);
+
+      // ---- 4. Assistant
+      const A = 11.8;
+      tl.fromTo('#s4panel', { y: 60, opacity: 0, scale: 0.96 }, { y: 0, opacity: 1, scale: 1, duration: 0.45, ease: E }, A);
+      ['#c1', '#c2', '#c3', '#c4'].forEach((c, i) => tl.fromTo(c, { opacity: 0, y: 20 }, { opacity: 1, y: 0, duration: 0.3, ease: E }, A + 0.2 + i * 0.08));
+      tl.fromTo('#s4cap', { opacity: 0, y: 24 }, { opacity: 1, y: 0, duration: 0.35, ease: E }, A + 0.6);
+      tl.to('#c1', { scale: 0.96, duration: 0.1 }, A + 0.95);
+      tl.set('#c1', { className: 'c press' }, A + 1.0);
+      tl.to('#c1', { scale: 1, duration: 0.15 }, A + 1.05);
+      tl.fromTo('#s4ans', { opacity: 0 }, { opacity: 1, duration: 0.2 }, A + 1.2);
+      ['#a1', '#a2', '#a3'].forEach((a, i) => tl.fromTo(a, { opacity: 0, x: -20 }, { opacity: 1, x: 0, duration: 0.3, ease: E }, A + 1.3 + i * 0.35));
+      tl.to(['#s4panel', '#s4cap'], { opacity: 0, y: -40, duration: 0.25, ease: 'power2.in' }, A + 4.15);
+
+      // ---- 5. Stats
+      const S = 16.2;
+      ['#t1', '#t2', '#t3'].forEach((t, i) => tl.fromTo(t, { opacity: 0, y: 60 }, { opacity: 1, y: 0, duration: 0.4, ease: E }, S + i * 0.1));
+      const counts = [{ id: 'n1', to: 38.5, dec: 1, f: '#f1', w: '77%' }, { id: 'n2', to: 94, dec: 0, f: '#f2', w: '94%' }, { id: 'n3', to: 6, dec: 0, f: '#f3', w: '30%' }];
+      counts.forEach((c, i) => {
+        const o = { v: 0 }; const el = document.getElementById(c.id);
+        tl.to(o, { v: c.to, duration: 1.1, ease: 'power2.out', onUpdate: () => { el.textContent = o.v.toFixed(c.dec); } }, S + 0.2 + i * 0.1);
+        tl.to(c.f, { width: c.w, duration: 1.1, ease: 'power2.out' }, S + 0.2 + i * 0.1);
+      });
+      tl.fromTo('#s5cap', { opacity: 0, y: 24 }, { opacity: 1, y: 0, duration: 0.35, ease: E }, S + 0.4);
+      tl.to(['#t1', '#t2', '#t3', '#s5cap'], { opacity: 0, y: -40, duration: 0.25, ease: 'power2.in' }, S + 2.35);
+
+      // ---- 6. Outro
+      const O = 18.8;
+      tl.fromTo('#s6hex', { scale: 0.3, rotation: 90, opacity: 0 }, { scale: 1, rotation: 0, opacity: 1, duration: 0.5, ease: 'back.out(1.6)' }, O);
+      tl.fromTo('#s6word', { y: 40, opacity: 0 }, { y: 0, opacity: 1, duration: 0.4, ease: E }, O + 0.2);
+      tl.fromTo('#s6l1', { y: 20, opacity: 0 }, { y: 0, opacity: 1, duration: 0.35, ease: E }, O + 0.4);
+      tl.fromTo('#s6l2', { y: 30, opacity: 0, scale: 0.9 }, { y: 0, opacity: 1, scale: 1, duration: 0.4, ease: 'back.out(2)' }, O + 0.9);
+
+      window.__timelines['main'] = tl;
+      tl.seek(0);
+    </script>
+  </body>
+</html>

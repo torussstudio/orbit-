@@ -1,0 +1,1138 @@
+{
+  "ok": true,
+  "strict": false,
+  "browserSkipped": false,
+  "lint": {
+    "ok": true,
+    "errorCount": 0,
+    "warningCount": 7,
+    "infoCount": 0,
+    "findings": [
+      {
+        "code": "timeline_track_too_dense",
+        "severity": "warning",
+        "message": "Track 0 has 6 timed elements in this HTML file. Smaller sub-compositions keep timelines easier to read, iterate on, and diff.",
+        "selector": "[data-composition-id]",
+        "dataAttributes": {},
+        "sourceFile": "C:\\Users\\Admin\\Desktop\\orbit-main - Copy\\brag-output\\composition\\index.html",
+        "bbox": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        },
+        "time": 0,
+        "fixHint": "Move coherent scene groups into separate .html files under compositions/ and mount them from the parent with data-composition-src so the timeline stays easier to inspect, revise, and validate."
+      },
+      {
+        "code": "nested_structure_needs_subcomposition",
+        "severity": "warning",
+        "message": "<div id=\"s1\"> is a timeline element that contains nested <div id=\"s1tag\">. The timeline shows one row per top-level element, and the root composition is built only from sub-compositions.",
+        "selector": "#s1",
+        "dataAttributes": {},
+        "sourceFile": "C:\\Users\\Admin\\Desktop\\orbit-main - Copy\\brag-output\\composition\\index.html",
+        "bbox": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        },
+        "time": 0,
+        "fixHint": "Move <div id=\"s1\"> and its contents into a sub-composition file and mount it with data-composition-src."
+      },
+      {
+        "code": "nested_structure_needs_subcomposition",
+        "severity": "warning",
+        "message": "<div id=\"s2\"> is a timeline element that contains nested <svg id=\"s2hex\">. The timeline shows one row per top-level element, and the root composition is built only from sub-compositions.",
+        "selector": "#s2",
+        "dataAttributes": {},
+        "sourceFile": "C:\\Users\\Admin\\Desktop\\orbit-main - Copy\\brag-output\\composition\\index.html",
+        "bbox": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        },
+        "time": 0,
+        "fixHint": "Move <div id=\"s2\"> and its contents into a sub-composition file and mount it with data-composition-src."
+      },
+      {
+        "code": "nested_structure_needs_subcomposition",
+        "severity": "warning",
+        "message": "<div id=\"s3\"> is a timeline element that contains nested <div id=\"s3app\">. The timeline shows one row per top-level element, and the root composition is built only from sub-compositions.",
+        "selector": "#s3",
+        "dataAttributes": {},
+        "sourceFile": "C:\\Users\\Admin\\Desktop\\orbit-main - Copy\\brag-output\\composition\\index.html",
+        "bbox": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        },
+        "time": 0,
+        "fixHint": "Move <div id=\"s3\"> and its contents into a sub-composition file and mount it with data-composition-src."
+      },
+      {
+        "code": "nested_structure_needs_subcomposition",
+        "severity": "warning",
+        "message": "<div id=\"s4\"> is a timeline element that contains nested <div id=\"s4panel\">. The timeline shows one row per top-level element, and the root composition is built only from sub-compositions.",
+        "selector": "#s4",
+        "dataAttributes": {},
+        "sourceFile": "C:\\Users\\Admin\\Desktop\\orbit-main - Copy\\brag-output\\composition\\index.html",
+        "bbox": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        },
+        "time": 0,
+        "fixHint": "Move <div id=\"s4\"> and its contents into a sub-composition file and mount it with data-composition-src."
+      },
+      {
+        "code": "nested_structure_needs_subcomposition",
+        "severity": "warning",
+        "message": "<div id=\"s5\"> is a timeline element that contains nested <div>. The timeline shows one row per top-level element, and the root composition is built only from sub-compositions.",
+        "selector": "#s5",
+        "dataAttributes": {},
+        "sourceFile": "C:\\Users\\Admin\\Desktop\\orbit-main - Copy\\brag-output\\composition\\index.html",
+        "bbox": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        },
+        "time": 0,
+        "fixHint": "Move <div id=\"s5\"> and its contents into a sub-composition file and mount it with data-composition-src."
+      },
+      {
+        "code": "nested_structure_needs_subcomposition",
+        "severity": "warning",
+        "message": "<div id=\"s6\"> is a timeline element that contains nested <svg id=\"s6hex\">. The timeline shows one row per top-level element, and the root composition is built only from sub-compositions.",
+        "selector": "#s6",
+        "dataAttributes": {},
+        "sourceFile": "C:\\Users\\Admin\\Desktop\\orbit-main - Copy\\brag-output\\composition\\index.html",
+        "bbox": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        },
+        "time": 0,
+        "fixHint": "Move <div id=\"s6\"> and its contents into a sub-composition file and mount it with data-composition-src."
+      }
+    ],
+    "filesScanned": 1
+  },
+  "runtime": {
+    "ok": true,
+    "errorCount": 0,
+    "warningCount": 0,
+    "infoCount": 0,
+    "findings": []
+  },
+  "layout": {
+    "ok": true,
+    "errorCount": 0,
+    "warningCount": 0,
+    "infoCount": 0,
+    "findings": [],
+    "duration": 20,
+    "samples": [
+      1.111,
+      3.333,
+      5.556,
+      7.778,
+      10,
+      12.222,
+      14.444,
+      16.667,
+      18.889
+    ],
+    "transitionSamples": [],
+    "transitionSamplesDropped": 0,
+    "tolerance": 2,
+    "totalIssueCount": 0,
+    "truncated": false
+  },
+  "motion": {
+    "ok": true,
+    "errorCount": 0,
+    "warningCount": 0,
+    "infoCount": 0,
+    "findings": [],
+    "enabled": false,
+    "samples": 0
+  },
+  "contrast": {
+    "ok": true,
+    "errorCount": 0,
+    "warningCount": 8,
+    "infoCount": 0,
+    "findings": [
+      {
+        "code": "contrast_aa_failure",
+        "severity": "warning",
+        "message": "Contrast is 2.8:1; WCAG AA requires 3:1.",
+        "text": "A",
+        "fg": "rgb(255,255,255)",
+        "bg": "rgb(242,120,47)",
+        "ratio": 2.8,
+        "requiredRatio": 3,
+        "suggestedColor": "rgb(77,77,77)",
+        "large": true,
+        "selector": "div > div:nth-of-type(4) > div:nth-of-type(2) > div:nth-of-type(1) > div",
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 367,
+          "y": 295,
+          "width": 52,
+          "height": 52
+        },
+        "time": 1.111,
+        "times": [
+          1.111
+        ]
+      },
+      {
+        "code": "contrast_aa_failure",
+        "severity": "warning",
+        "message": "Contrast is 2.87:1; WCAG AA requires 4.5:1.",
+        "text": "OVERVIEW",
+        "fg": "rgb(138,143,163)",
+        "bg": "rgb(240,242,249)",
+        "ratio": 2.87,
+        "requiredRatio": 4.5,
+        "suggestedColor": "rgb(107,110,126)",
+        "large": false,
+        "selector": "div > div:nth-of-type(6) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(2)",
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 151,
+          "y": 207,
+          "width": 299,
+          "height": 24
+        },
+        "time": 10,
+        "times": [
+          10
+        ]
+      },
+      {
+        "code": "contrast_aa_failure",
+        "severity": "warning",
+        "message": "Contrast is 2.87:1; WCAG AA requires 4.5:1.",
+        "text": "WORK",
+        "fg": "rgb(138,143,163)",
+        "bg": "rgb(240,242,249)",
+        "ratio": 2.87,
+        "requiredRatio": 4.5,
+        "suggestedColor": "rgb(107,110,126)",
+        "large": false,
+        "selector": "div > div:nth-of-type(6) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(6)",
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 151,
+          "y": 419,
+          "width": 299,
+          "height": 24
+        },
+        "time": 10,
+        "times": [
+          10
+        ]
+      },
+      {
+        "code": "contrast_aa_failure",
+        "severity": "warning",
+        "message": "Contrast is 4.47:1; WCAG AA requires 4.5:1.",
+        "text": "In Review 2",
+        "fg": "rgb(99,102,241)",
+        "bg": "rgb(255,255,255)",
+        "ratio": 4.47,
+        "requiredRatio": 4.5,
+        "suggestedColor": "rgb(98,101,239)",
+        "large": false,
+        "selector": "div > div:nth-of-type(6) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(8)",
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 151,
+          "y": 505,
+          "width": 299,
+          "height": 54
+        },
+        "time": 10,
+        "times": [
+          10
+        ]
+      },
+      {
+        "code": "contrast_aa_failure",
+        "severity": "warning",
+        "message": "Contrast is 4.47:1; WCAG AA requires 4.5:1.",
+        "text": "2",
+        "fg": "rgb(255,255,255)",
+        "bg": "rgb(99,102,241)",
+        "ratio": 4.47,
+        "requiredRatio": 4.5,
+        "suggestedColor": "rgb(7,7,7)",
+        "large": false,
+        "selector": "#b1",
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 400,
+          "y": 517,
+          "width": 34,
+          "height": 30
+        },
+        "time": 10,
+        "times": [
+          10
+        ]
+      },
+      {
+        "code": "contrast_aa_failure",
+        "severity": "warning",
+        "message": "Contrast is 4.47:1; WCAG AA requires 4.5:1.",
+        "text": "0",
+        "fg": "rgb(255,255,255)",
+        "bg": "rgb(99,102,241)",
+        "ratio": 4.47,
+        "requiredRatio": 4.5,
+        "suggestedColor": "rgb(7,7,7)",
+        "large": false,
+        "selector": "#b2",
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 400,
+          "y": 571,
+          "width": 34,
+          "height": 30
+        },
+        "time": 10,
+        "times": [
+          10
+        ]
+      },
+      {
+        "code": "contrast_aa_failure",
+        "severity": "warning",
+        "message": "Contrast is 2.87:1; WCAG AA requires 4.5:1.",
+        "text": "TEAM",
+        "fg": "rgb(138,143,163)",
+        "bg": "rgb(240,242,249)",
+        "ratio": 2.87,
+        "requiredRatio": 4.5,
+        "suggestedColor": "rgb(107,110,126)",
+        "large": false,
+        "selector": "div > div:nth-of-type(6) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(10)",
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 151,
+          "y": 635,
+          "width": 299,
+          "height": 24
+        },
+        "time": 10,
+        "times": [
+          10
+        ]
+      },
+      {
+        "code": "contrast_aa_failure",
+        "severity": "warning",
+        "message": "Contrast is 2.54:1; WCAG AA requires 4.5:1.",
+        "text": "DONE",
+        "fg": "rgb(255,255,255)",
+        "bg": "rgb(16,185,129)",
+        "ratio": 2.54,
+        "requiredRatio": 4.5,
+        "suggestedColor": "rgb(57,57,57)",
+        "large": false,
+        "selector": "#s3pill",
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 1528.0625,
+          "y": 598,
+          "width": 66.9375,
+          "height": 27
+        },
+        "time": 10,
+        "times": [
+          10
+        ]
+      }
+    ],
+    "enabled": true,
+    "samples": [
+      1.111,
+      5.556,
+      10,
+      14.444,
+      18.889
+    ],
+    "checked": 78,
+    "passed": 70
+  },
+  "craft": {
+    "ok": true,
+    "errorCount": 0,
+    "warningCount": 7,
+    "infoCount": 0,
+    "findings": [
+      {
+        "code": "first_frame_empty",
+        "severity": "warning",
+        "message": "Frame 0 shows only the background, and the first frame is the thumbnail on social players: have the title or key image already on screen at 0 s instead of entering from nothing; see references/review.md.",
+        "selector": "[data-composition-id]",
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        },
+        "time": 0
+      },
+      {
+        "code": "film_silent",
+        "severity": "warning",
+        "message": "This 20 s film has no sound source (no <audio>, no <video> with sound): add a music bed and sounds on the visible actions unless the person asked for silence; see references/sound.md.",
+        "selector": "[data-composition-id]",
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        },
+        "time": 0
+      },
+      {
+        "code": "line_unread",
+        "severity": "warning",
+        "message": "\"client nu logo innu evening tharam, ok alle?\" (8 words) is on screen 1.87 s (±0.01 s), under its 2.17 s floor: hold it about 0.5 s + 0.3 s a word (2.90 s here) before it leaves or changes; see references/motion.md.",
+        "text": "client nu logo innu evening tharam, ok alle?",
+        "selector": "#s1raw",
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 367.24,
+          "y": 375.52,
+          "width": 49.870000000000005,
+          "height": 74.97000000000003
+        },
+        "time": 0.203,
+        "words": 8,
+        "seconds": 1.867,
+        "floorSeconds": 2.175,
+        "measured": [
+          {
+            "time": 0,
+            "opacity": null,
+            "heightPx": null
+          },
+          {
+            "time": 0.125,
+            "opacity": null,
+            "heightPx": null
+          },
+          {
+            "time": 0.25,
+            "opacity": 0.99,
+            "heightPx": 75
+          },
+          {
+            "time": 0.375,
+            "opacity": 1,
+            "heightPx": 75
+          },
+          {
+            "time": 0.5,
+            "opacity": 1,
+            "heightPx": 75
+          },
+          {
+            "time": 0.625,
+            "opacity": 1,
+            "heightPx": 75
+          },
+          {
+            "time": 1.625,
+            "opacity": 1,
+            "heightPx": 151
+          },
+          {
+            "time": 1.75,
+            "opacity": 1,
+            "heightPx": 151
+          },
+          {
+            "time": 1.875,
+            "opacity": 1,
+            "heightPx": 151
+          },
+          {
+            "time": 2,
+            "opacity": 1,
+            "heightPx": 151
+          },
+          {
+            "time": 2.125,
+            "opacity": 0.3,
+            "heightPx": 151
+          },
+          {
+            "time": 2.25,
+            "opacity": null,
+            "heightPx": null
+          },
+          {
+            "time": 2.375,
+            "opacity": null,
+            "heightPx": null
+          }
+        ]
+      },
+      {
+        "code": "line_unread",
+        "severity": "warning",
+        "message": "\"Hi! We'll share the final logo by this evening. Does that...\" (14 words) is on screen 1.16 s (±0.01 s), under its 3.53 s floor: hold it about 0.5 s + 0.3 s a word (4.70 s here) before it leaves or changes; see references/motion.md.",
+        "text": "Hi! We'll share the final logo by this evening. Does that work for you?",
+        "selector": "#s1clean",
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 367,
+          "y": 378.6,
+          "width": 1002.3,
+          "height": 150.62
+        },
+        "time": 2.203,
+        "words": 14,
+        "seconds": 1.164,
+        "floorSeconds": 3.525,
+        "measured": [
+          {
+            "time": 1.875,
+            "opacity": null,
+            "heightPx": null
+          },
+          {
+            "time": 2,
+            "opacity": null,
+            "heightPx": null
+          },
+          {
+            "time": 2.125,
+            "opacity": null,
+            "heightPx": null
+          },
+          {
+            "time": 2.25,
+            "opacity": 0.85,
+            "heightPx": 151
+          },
+          {
+            "time": 2.375,
+            "opacity": 1,
+            "heightPx": 151
+          },
+          {
+            "time": 2.5,
+            "opacity": 1,
+            "heightPx": 151
+          },
+          {
+            "time": 2.625,
+            "opacity": 1,
+            "heightPx": 151
+          },
+          {
+            "time": 2.875,
+            "opacity": 1,
+            "heightPx": 151
+          },
+          {
+            "time": 3,
+            "opacity": 1,
+            "heightPx": 151
+          },
+          {
+            "time": 3.125,
+            "opacity": 1,
+            "heightPx": 151
+          },
+          {
+            "time": 3.25,
+            "opacity": 0.96,
+            "heightPx": 151
+          },
+          {
+            "time": 3.375,
+            "opacity": 0.35,
+            "heightPx": 151
+          },
+          {
+            "time": 3.5,
+            "opacity": null,
+            "heightPx": null
+          },
+          {
+            "time": 3.625,
+            "opacity": null,
+            "heightPx": null
+          }
+        ]
+      },
+      {
+        "code": "text_below_floor",
+        "severity": "warning",
+        "message": "Type floor is 28 px (2.6% of the 1080 px short side, what a phone can read) and 41 text elements stay under it for 0.5 s or more, the smallest \"NEW\" at 15 px: set reading text to at least 28 px, or put data-layout-ignore on text that is texture rather than reading; see references/look.md.",
+        "text": "NEW",
+        "selector": "#s3pill",
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 727.89,
+          "y": 603.88,
+          "width": 36.11,
+          "height": 19
+        },
+        "time": 6.5,
+        "times": [
+          0.125,
+          0.125,
+          0.375,
+          1.5,
+          6.125,
+          6.125,
+          6.125,
+          6.125,
+          6.125,
+          6.125,
+          6.125,
+          6.125,
+          6.125,
+          6.125,
+          6.125,
+          6.125,
+          6.125,
+          6.125,
+          6.125,
+          6.125,
+          6.125,
+          6.5,
+          6.5,
+          6.5,
+          10.875,
+          10.875,
+          11,
+          11,
+          11.125,
+          11.125,
+          11.125,
+          11.125,
+          12,
+          12,
+          12.375,
+          12.375,
+          12.875,
+          12.875,
+          15.125,
+          15.25,
+          15.375
+        ],
+        "fontPx": 15,
+        "floorPx": 28,
+        "seconds": 4.125,
+        "elements": [
+          {
+            "selector": "#s3pill",
+            "text": "NEW",
+            "fontPx": 15,
+            "time": 6.5,
+            "seconds": 4.125
+          },
+          {
+            "selector": "#b1",
+            "text": "2",
+            "fontPx": 15.74,
+            "time": 6.125,
+            "seconds": 4.5
+          },
+          {
+            "selector": "div.side > div:nth-of-type(2)",
+            "text": "OVERVIEW",
+            "fontPx": 15.77,
+            "time": 6.125,
+            "seconds": 4.5
+          },
+          {
+            "selector": "div.side > div:nth-of-type(6)",
+            "text": "WORK",
+            "fontPx": 15.77,
+            "time": 6.125,
+            "seconds": 4.5
+          },
+          {
+            "selector": "div.side > div:nth-of-type(10)",
+            "text": "TEAM",
+            "fontPx": 15.77,
+            "time": 6.125,
+            "seconds": 4.5
+          },
+          {
+            "selector": "div.m > span:nth-of-type(1)",
+            "text": "Due Fri · 3h",
+            "fontPx": 16,
+            "time": 6.5,
+            "seconds": 4.125
+          },
+          {
+            "selector": "#b2",
+            "text": "1",
+            "fontPx": 16.75,
+            "time": 6.125,
+            "seconds": 4.5
+          },
+          {
+            "selector": "#c1 > span:nth-of-type(1)",
+            "text": "Prioritise my day",
+            "fontPx": 18.43,
+            "time": 10.875,
+            "seconds": 4.125
+          },
+          {
+            "selector": "#c2 > span:nth-of-type(1)",
+            "text": "What is late",
+            "fontPx": 19,
+            "time": 11,
+            "seconds": 4
+          },
+          {
+            "selector": "#c3 > span:nth-of-type(1)",
+            "text": "Yesterday · today · blockers",
+            "fontPx": 19,
+            "time": 11.125,
+            "seconds": 3.875
+          },
+          {
+            "selector": "#c4 > span:nth-of-type(1)",
+            "text": "Who is overloaded, who has room",
+            "fontPx": 19,
+            "time": 11.125,
+            "seconds": 3.875
+          },
+          {
+            "selector": "#lanes > div:nth-of-type(1) > b:nth-of-type(1)",
+            "text": "Requested",
+            "fontPx": 20.69,
+            "time": 6.125,
+            "seconds": 4.5
+          },
+          {
+            "selector": "#lanes > div:nth-of-type(2) > b:nth-of-type(1)",
+            "text": "In Progress",
+            "fontPx": 20.69,
+            "time": 6.125,
+            "seconds": 4.5
+          },
+          {
+            "selector": "#lanes > div:nth-of-type(3) > b:nth-of-type(1)",
+            "text": "In Review",
+            "fontPx": 20.69,
+            "time": 6.125,
+            "seconds": 4.5
+          },
+          {
+            "selector": "#lanes > div:nth-of-type(4) > b:nth-of-type(1)",
+            "text": "Done",
+            "fontPx": 20.69,
+            "time": 6.125,
+            "seconds": 4.5
+          },
+          {
+            "selector": "#s1chip > small:nth-of-type(1)",
+            "text": "Manglish → polished English",
+            "fontPx": 20.85,
+            "time": 1.5,
+            "seconds": 1.875
+          },
+          {
+            "selector": "#s1tag",
+            "text": "Messages · Client – Logo refresh",
+            "fontPx": 22,
+            "time": 0.375,
+            "seconds": 3
+          },
+          {
+            "selector": "div.t",
+            "text": "Final logo export for client",
+            "fontPx": 22,
+            "time": 6.5,
+            "seconds": 4.125
+          },
+          {
+            "selector": "div.side > div:nth-of-type(3)",
+            "text": "Dashboard",
+            "fontPx": 22.66,
+            "time": 6.125,
+            "seconds": 4.5
+          },
+          {
+            "selector": "div.side > div:nth-of-type(4)",
+            "text": "Calendar",
+            "fontPx": 22.66,
+            "time": 6.125,
+            "seconds": 4.5
+          },
+          {
+            "selector": "div.side > div:nth-of-type(5)",
+            "text": "Messages",
+            "fontPx": 22.66,
+            "time": 6.125,
+            "seconds": 4.5
+          },
+          {
+            "selector": "div.side > div:nth-of-type(7)",
+            "text": "Projects",
+            "fontPx": 22.66,
+            "time": 6.125,
+            "seconds": 4.5
+          },
+          {
+            "selector": "div.nav.on",
+            "text": "In Review",
+            "fontPx": 22.66,
+            "time": 6.125,
+            "seconds": 4.5
+          },
+          {
+            "selector": "div.side > div:nth-of-type(9)",
+            "text": "Requested Tasks",
+            "fontPx": 22.66,
+            "time": 6.125,
+            "seconds": 4.5
+          },
+          {
+            "selector": "div.side > div:nth-of-type(11)",
+            "text": "Members",
+            "fontPx": 22.66,
+            "time": 6.125,
+            "seconds": 4.5
+          },
+          {
+            "selector": "div.side > div:nth-of-type(12)",
+            "text": "Time Log",
+            "fontPx": 22.66,
+            "time": 6.125,
+            "seconds": 4.5
+          },
+          {
+            "selector": "#a1",
+            "text": "1. : the client is waiting, due tonight.",
+            "fontPx": 24,
+            "time": 12,
+            "seconds": 3
+          },
+          {
+            "selector": "#a1 > em:nth-of-type(1)",
+            "text": "Final logo export",
+            "fontPx": 24,
+            "time": 12,
+            "seconds": 3
+          },
+          {
+            "selector": "#a2",
+            "text": "2. on the brand deck: 2 changes.",
+            "fontPx": 24,
+            "time": 12.375,
+            "seconds": 2.625
+          },
+          {
+            "selector": "#a2 > em:nth-of-type(1)",
+            "text": "Reply to review notes",
+            "fontPx": 24,
+            "time": 12.375,
+            "seconds": 2.625
+          },
+          {
+            "selector": "#a3",
+            "text": "3. Log yesterday's on Logo refresh before lunch.",
+            "fontPx": 24,
+            "time": 12.875,
+            "seconds": 2.125
+          },
+          {
+            "selector": "#a3 > em:nth-of-type(1)",
+            "text": "3h",
+            "fontPx": 24,
+            "time": 12.875,
+            "seconds": 2.125
+          },
+          {
+            "selector": "#c1 > b:nth-of-type(1)",
+            "text": "What should I do first?",
+            "fontPx": 24.25,
+            "time": 10.875,
+            "seconds": 4.125
+          },
+          {
+            "selector": "#c2 > b:nth-of-type(1)",
+            "text": "My overdue tasks",
+            "fontPx": 25,
+            "time": 11,
+            "seconds": 4
+          },
+          {
+            "selector": "#c3 > b:nth-of-type(1)",
+            "text": "Write my standup",
+            "fontPx": 25,
+            "time": 11.125,
+            "seconds": 3.875
+          },
+          {
+            "selector": "#c4 > b:nth-of-type(1)",
+            "text": "Team workload",
+            "fontPx": 25,
+            "time": 11.125,
+            "seconds": 3.875
+          },
+          {
+            "selector": "div.who",
+            "text": "Arjun · draft reply",
+            "fontPx": 25.8,
+            "time": 0.125,
+            "seconds": 3.25
+          },
+          {
+            "selector": "div.av",
+            "text": "A",
+            "fontPx": 25.8,
+            "time": 0.125,
+            "seconds": 3.25
+          },
+          {
+            "selector": "#t1 > div:nth-of-type(1)",
+            "text": "Hours this week",
+            "fontPx": 26,
+            "time": 15.125,
+            "seconds": 2.5
+          },
+          {
+            "selector": "#t2 > div:nth-of-type(1)",
+            "text": "On-time rate",
+            "fontPx": 26,
+            "time": 15.25,
+            "seconds": 2.375
+          },
+          {
+            "selector": "#t3 > div:nth-of-type(1)",
+            "text": "Waiting for review",
+            "fontPx": 26,
+            "time": 15.375,
+            "seconds": 2.25
+          }
+        ]
+      },
+      {
+        "code": "line_unread",
+        "severity": "warning",
+        "message": "The film's last line \"Internal use only.\" (3 words) is on screen 1.83 s (±0.01 s), under the 2.00 s a closing line needs: hold it about 0.5 s + 0.3 s a word and at least 2 s before the film ends; see references/motion.md.",
+        "text": "Internal use only.",
+        "selector": "#s6l1",
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 772.72,
+          "y": 663.44,
+          "width": 374.54999999999995,
+          "height": 50
+        },
+        "time": 18.172,
+        "words": 3,
+        "seconds": 1.832,
+        "floorSeconds": 2,
+        "measured": [
+          {
+            "time": 17.875,
+            "opacity": null,
+            "heightPx": null
+          },
+          {
+            "time": 18,
+            "opacity": null,
+            "heightPx": null
+          },
+          {
+            "time": 18.125,
+            "opacity": null,
+            "heightPx": null
+          },
+          {
+            "time": 18.25,
+            "opacity": 0.85,
+            "heightPx": 50
+          },
+          {
+            "time": 18.375,
+            "opacity": 1,
+            "heightPx": 50
+          },
+          {
+            "time": 18.5,
+            "opacity": 1,
+            "heightPx": 50
+          },
+          {
+            "time": 18.625,
+            "opacity": 1,
+            "heightPx": 50
+          },
+          {
+            "time": 19.5,
+            "opacity": 1,
+            "heightPx": 50
+          },
+          {
+            "time": 19.625,
+            "opacity": 1,
+            "heightPx": 50
+          },
+          {
+            "time": 19.75,
+            "opacity": 1,
+            "heightPx": 50
+          },
+          {
+            "time": 19.875,
+            "opacity": 1,
+            "heightPx": 50
+          }
+        ]
+      },
+      {
+        "code": "line_unread",
+        "severity": "warning",
+        "message": "The film's last line \"Externally impressive.\" (2 words) is on screen 1.33 s (±0.01 s), under the 2.00 s a closing line needs: hold it about 0.5 s + 0.3 s a word and at least 2 s before the film ends; see references/motion.md.",
+        "text": "Externally impressive.",
+        "selector": "#s6l2",
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 564.28,
+          "y": 724.5,
+          "width": 791.44,
+          "height": 92
+        },
+        "time": 18.672,
+        "words": 2,
+        "seconds": 1.332,
+        "floorSeconds": 2,
+        "measured": [
+          {
+            "time": 18.375,
+            "opacity": null,
+            "heightPx": null
+          },
+          {
+            "time": 18.5,
+            "opacity": null,
+            "heightPx": null
+          },
+          {
+            "time": 18.625,
+            "opacity": null,
+            "heightPx": null
+          },
+          {
+            "time": 18.75,
+            "opacity": 1,
+            "heightPx": 92
+          },
+          {
+            "time": 18.875,
+            "opacity": 1,
+            "heightPx": 93
+          },
+          {
+            "time": 19,
+            "opacity": 1,
+            "heightPx": 92
+          },
+          {
+            "time": 19.125,
+            "opacity": 1,
+            "heightPx": 92
+          },
+          {
+            "time": 19.5,
+            "opacity": 1,
+            "heightPx": 92
+          },
+          {
+            "time": 19.625,
+            "opacity": 1,
+            "heightPx": 92
+          },
+          {
+            "time": 19.75,
+            "opacity": 1,
+            "heightPx": 92
+          },
+          {
+            "time": 19.875,
+            "opacity": 1,
+            "heightPx": 92
+          }
+        ]
+      }
+    ],
+    "enabled": true,
+    "step": 0.125,
+    "samples": 160
+  },
+  "audio": {
+    "ok": true,
+    "errorCount": 0,
+    "warningCount": 0,
+    "infoCount": 1,
+    "findings": [
+      {
+        "code": "audio_none",
+        "severity": "info",
+        "message": "The film has no sound: no clip in it plays audio.",
+        "selector": "[data-composition-id]",
+        "dataAttributes": {},
+        "sourceFile": "index.html",
+        "bbox": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        },
+        "time": 0
+      }
+    ]
+  },
+  "hdr": {
+    "autoPromotion": null,
+    "inspection": "available"
+  },
+  "snapshots": {
+    "enabled": false,
+    "files": [],
+    "times": [],
+    "findingFiles": []
+  }
+}

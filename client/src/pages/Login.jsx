@@ -257,9 +257,11 @@ export default function Login() {
               <circle cx="42" cy="150" r="2.5" fill="white" />
             </svg>
             <div className="relative text-center">
-              <div className="text-2xl sm:text-[26px] font-bold font-mono text-white tracking-[3px] flex items-center justify-center gap-2">
-                <span>⬡</span><span>ORBIT</span>
-              </div>
+              <img
+                src="/assets/images/orbit-wordmark-white.png"
+                alt="Orbit"
+                className="mx-auto h-9 sm:h-10 w-auto"
+              />
               <div className="text-[10px] sm:text-[11px] text-white/70 tracking-[2px] uppercase mt-1">Agency OS</div>
             </div>
           </div>

@@ -133,13 +133,15 @@ function ThemeSwitch() {
   );
 }
 
-// Brand mark: hexagon with a solid core, replaces the "⬡" text glyph.
+// Brand mark: the Orbit starburst logo.
 function LogoMark() {
   return (
-    <svg className="h-[22px] w-[22px] shrink-0 text-[var(--accent)]" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path d="M12 2.5l8.2 4.75v9.5L12 21.5l-8.2-4.75v-9.5L12 2.5z" stroke="currentColor" strokeWidth="1.75" strokeLinejoin="round" />
-      <circle cx="12" cy="12" r="2.6" fill="currentColor" />
-    </svg>
+    <img
+      src="/assets/images/orbit-logo-transparent.png"
+      alt=""
+      aria-hidden="true"
+      className="h-[26px] w-[26px] shrink-0 object-contain"
+    />
   );
 }
 
