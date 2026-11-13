@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import api from '../../api/client';
-import { useLiveEvents, PRESENCE_EVENTS } from '../../hooks/useLiveEvents';
+import { useCallback, useEffect, useRef, useState } from "react";
+import api from "../../api/client";
+import { useLiveEvents, PRESENCE_EVENTS } from "../../hooks/useLiveEvents";
 
 /*
  * Chat extras shared by both chats (Messages.jsx: member <-> admin team,
@@ -8,7 +8,7 @@ import { useLiveEvents, PRESENCE_EVENTS } from '../../hooks/useLiveEvents';
  * indicator, edit rules and in-chat search.
  */
 
-export const QUICK_REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
+export const QUICK_REACTIONS = ["👍", "❤️", "😂", "😮", "😢", "🙏"];
 // Same window as the server (server/utils/chatExtras.js).
 export const EDIT_WINDOW_MS = 15 * 60 * 1000;
 // How long "typing…" stays without a new typing event.
@@ -29,7 +29,13 @@ export function toggleReaction(reactions, meId, emoji) {
 }
 
 export function canEditMessage(message, meId) {
-  if (!message || message.pending || message.deleted || message.forwarded_from_id) return false;
+  if (
+    !message ||
+    message.pending ||
+    message.deleted ||
+    message.forwarded_from_id
+  )
+    return false;
   if (!sameId(message.sender_id, meId)) return false;
   return Date.now() - new Date(message.created_at).getTime() < EDIT_WINDOW_MS;
 }
@@ -42,21 +48,29 @@ export function canEditMessage(message, meId) {
  * team: also count the admins online (member's "Admin team" chat).
  */
 export function usePresence(ids, { team = false } = {}) {
-  const key = [...new Set((ids || []).filter((id) => id != null).map(String))].sort().join(',');
+  const key = [...new Set((ids || []).filter((id) => id != null).map(String))]
+    .sort()
+    .join(",");
   const [state, setState] = useState({ presence: {}, adminsOnline: 0 });
   const { subscribe } = useLiveEvents();
 
   const load = useCallback(async () => {
     if (!key && !team) return;
     try {
-      const { data } = await api.get('/messages/presence', { params: { ids: key, team: team ? 1 : undefined }, silent: true });
-      setState({ presence: data?.presence || {}, adminsOnline: data?.admins_online || 0 });
-    } catch {
-      /* presence is a nice-to-have: keep the last state */
-    }
+      const { data } = await api.get("/messages/presence", {
+        params: { ids: key, team: team ? 1 : undefined },
+        silent: true,
+      });
+      setState({
+        presence: data?.presence || {},
+        adminsOnline: data?.admins_online || 0,
+      });
+    } catch {}
   }, [key, team]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    load();
+  }, [load]);
 
   useEffect(() => {
     let timer = null;
@@ -64,7 +78,10 @@ export function usePresence(ids, { team = false } = {}) {
       clearTimeout(timer);
       timer = setTimeout(load, 300);
     });
-    return () => { unsubscribe(); clearTimeout(timer); };
+    return () => {
+      unsubscribe();
+      clearTimeout(timer);
+    };
   }, [subscribe, load]);
 
   // "last seen today" becomes "yesterday" after midnight.
@@ -77,19 +94,26 @@ export function usePresence(ids, { team = false } = {}) {
   return state;
 }
 
-const LS_TIME = new Intl.DateTimeFormat('en-IN', { hour: 'numeric', minute: '2-digit' });
-const LS_WEEKDAY = new Intl.DateTimeFormat('en-IN', { weekday: 'long' });
-const LS_DATE = new Intl.DateTimeFormat('en-IN', { day: 'numeric', month: 'short' });
+const LS_TIME = new Intl.DateTimeFormat("en-IN", {
+  hour: "numeric",
+  minute: "2-digit",
+});
+const LS_WEEKDAY = new Intl.DateTimeFormat("en-IN", { weekday: "long" });
+const LS_DATE = new Intl.DateTimeFormat("en-IN", {
+  day: "numeric",
+  month: "short",
+});
 
 // "online", "last seen today at 10:31 am", "last seen yesterday at …",
 // "last seen Monday at …", "last seen 12 Oct at …", or '' when unknown.
 export function presenceLabel(p) {
-  if (!p) return '';
-  if (p.online) return 'online';
-  if (!p.last_seen_at) return '';
+  if (!p) return "";
+  if (p.online) return "online";
+  if (!p.last_seen_at) return "";
   const date = new Date(p.last_seen_at);
-  if (Number.isNaN(date.getTime())) return '';
-  const start = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  if (Number.isNaN(date.getTime())) return "";
+  const start = (d) =>
+    new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
   const days = Math.round((start(new Date()) - start(date)) / 86400000);
   const time = LS_TIME.format(date);
   if (days <= 0) return `last seen today at ${time}`;
@@ -99,7 +123,7 @@ export function presenceLabel(p) {
 }
 
 // Green dot for an avatar. Put it inside a `relative` wrapper.
-export function OnlineDot({ className = 'h-3 w-3' }) {
+export function OnlineDot({ className = "h-3 w-3" }) {
   return (
     <span
       className={`absolute -bottom-0.5 -right-0.5 rounded-full border-2 border-[color:var(--bg-2)] bg-emerald-500 ${className}`}
@@ -115,7 +139,9 @@ export function OnlineDot({ className = 'h-3 w-3' }) {
 // Returns notify(): call it on every keystroke. Throttled, never throws.
 export function useTypingSender(url) {
   const last = useRef(0);
-  useEffect(() => { last.current = 0; }, [url]);
+  useEffect(() => {
+    last.current = 0;
+  }, [url]);
   const notify = useCallback(() => {
     if (!url) return;
     const now = Date.now();
@@ -123,7 +149,9 @@ export function useTypingSender(url) {
     last.current = now;
     api.post(url, null, { silent: true }).catch(() => {});
   }, [url]);
-  const reset = useCallback(() => { last.current = 0; }, []);
+  const reset = useCallback(() => {
+    last.current = 0;
+  }, []);
   return { notify, reset };
 }
 
@@ -132,14 +160,19 @@ export function useTypingIndicator(types, conversationId, meId) {
   const { subscribe } = useLiveEvents();
   const [typers, setTypers] = useState({}); // userId -> expires at (ms)
 
-  useEffect(() => { setTypers({}); }, [conversationId]);
+  useEffect(() => {
+    setTypers({});
+  }, [conversationId]);
 
   useEffect(() => {
     if (conversationId == null) return undefined;
     return subscribe(types, (event) => {
       if (!sameId(event.conversationId, conversationId)) return;
       if (event.userId == null || sameId(event.userId, meId)) return;
-      setTypers((old) => ({ ...old, [String(event.userId)]: Date.now() + TYPING_TTL_MS }));
+      setTypers((old) => ({
+        ...old,
+        [String(event.userId)]: Date.now() + TYPING_TTL_MS,
+      }));
     });
   }, [subscribe, types, conversationId, meId]);
 
@@ -151,7 +184,8 @@ export function useTypingIndicator(types, conversationId, meId) {
       setTypers((old) => {
         const now = Date.now();
         const next = {};
-        for (const [id, until] of Object.entries(old)) if (until > now) next[id] = until;
+        for (const [id, until] of Object.entries(old))
+          if (until > now) next[id] = until;
         return next;
       });
     }, wait);
@@ -172,14 +206,17 @@ export function useTypingIndicator(types, conversationId, meId) {
   return { typingIds: Object.keys(typers), clear };
 }
 
-export function TypingDots({ className = '' }) {
+export function TypingDots({ className = "" }) {
   return (
-    <span className={`inline-flex items-center gap-[3px] ${className}`} aria-hidden="true">
+    <span
+      className={`inline-flex items-center gap-[3px] ${className}`}
+      aria-hidden="true"
+    >
       {[0, 1, 2].map((i) => (
         <span
           key={i}
           className="h-1.5 w-1.5 animate-bounce rounded-full bg-current motion-reduce:animate-none"
-          style={{ animationDelay: `${i * 140}ms`, animationDuration: '1s' }}
+          style={{ animationDelay: `${i * 140}ms`, animationDuration: "1s" }}
         />
       ))}
     </span>
@@ -206,20 +243,30 @@ export function TypingBubble({ label }) {
  */
 export function tickState(createdAt, deliveredAt, readAt) {
   const at = new Date(createdAt).getTime();
-  if (readAt && new Date(readAt).getTime() >= at) return 'seen';
-  if (deliveredAt && new Date(deliveredAt).getTime() >= at) return 'delivered';
-  return 'sent';
+  if (readAt && new Date(readAt).getTime() >= at) return "seen";
+  if (deliveredAt && new Date(deliveredAt).getTime() >= at) return "delivered";
+  return "sent";
 }
 
-const TICK_LABEL = { sent: 'Sent', delivered: 'Delivered', seen: 'Seen' };
+const TICK_LABEL = { sent: "Sent", delivered: "Delivered", seen: "Seen" };
 
 // Colour: inherits the time's colour, blue (--chat-tick-read) once seen.
-export function ReadTicks({ state = 'sent', className = 'h-3.5 w-3.5' }) {
-  const label = TICK_LABEL[state] || 'Sent';
+export function ReadTicks({ state = "sent", className = "h-3.5 w-3.5" }) {
+  const label = TICK_LABEL[state] || "Sent";
   return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" className={`inline-block shrink-0 ${state === 'seen' ? 'text-[color:var(--chat-tick-read)]' : ''} ${className}`} role="img" aria-label={label}>
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={`inline-block shrink-0 ${state === "seen" ? "text-[color:var(--chat-tick-read)]" : ""} ${className}`}
+      role="img"
+      aria-label={label}
+    >
       <title>{label}</title>
-      {state !== 'sent' ? (
+      {state !== "sent" ? (
         <>
           <path d="M1.5 12.5l4.5 4.5L16.5 6.5" />
           <path d="M10 15.5l1.5 1.5L22 6.5" />
@@ -242,8 +289,11 @@ export function ReactionPicker({ current, onPick }) {
           type="button"
           role="menuitem"
           aria-label={`React ${emoji}`}
-          onClick={(event) => { event.stopPropagation(); onPick(emoji); }}
-          className={`grid h-7 w-7 place-items-center rounded-md text-[17px] leading-none transition duration-150 hover:scale-125 hover:bg-black/10 active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-current ${current === emoji ? 'bg-black/10' : ''}`}
+          onClick={(event) => {
+            event.stopPropagation();
+            onPick(emoji);
+          }}
+          className={`grid h-7 w-7 place-items-center rounded-md text-[17px] leading-none transition duration-150 hover:scale-125 hover:bg-black/10 active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-current ${current === emoji ? "bg-black/10" : ""}`}
         >
           {emoji}
         </button>
@@ -263,22 +313,33 @@ export function ReactionChips({ reactions, meId, nameOf, onToggle, alignEnd }) {
   }
   const list = [...groups.entries()].sort((a, b) => b[1].length - a[1].length);
   return (
-    <div className={`relative z-[1] -mt-1.5 mb-0.5 flex flex-wrap gap-1 px-1.5 ${alignEnd ? 'justify-end' : 'justify-start'}`}>
+    <div
+      className={`relative z-[1] -mt-1.5 mb-0.5 flex flex-wrap gap-1 px-1.5 ${alignEnd ? "justify-end" : "justify-start"}`}
+    >
       {list.map(([emoji, ids]) => {
         const mine = ids.some((id) => sameId(id, meId));
-        const names = ids.map((id) => (sameId(id, meId) ? 'You' : nameOf(id))).join(', ');
+        const names = ids
+          .map((id) => (sameId(id, meId) ? "You" : nameOf(id)))
+          .join(", ");
         return (
           <button
             key={emoji}
             type="button"
             title={names}
-            aria-label={`${emoji} from ${names}${mine ? '. Select to remove yours' : ''}`}
+            aria-label={`${emoji} from ${names}${mine ? ". Select to remove yours" : ""}`}
             aria-pressed={mine}
-            onClick={(event) => { event.stopPropagation(); onToggle(emoji); }}
-            className={`inline-flex h-6 items-center gap-1 rounded-full border px-1.5 text-[13px] leading-none shadow-[0_4px_10px_-6px_rgba(15,23,42,0.45)] transition duration-150 hover:-translate-y-px active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent)] ${mine ? 'border-[color:var(--accent)] bg-[var(--accent-light)]' : 'border-[color:var(--border)] bg-[var(--bg-2)]'}`}
+            onClick={(event) => {
+              event.stopPropagation();
+              onToggle(emoji);
+            }}
+            className={`inline-flex h-6 items-center gap-1 rounded-full border px-1.5 text-[13px] leading-none shadow-[0_4px_10px_-6px_rgba(15,23,42,0.45)] transition duration-150 hover:-translate-y-px active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent)] ${mine ? "border-[color:var(--accent)] bg-[var(--accent-light)]" : "border-[color:var(--border)] bg-[var(--bg-2)]"}`}
           >
             <span>{emoji}</span>
-            {ids.length > 1 && <span className="text-[10px] font-semibold tabular-nums text-[color:var(--text-2)]">{ids.length}</span>}
+            {ids.length > 1 && (
+              <span className="text-[10px] font-semibold tabular-nums text-[color:var(--text-2)]">
+                {ids.length}
+              </span>
+            )}
           </button>
         );
       })}
@@ -290,7 +351,7 @@ export function ReactionChips({ reactions, meId, nameOf, onToggle, alignEnd }) {
 
 // Marks every match of `query` in plain text. Never renders HTML.
 export function Highlight({ text, query }) {
-  const value = String(text || '');
+  const value = String(text || "");
   if (!query) return value;
   const lower = value.toLowerCase();
   const q = query.toLowerCase();
@@ -299,7 +360,14 @@ export function Highlight({ text, query }) {
   let at = lower.indexOf(q);
   while (at !== -1) {
     if (at > from) parts.push(value.slice(from, at));
-    parts.push(<mark key={at} className="rounded-[3px] bg-amber-200 px-0.5 text-slate-900">{value.slice(at, at + q.length)}</mark>);
+    parts.push(
+      <mark
+        key={at}
+        className="rounded-[3px] bg-amber-200 px-0.5 text-slate-900"
+      >
+        {value.slice(at, at + q.length)}
+      </mark>,
+    );
     from = at + q.length;
     at = lower.indexOf(q, from);
   }
@@ -307,13 +375,27 @@ export function Highlight({ text, query }) {
   return parts;
 }
 
-const SearchIcon = ({ path, className = 'h-4 w-4' }) => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" className={`shrink-0 ${className}`} aria-hidden="true">
+const SearchIcon = ({ path, className = "h-4 w-4" }) => (
+  <svg
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.75"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={`shrink-0 ${className}`}
+    aria-hidden="true"
+  >
     {path}
   </svg>
 );
 const PATHS = {
-  search: <><circle cx="11" cy="11" r="7" /><path d="M21 21l-4.35-4.35" /></>,
+  search: (
+    <>
+      <circle cx="11" cy="11" r="7" />
+      <path d="M21 21l-4.35-4.35" />
+    </>
+  ),
   up: <path d="M18 15l-6-6-6 6" />,
   down: <path d="M6 9l6 6 6-6" />,
   close: <path d="M6 6l12 12M18 6L6 18" />,
@@ -326,7 +408,7 @@ const PATHS = {
  * query ('' when none) for highlighting.
  */
 export function ChatSearchBar({ searchUrl, onClose, onJump, onQueryChange }) {
-  const [q, setQ] = useState('');
+  const [q, setQ] = useState("");
   const [results, setResults] = useState([]);
   const [index, setIndex] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -344,7 +426,7 @@ export function ChatSearchBar({ searchUrl, onClose, onJump, onQueryChange }) {
       setResults([]);
       setSearched(false);
       setLoading(false);
-      queryRef.current?.('');
+      queryRef.current?.("");
       return undefined;
     }
     setLoading(true);
@@ -359,7 +441,10 @@ export function ChatSearchBar({ searchUrl, onClose, onJump, onQueryChange }) {
         queryRef.current?.(term);
         if (list[0]) jumpRef.current?.(list[0]);
       } catch {
-        if (id === requestRef.current) { setResults([]); setSearched(true); }
+        if (id === requestRef.current) {
+          setResults([]);
+          setSearched(true);
+        }
       } finally {
         if (id === requestRef.current) setLoading(false);
       }
@@ -367,7 +452,7 @@ export function ChatSearchBar({ searchUrl, onClose, onJump, onQueryChange }) {
     return () => clearTimeout(timer);
   }, [q, searchUrl]);
 
-  useEffect(() => () => queryRef.current?.(''), []);
+  useEffect(() => () => queryRef.current?.(""), []);
 
   const go = (next) => {
     if (!results.length) return;
@@ -377,16 +462,26 @@ export function ChatSearchBar({ searchUrl, onClose, onJump, onQueryChange }) {
   };
 
   const onKeyDown = (event) => {
-    if (event.key === 'Escape') { event.preventDefault(); onClose(); }
-    if (event.key === 'Enter') { event.preventDefault(); go(event.shiftKey ? index - 1 : index + 1); }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      onClose();
+    }
+    if (event.key === "Enter") {
+      event.preventDefault();
+      go(event.shiftKey ? index - 1 : index + 1);
+    }
   };
 
-  const btn = 'grid h-8 w-8 shrink-0 place-items-center rounded-lg text-[color:var(--text-2)] transition duration-200 hover:bg-[var(--bg-3)] hover:text-[color:var(--text)] active:scale-95 disabled:opacity-35 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent)]';
+  const btn =
+    "grid h-8 w-8 shrink-0 place-items-center rounded-lg text-[color:var(--text-2)] transition duration-200 hover:bg-[var(--bg-3)] hover:text-[color:var(--text)] active:scale-95 disabled:opacity-35 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent)]";
 
   return (
     <div className="flex shrink-0 items-center gap-1.5 border-b border-[color:var(--border)] bg-[var(--bg-2)] px-3 py-2 sm:px-5">
       <div className="relative min-w-0 flex-1">
-        <SearchIcon path={PATHS.search} className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[color:var(--text-3)]" />
+        <SearchIcon
+          path={PATHS.search}
+          className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[color:var(--text-3)]"
+        />
         <input
           autoFocus
           value={q}
@@ -397,16 +492,45 @@ export function ChatSearchBar({ searchUrl, onClose, onJump, onQueryChange }) {
           className="h-9 w-full rounded-xl border border-[color:var(--border)] bg-[var(--bg-3)] pl-9 pr-3 text-[16px] text-[color:var(--text)] outline-none transition duration-200 placeholder:text-[color:var(--text-3)] focus:border-[color:var(--accent)] focus:ring-4 focus:ring-[color:var(--accent-light)] sm:text-sm"
         />
       </div>
-      <span className="min-w-[56px] text-center text-[11px] tabular-nums text-[color:var(--text-3)]" aria-live="polite">
-        {loading ? '…' : results.length ? `${index + 1} of ${results.length}` : searched ? 'No matches' : ''}
+      <span
+        className="min-w-[56px] text-center text-[11px] tabular-nums text-[color:var(--text-3)]"
+        aria-live="polite"
+      >
+        {loading
+          ? "…"
+          : results.length
+            ? `${index + 1} of ${results.length}`
+            : searched
+              ? "No matches"
+              : ""}
       </span>
-      <button type="button" className={btn} onClick={() => go(index + 1)} disabled={index >= results.length - 1} aria-label="Older match" title="Older match (Enter)">
+      <button
+        type="button"
+        className={btn}
+        onClick={() => go(index + 1)}
+        disabled={index >= results.length - 1}
+        aria-label="Older match"
+        title="Older match (Enter)"
+      >
         <SearchIcon path={PATHS.up} />
       </button>
-      <button type="button" className={btn} onClick={() => go(index - 1)} disabled={index <= 0} aria-label="Newer match" title="Newer match (Shift + Enter)">
+      <button
+        type="button"
+        className={btn}
+        onClick={() => go(index - 1)}
+        disabled={index <= 0}
+        aria-label="Newer match"
+        title="Newer match (Shift + Enter)"
+      >
         <SearchIcon path={PATHS.down} />
       </button>
-      <button type="button" className={btn} onClick={onClose} aria-label="Close search" title="Close (Esc)">
+      <button
+        type="button"
+        className={btn}
+        onClick={onClose}
+        aria-label="Close search"
+        title="Close (Esc)"
+      >
         <SearchIcon path={PATHS.close} />
       </button>
     </div>
