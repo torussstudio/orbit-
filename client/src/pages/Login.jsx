@@ -10,16 +10,16 @@ import Loader from '../components/ui/Loader';
 const RESEND_SECONDS = 60;
 
 const INPUT_CLASS =
-  'w-full bg-[var(--bg-3)] border border-[var(--border)] rounded-xl pl-9 py-[10px] text-[var(--text)] font-[var(--font-body)] text-sm outline-none transition-all focus:border-[var(--accent)] focus:ring-2 focus:ring-[var(--accent)]/25';
+  'w-full bg-white/60 border border-white/80 rounded-2xl pl-12 py-[15px] text-[#14163b] font-[var(--font-body)] text-[15px] placeholder:text-[#8b8fa8] outline-none shadow-[0_2px_10px_rgba(124,92,255,0.06)] transition-all focus:bg-white/80 focus:border-[#6366f1] focus:ring-4 focus:ring-[#6366f1]/15';
 
 const LABEL_CLASS =
-  'block text-[12px] text-[var(--text-2)] mb-1.5 font-semibold tracking-[0.2px]';
+  'block text-[15px] text-[#14163b] mb-2 pl-1 font-semibold';
 
 const PRIMARY_BUTTON_CLASS =
-  'group w-full flex items-center justify-center gap-1.5 px-5 py-2.5 rounded-xl text-[13px] font-semibold cursor-pointer transition-all border-0 bg-gradient-to-br from-[var(--accent)] to-[var(--accent-2)] text-white shadow-[0_2px_8px_rgba(99,102,241,0.3)] hover:shadow-[0_4px_16px_rgba(99,102,241,0.4)] disabled:opacity-70 disabled:cursor-not-allowed';
+  'group w-full flex items-center justify-center gap-2 px-6 py-[18px] rounded-full text-[17px] font-semibold cursor-pointer transition-all border-0 bg-gradient-to-r from-[#4338ff] to-[#7c3aed] text-white shadow-[0_14px_32px_rgba(91,61,245,0.35)] hover:shadow-[0_18px_40px_rgba(91,61,245,0.45)] hover:-translate-y-px disabled:opacity-70 disabled:cursor-not-allowed disabled:hover:translate-y-0';
 
 const LINK_BUTTON_CLASS =
-  'bg-transparent border-none p-0 text-[12px] font-semibold text-[var(--accent)] cursor-pointer hover:underline disabled:text-[var(--text-3)] disabled:no-underline disabled:cursor-default';
+  'bg-transparent border-none p-0 text-[14px] font-semibold text-[#5b3df5] cursor-pointer hover:underline disabled:text-[#8b8fa8] disabled:no-underline disabled:cursor-default';
 
 const HEADINGS = {
   login: { title: 'Welcome back', subtitle: 'Sign in to your workspace' },
@@ -29,7 +29,7 @@ const HEADINGS = {
 
 function MailIcon() {
   return (
-    <svg className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-3)]" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg className="absolute left-4 top-1/2 -translate-y-1/2 text-[#14163b]" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <path d="M22 6c0-1.1-.9-2-2-2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6z" />
       <path d="m22 6-10 7L2 6" />
     </svg>
@@ -38,7 +38,7 @@ function MailIcon() {
 
 function LockIcon() {
   return (
-    <svg className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-3)]" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg className="absolute left-4 top-1/2 -translate-y-1/2 text-[#14163b]" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <rect x="3" y="11" width="18" height="10" rx="2" />
       <path d="M7 11V7a5 5 0 0 1 10 0v4" />
     </svg>
@@ -47,7 +47,7 @@ function LockIcon() {
 
 function KeyIcon() {
   return (
-    <svg className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-3)]" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg className="absolute left-4 top-1/2 -translate-y-1/2 text-[#14163b]" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <circle cx="7.5" cy="15.5" r="4.5" />
       <path d="m21 2-9.6 9.6" />
       <path d="m15.5 7.5 3 3L22 7l-3-3" />
@@ -57,7 +57,7 @@ function KeyIcon() {
 
 function ArrowIcon() {
   return (
-    <svg className="transition-transform group-hover:translate-x-0.5" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg className="transition-transform group-hover:translate-x-0.5" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <line x1="5" y1="12" x2="19" y2="12" />
       <polyline points="12 5 19 12 12 19" />
     </svg>
@@ -69,16 +69,16 @@ function EyeToggle({ shown, onToggle }) {
     <button
       type="button"
       onClick={onToggle}
-      className="absolute right-2.5 top-1/2 -translate-y-1/2 bg-transparent border-none text-[var(--text-3)] cursor-pointer flex items-center justify-center p-0.5 hover:text-[var(--text)] max-[640px]:after:absolute max-[640px]:after:-inset-3 max-[640px]:after:content-['']"
+      className="absolute right-4 top-1/2 -translate-y-1/2 bg-transparent border-none text-[#6b6f8a] cursor-pointer flex items-center justify-center p-0.5 hover:text-[#14163b] max-[640px]:after:absolute max-[640px]:after:-inset-3 max-[640px]:after:content-['']"
       aria-label={shown ? 'Hide password' : 'Show password'}
     >
-      {shown ? (
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      {!shown ? (
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path>
           <line x1="1" y1="1" x2="23" y2="23"></line>
         </svg>
       ) : (
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
           <circle cx="12" cy="12" r="3"></circle>
         </svg>
@@ -122,6 +122,89 @@ function InfoBox({ children, tone = 'accent' }) {
         </svg>
       )}
       <span>{children}</span>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Decorative background: glass rings, cubes and orbit lines           */
+/* ------------------------------------------------------------------ */
+
+function GlassRing({ id, className }) {
+  return (
+    <svg className={className} viewBox="0 0 440 440" fill="none" aria-hidden="true">
+      <defs>
+        <linearGradient id={`${id}-a`} x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stopColor="#7c3aed" stopOpacity="0.85" />
+          <stop offset="0.55" stopColor="#a78bfa" stopOpacity="0.6" />
+          <stop offset="1" stopColor="#ddd6fe" stopOpacity="0.35" />
+        </linearGradient>
+        <filter id={`${id}-b`} x="-20%" y="-20%" width="140%" height="140%">
+          <feGaussianBlur stdDeviation="2.5" />
+        </filter>
+      </defs>
+      <g transform="rotate(-28 220 220)">
+        <ellipse cx="220" cy="220" rx="170" ry="92" stroke={`url(#${id}-a)`} strokeWidth="52" filter={`url(#${id}-b)`} />
+        <ellipse cx="220" cy="204" rx="170" ry="92" stroke="#fff" strokeOpacity="0.28" strokeWidth="3" />
+      </g>
+    </svg>
+  );
+}
+
+function GlassCube({ className }) {
+  return (
+    <svg className={className} viewBox="0 0 64 64" fill="none" aria-hidden="true">
+      <path d="M32 6l22 12.5L32 31 10 18.5z" fill="#fff" fillOpacity="0.55" />
+      <path d="M10 18.5L32 31v27L10 45.5z" fill="#a78bfa" fillOpacity="0.38" />
+      <path d="M54 18.5L32 31v27l22-12.5z" fill="#7c3aed" fillOpacity="0.28" />
+      <path d="M32 6l22 12.5v27L32 58 10 45.5v-27zM10 18.5L32 31l22-12.5M32 31v27" stroke="#fff" strokeOpacity="0.8" strokeWidth="1.5" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+const ART_CSS = `
+@keyframes orbit-ring-a { 0%,100% { transform: translate(0,0) rotate(0deg); } 50% { transform: translate(26px,-22px) rotate(9deg); } }
+@keyframes orbit-ring-b { 0%,100% { transform: translate(0,0) rotate(0deg); } 50% { transform: translate(-24px,20px) rotate(-8deg); } }
+@keyframes orbit-cube-a { 0%,100% { transform: translateY(0) rotate(12deg); } 50% { transform: translateY(-18px) rotate(32deg); } }
+@keyframes orbit-cube-b { 0%,100% { transform: translateY(0) rotate(-12deg); } 50% { transform: translateY(16px) rotate(-34deg); } }
+@keyframes orbit-flow { to { stroke-dashoffset: -240; } }
+@keyframes orbit-glow { 0%,100% { transform: translate(-50%,-50%) scale(1); opacity: .9; } 50% { transform: translate(-50%,-50%) scale(1.18); opacity: 1; } }
+.orbit-ring-a { animation: orbit-ring-a 20s ease-in-out infinite; }
+.orbit-ring-b { animation: orbit-ring-b 24s ease-in-out infinite; }
+.orbit-cube-a { animation: orbit-cube-a 7s ease-in-out infinite; }
+.orbit-cube-b { animation: orbit-cube-b 8.5s ease-in-out infinite; }
+.orbit-flow { stroke-dasharray: 5 9; animation: orbit-flow 30s linear infinite; }
+.orbit-glow { animation: orbit-glow 9s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .orbit-ring-a, .orbit-ring-b, .orbit-cube-a, .orbit-cube-b, .orbit-flow, .orbit-glow { animation: none; }
+}
+`;
+
+function BackgroundArt() {
+  return (
+    <div className="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden="true">
+      <style>{ART_CSS}</style>
+
+      {/* soft glow behind the card */}
+      <div className="orbit-glow absolute left-1/2 top-1/2 h-[520px] w-[520px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[#8b5cf6]/20 blur-3xl" />
+
+      {/* thin orbit lines */}
+      <svg className="absolute inset-0 h-full w-full" viewBox="0 0 1000 600" preserveAspectRatio="none" fill="none">
+        <g className="orbit-flow" stroke="#7c3aed" strokeOpacity="0.32" strokeWidth="1" vectorEffect="non-scaling-stroke">
+          <path d="M0 540 C200 520 350 390 500 335" vectorEffect="non-scaling-stroke" />
+          <path d="M600 0 C610 40 590 90 560 125" vectorEffect="non-scaling-stroke" />
+          <path d="M1000 250 C870 262 790 320 700 385" vectorEffect="non-scaling-stroke" />
+          <path d="M300 600 C520 575 720 505 820 455" vectorEffect="non-scaling-stroke" />
+        </g>
+      </svg>
+
+      {/* big glass rings */}
+      <GlassRing id="ring-bl" className="orbit-ring-a absolute -bottom-40 -left-44 w-[420px] sm:w-[620px] opacity-90" />
+      <GlassRing id="ring-tr" className="orbit-ring-b absolute -top-36 -right-40 w-[340px] sm:w-[520px] opacity-80" />
+
+      {/* floating cubes */}
+      <GlassCube className="orbit-cube-a absolute left-[22%] top-[20%] hidden h-14 w-14 drop-shadow-[0_8px_16px_rgba(124,58,237,0.25)] md:block" />
+      <GlassCube className="orbit-cube-b absolute right-[18%] top-[62%] hidden h-14 w-14 drop-shadow-[0_8px_16px_rgba(124,58,237,0.25)] md:block" />
     </div>
   );
 }
@@ -239,38 +322,29 @@ export default function Login() {
   const heading = HEADINGS[mode];
 
   return (
-    <div className="relative min-h-screen min-h-[100dvh] flex items-center justify-center p-4 sm:p-6 overflow-y-auto bg-[var(--bg)]">
+    <div className="relative min-h-screen min-h-[100dvh] overflow-hidden bg-[linear-gradient(135deg,#faf9ff_0%,#ece8ff_45%,#ddd6fe_100%)]">
+      <BackgroundArt />
 
-      {/* Soft color blobs — visible at every width, this IS the creative layer now */}
-      <div className="pointer-events-none absolute -top-24 -left-20 w-72 h-72 rounded-full bg-[var(--accent)]/20 blur-3xl" />
-      <div className="pointer-events-none absolute -bottom-28 -right-16 w-80 h-80 rounded-full bg-[var(--accent-2)]/20 blur-3xl" />
+      <div className="relative flex min-h-screen min-h-[100dvh] items-center justify-center p-4 sm:p-6">
+        <div className="relative w-full max-w-[540px] my-auto">
+          <div className="rounded-[36px] sm:rounded-[44px] border border-white/70 bg-white/45 px-6 pb-9 pt-9 shadow-[0_30px_80px_rgba(124,92,255,0.22)] backdrop-blur-2xl sm:px-12 sm:pb-12 sm:pt-11">
 
-      <div className="relative w-full max-w-[400px] my-auto">
-        <div className="rounded-3xl bg-[var(--bg-2)] shadow-xl overflow-hidden border border-[var(--border)]">
-
-          {/* Hero band — orbit motif, always visible, scales with the card */}
-          <div className="relative h-[132px] sm:h-[150px] bg-gradient-to-br from-[var(--accent)] to-[var(--accent-2)] flex items-center justify-center overflow-hidden">
-            <svg width="220" height="220" viewBox="0 0 220 220" className="absolute opacity-30">
-              <circle cx="110" cy="110" r="48" fill="none" stroke="white" strokeWidth="1" />
-              <circle cx="110" cy="110" r="80" fill="none" stroke="white" strokeWidth="1" />
-              <circle cx="150" cy="55" r="3" fill="white" />
-              <circle cx="42" cy="150" r="2.5" fill="white" />
-            </svg>
-            <div className="relative text-center">
-              <img
-                src="/assets/images/orbit-wordmark-white.png"
-                alt="Orbit"
-                className="mx-auto h-9 sm:h-10 w-auto"
-              />
-              <div className="text-[10px] sm:text-[11px] text-white/70 tracking-[2px] uppercase mt-1">Agency OS</div>
+            {/* Brand */}
+            <div className="flex flex-col items-center text-center">
+              <div className="flex h-[88px] w-[88px] items-center justify-center rounded-[28px] border border-white/80 bg-white/60 shadow-[0_12px_30px_rgba(124,92,255,0.25)] backdrop-blur sm:h-[104px] sm:w-[104px] sm:rounded-[32px]">
+                <img src="/assets/images/orbit-logo-transparent.png" alt="Orbit" className="h-[48px] w-[48px] object-contain sm:h-[58px] sm:w-[58px]" />
+              </div>
+              <div className="mt-5 flex items-center gap-3 text-[22px] sm:text-[26px] leading-none">
+                <span className="font-bold tracking-[-0.02em] text-[#14163b]">Orbit</span>
+                <span className="h-6 w-px bg-[#6b6f8a]/60" />
+                <span className="font-normal text-[#6b6f8a]">Agency OS</span>
+              </div>
             </div>
-          </div>
 
-          {/* Form panel */}
-          <div className="p-5 sm:p-7">
-            <div className="mb-6">
-              <h1 className="text-[19px] font-semibold mb-1 text-[var(--text)]">{heading.title}</h1>
-              <p className="text-[13px] text-[var(--text-2)]">{heading.subtitle}</p>
+            {/* Heading */}
+            <div className="mb-7 mt-6 text-center sm:mb-8 sm:mt-7">
+              <h1 className={`mb-2 font-extrabold leading-[1.1] tracking-[-0.03em] text-[#14163b] ${mode === 'login' ? 'text-[34px] sm:text-[44px]' : 'text-[28px] sm:text-[34px]'}`}>{heading.title}</h1>
+              <p className="text-[15px] sm:text-[17px] font-medium text-[#6b6f8a]">{heading.subtitle}</p>
             </div>
 
             {mode === 'login' && (
@@ -283,7 +357,7 @@ export default function Login() {
 
                 <form onSubmit={handleSubmit}>
                   {/* Email */}
-                  <div className="mb-4">
+                  <div className="mb-5">
                     <label htmlFor="login-email" className={LABEL_CLASS}>Email</label>
                     <div className="relative">
                       <MailIcon />
@@ -295,15 +369,15 @@ export default function Login() {
                         autoFocus={!passwordReset}
                         value={email}
                         onChange={e => setEmail(e.target.value)}
-                        placeholder="you@agency.com"
+                        placeholder="Enter your email address"
                         required
                       />
                     </div>
                   </div>
 
                   {/* Password */}
-                  <div className="mb-4 relative">
-                    <div className="flex items-center justify-between mb-1.5">
+                  <div className="mb-6 relative">
+                    <div className="flex items-center justify-between mb-2">
                       <label htmlFor="login-password" className={`${LABEL_CLASS} !mb-0`}>Password</label>
                       <button type="button" className={LINK_BUTTON_CLASS} onClick={() => goTo('forgot')}>
                         Forgot password?
@@ -319,7 +393,7 @@ export default function Login() {
                         autoFocus={passwordReset}
                         value={password}
                         onChange={e => setPassword(e.target.value)}
-                        placeholder="••••••••"
+                        placeholder="Enter your password"
                         required
                       />
                       <EyeToggle shown={showPassword} onToggle={() => setShowPassword(!showPassword)} />
@@ -353,7 +427,7 @@ export default function Login() {
                       autoFocus
                       value={email}
                       onChange={e => setEmail(e.target.value)}
-                      placeholder="you@agency.com"
+                      placeholder="Enter your email address"
                       required
                     />
                   </div>
@@ -480,9 +554,9 @@ export default function Login() {
               </form>
             )}
           </div>
-        </div>
 
-        <p className="text-center text-[11px] text-[var(--text-3)] mt-5">Orbit — Internal use only</p>
+          <p className="mt-5 text-center text-[12px] text-[#6b6f8a]">Orbit — Internal use only</p>
+        </div>
       </div>
     </div>
   );

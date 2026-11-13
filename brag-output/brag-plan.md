@@ -11,7 +11,24 @@
 8. **Format:** landscape 1920×1080, about 20 s.
 9. **Punchline:** "Internal use only. Externally impressive."
 
-## Storyboard (20.0 s)
+## Final cut: 45 s full tour
+| # | Time | Scene |
+|---|---|---|
+| 1 | 0.0–5.0 | Hook: Manglish → client English |
+| 2 | 5.0–7.4 | ORBIT reveal |
+| 3 | 7.4–11.8 | Task flow: Requested → Done |
+| 4 | 11.8–16.2 | Ask Orbit assistant |
+| 7 | 16.2–20.4 | Calendar: "Deadlines, meetings, even birthdays." |
+| 8 | 20.4–24.6 | Time Log: 126h 30m this week, per-project bars |
+| 9 | 24.6–28.8 | Messages: member chat plus file, "No WhatsApp chaos." |
+| 10 | 28.8–33.0 | Knowledge folders, brand note, vaulted credentials |
+| 11 | 33.0–37.2 | Member Activity: Created / In Review / Done / Rework |
+| 5 | 37.2–40.6 | Stat tiles |
+| 6 | 40.6–45.0 | Outro: "Internal use only. Externally impressive." |
+
+All names and numbers in the mock-ups are illustrative.
+
+## Original storyboard (20.0 s, first cut)
 | # | Time | Scene | On-screen text | Motion |
 |---|---|---|---|---|
 | 1 | 0.0–3.4 | **Hook**: a chat bubble types out Manglish | "client nu logo innu evening tharam, ok alle?" → chip "✦ Rewrite for client" → "Hi! We'll share the final logo by this evening. Does that work for you?" | type-on, chip pops, text swaps with blur |

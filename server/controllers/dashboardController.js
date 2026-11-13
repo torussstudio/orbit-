@@ -15,6 +15,20 @@ async function getMemberTasks(req, res, next) {
   } catch (err) { next(err); }
 }
 
+// GitHub-style daily activity for one member (self, or any member for managers).
+async function getActivityHeatmap(req, res, next) {
+  try {
+    res.json(await dashboardService.getActivityHeatmap(req.params.id));
+  } catch (err) { next(err); }
+}
+
+// Member dashboard "Time logged" (self, or any member for managers).
+async function getTimeSummary(req, res, next) {
+  try {
+    res.json(await dashboardService.getTimeSummary(req.params.id));
+  } catch (err) { next(err); }
+}
+
 async function getTasksList(req, res, next) {
   try {
     const tasks = await dashboardService.getTasksList(req.query.stage);
@@ -37,4 +51,4 @@ async function getTeamProgress(req, res, next) {
   } catch (err) { next(err); }
 }
 
-module.exports = { getDashboard, getMemberTasks, getTasksList, getMyTasks, getTeamProgress };
+module.exports = { getDashboard, getMemberTasks, getTasksList, getMyTasks, getTeamProgress, getActivityHeatmap, getTimeSummary };

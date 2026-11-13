@@ -37,6 +37,8 @@ const TYPES = [
   { key: 'task_request_update', group: 'tasks', label: 'Your task request approved or declined' },
   // services/overdueReasonService.js: the admin reviewed why your task is overdue.
   { key: 'overdue_decision', group: 'tasks', label: 'Your admin reviewed an overdue reason' },
+  // utils/streakMilestones.js: your working-day streak reached a milestone (5, 10, 25 ...).
+  { key: 'streak_milestone', group: 'tasks', label: 'Work streak milestone' },
 
   { key: 'project_member_added', group: 'projects', label: 'Added to a project' },
   { key: 'project_member_removed', group: 'projects', label: 'Removed from a project' },

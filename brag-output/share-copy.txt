@@ -1,7 +1,7 @@
 == LinkedIn ==
 We built Orbit: one workspace for our whole agency.
 
-Projects, clusters, tasks, review queues, time logs, calendar and messages, all in one place. And an assistant that actually knows what's going on: "What should I do first?", "Team workload", "Write my standup".
+Projects, tasks and review queues. Calendar, time logs and team chat. Brand files, notes and vaulted logins. Member activity for managers. All in one place. And an assistant that actually knows what's going on: "What should I do first?", "Team workload", "Write my standup".
 
 Our favourite feature: one tap turns a Manglish draft into a polished client reply. 😄
 

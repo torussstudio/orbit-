@@ -5,13 +5,29 @@
   "lint": {
     "ok": true,
     "errorCount": 0,
-    "warningCount": 7,
+    "warningCount": 13,
     "infoCount": 0,
     "findings": [
       {
+        "code": "composition_file_too_large",
+        "severity": "warning",
+        "message": "This HTML composition file has 331 lines. Smaller sub-compositions are easier to read, iterate on, and diff.",
+        "selector": "[data-composition-id]",
+        "dataAttributes": {},
+        "sourceFile": "C:\\Users\\Admin\\Desktop\\orbit-main - Copy\\brag-output\\composition\\index.html",
+        "bbox": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        },
+        "time": 0,
+        "fixHint": "Split coherent scenes or layers into separate .html files under compositions/, then mount them from the parent with data-composition-src so each file stays small enough to inspect, revise, and validate independently."
+      },
+      {
         "code": "timeline_track_too_dense",
         "severity": "warning",
-        "message": "Track 0 has 6 timed elements in this HTML file. Smaller sub-compositions keep timelines easier to read, iterate on, and diff.",
+        "message": "Track 0 has 11 timed elements in this HTML file. Smaller sub-compositions keep timelines easier to read, iterate on, and diff.",
         "selector": "[data-composition-id]",
         "dataAttributes": {},
         "sourceFile": "C:\\Users\\Admin\\Desktop\\orbit-main - Copy\\brag-output\\composition\\index.html",
@@ -43,7 +59,7 @@
       {
         "code": "nested_structure_needs_subcomposition",
         "severity": "warning",
-        "message": "<div id=\"s2\"> is a timeline element that contains nested <svg id=\"s2hex\">. The timeline shows one row per top-level element, and the root composition is built only from sub-compositions.",
+        "message": "<div id=\"s2\"> is a timeline element that contains nested <div>. The timeline shows one row per top-level element, and the root composition is built only from sub-compositions.",
         "selector": "#s2",
         "dataAttributes": {},
         "sourceFile": "C:\\Users\\Admin\\Desktop\\orbit-main - Copy\\brag-output\\composition\\index.html",
@@ -91,6 +107,86 @@
       {
         "code": "nested_structure_needs_subcomposition",
         "severity": "warning",
+        "message": "<div id=\"s7\"> is a timeline element that contains nested <div id=\"s7card\">. The timeline shows one row per top-level element, and the root composition is built only from sub-compositions.",
+        "selector": "#s7",
+        "dataAttributes": {},
+        "sourceFile": "C:\\Users\\Admin\\Desktop\\orbit-main - Copy\\brag-output\\composition\\index.html",
+        "bbox": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        },
+        "time": 0,
+        "fixHint": "Move <div id=\"s7\"> and its contents into a sub-composition file and mount it with data-composition-src."
+      },
+      {
+        "code": "nested_structure_needs_subcomposition",
+        "severity": "warning",
+        "message": "<div id=\"s8\"> is a timeline element that contains nested <div id=\"s8card\">. The timeline shows one row per top-level element, and the root composition is built only from sub-compositions.",
+        "selector": "#s8",
+        "dataAttributes": {},
+        "sourceFile": "C:\\Users\\Admin\\Desktop\\orbit-main - Copy\\brag-output\\composition\\index.html",
+        "bbox": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        },
+        "time": 0,
+        "fixHint": "Move <div id=\"s8\"> and its contents into a sub-composition file and mount it with data-composition-src."
+      },
+      {
+        "code": "nested_structure_needs_subcomposition",
+        "severity": "warning",
+        "message": "<div id=\"s9\"> is a timeline element that contains nested <div id=\"s9card\">. The timeline shows one row per top-level element, and the root composition is built only from sub-compositions.",
+        "selector": "#s9",
+        "dataAttributes": {},
+        "sourceFile": "C:\\Users\\Admin\\Desktop\\orbit-main - Copy\\brag-output\\composition\\index.html",
+        "bbox": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        },
+        "time": 0,
+        "fixHint": "Move <div id=\"s9\"> and its contents into a sub-composition file and mount it with data-composition-src."
+      },
+      {
+        "code": "nested_structure_needs_subcomposition",
+        "severity": "warning",
+        "message": "<div id=\"s10\"> is a timeline element that contains nested <div id=\"s10card\">. The timeline shows one row per top-level element, and the root composition is built only from sub-compositions.",
+        "selector": "#s10",
+        "dataAttributes": {},
+        "sourceFile": "C:\\Users\\Admin\\Desktop\\orbit-main - Copy\\brag-output\\composition\\index.html",
+        "bbox": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        },
+        "time": 0,
+        "fixHint": "Move <div id=\"s10\"> and its contents into a sub-composition file and mount it with data-composition-src."
+      },
+      {
+        "code": "nested_structure_needs_subcomposition",
+        "severity": "warning",
+        "message": "<div id=\"s11\"> is a timeline element that contains nested <div id=\"s11card\">. The timeline shows one row per top-level element, and the root composition is built only from sub-compositions.",
+        "selector": "#s11",
+        "dataAttributes": {},
+        "sourceFile": "C:\\Users\\Admin\\Desktop\\orbit-main - Copy\\brag-output\\composition\\index.html",
+        "bbox": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        },
+        "time": 0,
+        "fixHint": "Move <div id=\"s11\"> and its contents into a sub-composition file and mount it with data-composition-src."
+      },
+      {
+        "code": "nested_structure_needs_subcomposition",
+        "severity": "warning",
         "message": "<div id=\"s5\"> is a timeline element that contains nested <div>. The timeline shows one row per top-level element, and the root composition is built only from sub-compositions.",
         "selector": "#s5",
         "dataAttributes": {},
@@ -107,7 +203,7 @@
       {
         "code": "nested_structure_needs_subcomposition",
         "severity": "warning",
-        "message": "<div id=\"s6\"> is a timeline element that contains nested <svg id=\"s6hex\">. The timeline shows one row per top-level element, and the root composition is built only from sub-compositions.",
+        "message": "<div id=\"s6\"> is a timeline element that contains nested <div>. The timeline shows one row per top-level element, and the root composition is built only from sub-compositions.",
         "selector": "#s6",
         "dataAttributes": {},
         "sourceFile": "C:\\Users\\Admin\\Desktop\\orbit-main - Copy\\brag-output\\composition\\index.html",
@@ -136,17 +232,17 @@
     "warningCount": 0,
     "infoCount": 0,
     "findings": [],
-    "duration": 22.5,
+    "duration": 45,
     "samples": [
-      1.25,
-      3.75,
-      6.25,
-      8.75,
-      11.25,
-      13.75,
-      16.25,
-      18.75,
-      21.25
+      2.5,
+      7.5,
+      12.5,
+      17.5,
+      22.5,
+      27.5,
+      32.5,
+      37.5,
+      42.5
     ],
     "transitionSamples": [],
     "transitionSamplesDropped": 0,
@@ -189,22 +285,22 @@
           "width": 52,
           "height": 52
         },
-        "time": 1.25,
+        "time": 2.5,
         "times": [
-          1.25
+          2.5
         ]
       }
     ],
     "enabled": true,
     "samples": [
-      1.25,
-      6.25,
-      11.25,
-      16.25,
-      21.25
+      2.5,
+      12.5,
+      22.5,
+      32.5,
+      42.5
     ],
-    "checked": 47,
-    "passed": 46
+    "checked": 19,
+    "passed": 18
   },
   "craft": {
     "ok": true,
@@ -336,9 +432,9 @@
           13.5,
           13.875,
           13.875,
-          16.375,
-          16.375,
-          16.5
+          37.375,
+          37.375,
+          37.5
         ],
         "fontPx": 20.34,
         "floorPx": 28,
@@ -450,14 +546,14 @@
             "seconds": 3.875
           },
           {
-            "selector": "div.who",
+            "selector": "#s1chat > div:nth-of-type(1)",
             "text": "Arjun · draft reply",
             "fontPx": 26,
             "time": 0,
             "seconds": 5
           },
           {
-            "selector": "div.av",
+            "selector": "#s1chat > div:nth-of-type(1) > div:nth-of-type(1)",
             "text": "A",
             "fontPx": 26,
             "time": 0,
@@ -467,29 +563,29 @@
             "selector": "#t1 > div:nth-of-type(1)",
             "text": "Hours this week",
             "fontPx": 26,
-            "time": 16.375,
-            "seconds": 2.5
+            "time": 37.375,
+            "seconds": 3.25
           },
           {
             "selector": "#t2 > div:nth-of-type(1)",
             "text": "On-time rate",
             "fontPx": 26,
-            "time": 16.375,
-            "seconds": 2.5
+            "time": 37.375,
+            "seconds": 3.25
           },
           {
             "selector": "#t3 > div:nth-of-type(1)",
             "text": "Waiting for review",
             "fontPx": 26,
-            "time": 16.5,
-            "seconds": 2.375
+            "time": 37.5,
+            "seconds": 3.125
           }
         ]
       }
     ],
     "enabled": true,
     "step": 0.125,
-    "samples": 180
+    "samples": 360
   },
   "audio": {
     "ok": true,

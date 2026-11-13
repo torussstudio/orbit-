@@ -2,9 +2,17 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import './index.css';
 import App from './App';
+import UpdatePrompt from './components/ui/UpdatePrompt';
 
 const root = ReactDOM.createRoot(document.getElementById('root'));
-root.render(<React.StrictMode><App /></React.StrictMode>);
+// UpdatePrompt sits next to App, outside login and routing, so a stale
+// copy of the app is told to update even on the login page.
+root.render(
+  <React.StrictMode>
+    <App />
+    <UpdatePrompt />
+  </React.StrictMode>,
+);
 
 // Install as an app (PWA): the browser offers "Install Orbit" once the
 // service worker is registered. Same worker and options the notification

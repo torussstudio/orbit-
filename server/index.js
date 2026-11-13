@@ -435,6 +435,16 @@ const {
 scheduleLoginReminders();
 
 /*
+ * Work-streak milestone notification (5, 10, 25 ... working days in a
+ * row). Off with STREAK_MILESTONES_ENABLED=false.
+ */
+const {
+  scheduleStreakMilestones,
+} = require("./utils/streakMilestones");
+
+scheduleStreakMilestones();
+
+/*
  * Deadline reminders are OFF unless
  * DEADLINE_REMINDERS_ENABLED=true.
  */

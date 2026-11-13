@@ -1,10 +1,12 @@
 import { memo, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import api from "../api/client";
 import { useAuth } from "../context/AuthContext";
 import { formatDate } from "../utils/helpers";
 import { useCountUp } from "../utils/motion";
-import Modal from "../components/ui/Modal";
+import ActivityHeatmap from "../components/progress/ActivityHeatmap";
+import TimeLogCard from "../components/progress/TimeLogCard";
+import TodayGlance from "../components/progress/TodayGlance";
 import { useLiveRefetch, DASHBOARD_EVENTS } from "../hooks/useLiveEvents";
 import {
   PeriodToggle,
@@ -176,51 +178,6 @@ function useDashboardData() {
   // `load` never shows the skeleton again after the first load, so it is
   // also the silent refresh used by live updates.
   return { data, loading, error, retry, refresh: load };
-}
-
-// "Total tasks" / "Completed tasks" modal. Latest request wins.
-function useTaskModal() {
-  const [kind, setKind] = useState(null); // "total" | "completed" | null
-  const [tasks, setTasks] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(false);
-  const controller = useRef(null);
-
-  const open = useCallback(async (type) => {
-    controller.current?.abort();
-    const c = new AbortController();
-    controller.current = c;
-    setKind(type);
-    setLoading(true);
-    setError(false);
-    try {
-      const r = await api.get("/dashboard/tasks", {
-        ...(type === "completed" ? { params: { stage: "Done" } } : {}),
-        signal: c.signal,
-      });
-      if (controller.current !== c) return;
-      setTasks(r.data.tasks || []);
-    } catch (e) {
-      if (isAbort(e) || controller.current !== c) return;
-      setTasks([]);
-      setError(true);
-    } finally {
-      if (controller.current === c) setLoading(false);
-    }
-  }, []);
-
-  const close = useCallback(() => {
-    controller.current?.abort();
-    controller.current = null;
-    setKind(null);
-    setTasks([]);
-    setError(false);
-    setLoading(false);
-  }, []);
-
-  useEffect(() => () => controller.current?.abort(), []);
-
-  return { kind, tasks, loading, error, open, close };
 }
 
 // Per-member task lists for the workload accordion (cached after first load).
@@ -1119,49 +1076,574 @@ export default function Dashboard() {
  * Manager view
  * ========================================================================= */
 
+const WEEKDAY_SHORT = new Intl.DateTimeFormat("en-US", { weekday: "short" });
+
+// Project health -> the existing badge colours (see projectHealth in dashboardService).
+const HEALTH = {
+  behind: { label: "Behind", badge: "badge-blocked" },
+  at_risk: { label: "At risk", badge: "badge-inprogress" },
+  on_track: { label: "On track", badge: "badge-done" },
+  on_hold: { label: "On hold", badge: "badge-on_hold" },
+  no_tasks: { label: "No tasks", badge: "badge-archived" },
+  completed: { label: "Completed", badge: "badge-completed" },
+};
+
+const DOT_TONE = {
+  danger: "bg-[color:var(--danger)]",
+  warning: "bg-[color:var(--warning)]",
+  accent: "bg-[color:var(--accent)]",
+  muted: "bg-[color:var(--text-3)]",
+  success: "bg-[color:var(--success)]",
+};
+
+const VALUE_TONE = {
+  danger: "text-[color:var(--danger)]",
+  warning: "text-[color:var(--warning)]",
+  accent: "text-[color:var(--accent)]",
+  muted: "text-[color:var(--text-2)]",
+  success: "text-[color:var(--success)]",
+};
+
+// Stage -> colour for the "Tasks by stage" bar (custom stages count as accent).
+const STAGE_COLOR = {
+  todo: "var(--text-3)",
+  "in progress": "var(--warning)",
+  "in review": "var(--accent-2)",
+  done: "var(--success)",
+};
+
+const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+
+// 150 -> "2h 30m", 45 -> "45m", 0 -> "0h"
+function fmtMinutes(min) {
+  const n = Math.round(Number(min) || 0);
+  if (n <= 0) return "0h";
+  const h = Math.floor(n / 60);
+  const m = n % 60;
+  if (h && m) return `${h}h ${m}m`;
+  return h ? `${h}h` : `${m}m`;
+}
+
+function timeAgo(iso) {
+  const t = new Date(iso).getTime();
+  if (Number.isNaN(t)) return "";
+  const mins = Math.floor((Date.now() - t) / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.floor(hrs / 24)}d ago`;
+}
+
+const MemberAvatar = memo(function MemberAvatar({ member: m }) {
+  return (
+    <span
+      className="user-avatar size-8 p-0 !rounded-[10px] overflow-hidden shrink-0 text-[11px]"
+      aria-hidden="true"
+    >
+      {m.avatar_url ? (
+        <img
+          src={m.avatar_url}
+          alt=""
+          loading="lazy"
+          decoding="async"
+          className="block size-full object-cover"
+        />
+      ) : (
+        (m.name || "?")[0]
+      )}
+    </span>
+  );
+});
+
+/* ---- Hero: briefing, needs attention, portfolio health ---------------------- */
+
+// A short plain-language summary written from the live numbers.
+function briefingSentences(data) {
+  const a = data.attention || {};
+  const overdue = Number(data.overdue_count) || 0;
+  const noReason = Math.min(Number(a.overdue_no_reason) || 0, overdue);
+  const due = (Number(a.due_today) || 0) + (Number(a.due_tomorrow) || 0);
+  const requests = Number(a.pending_requests) || 0;
+  const inReview = Number(a.in_review) || 0;
+  const out = [];
+  if (overdue > 0) {
+    out.push(
+      `${plural(overdue, "task")} ${overdue === 1 ? "is" : "are"} overdue` +
+        (noReason > 0 ? `, ${noReason} of them without a reason from the assignee.` : "."),
+    );
+  } else {
+    out.push("Nothing is overdue.");
+  }
+  if (due > 0) out.push(`${plural(due, "task")} ${due === 1 ? "falls" : "fall"} due today or tomorrow.`);
+  if (requests > 0)
+    out.push(`${plural(requests, "task request")} ${requests === 1 ? "is" : "are"} waiting for you.`);
+  if (inReview > 0)
+    out.push(`${plural(inReview, "task")} ${inReview === 1 ? "is" : "are"} waiting in review.`);
+  return out;
+}
+
+// Wraps the numbers of a sentence in bold.
+function BoldNumbers({ text }) {
+  return text.split(/(\d+)/).map((part, i) =>
+    /^\d+$/.test(part) ? (
+      <b key={i} className="font-semibold text-[color:var(--text)] tabular-nums">
+        {part}
+      </b>
+    ) : (
+      part
+    ),
+  );
+}
+
+const ROW_BASE = `flex items-center gap-3 px-3 py-2.5 rounded-xl no-underline border border-[color:var(--border)] bg-[color:var(--bg-2)] transition-colors duration-200 hover:bg-[color:var(--bg-3)] motion-reduce:transition-none ${FOCUS}`;
+
+const AttentionRow = memo(function AttentionRow({ item }) {
+  const zero = !item.value;
+  const body = (
+    <>
+      <span
+        className={cx("size-[9px] rounded-full shrink-0", DOT_TONE[zero ? "muted" : item.tone])}
+        aria-hidden="true"
+      />
+      <span className="min-w-0 flex-1">
+        <span className="block text-[13px] font-medium text-[color:var(--text)]">
+          {item.label}
+        </span>
+        {item.hint && (
+          <span className="block mt-0.5 text-[11px] text-[color:var(--text-3)]">{item.hint}</span>
+        )}
+      </span>
+      <span
+        className={cx(
+          "shrink-0 font-[family-name:var(--font-mono)] text-[15px] font-bold tabular-nums",
+          zero ? "text-[color:var(--text-3)]" : VALUE_TONE[item.tone],
+        )}
+      >
+        {item.value}
+      </span>
+    </>
+  );
+  const cls = cx(ROW_BASE, zero && "opacity-60");
+  if (item.to) {
+    return (
+      <Link to={item.to} className={cls}>
+        {body}
+      </Link>
+    );
+  }
+  return (
+    <a href={item.href} className={cls}>
+      {body}
+    </a>
+  );
+});
+
+function attentionItems(attention) {
+  const a = attention || {};
+  const dueToday = Number(a.due_today) || 0;
+  const dueTomorrow = Number(a.due_tomorrow) || 0;
+  const oldest = a.oldest_review_days;
+  return [
+    {
+      key: "no-reason",
+      tone: "danger",
+      label: "Overdue, no reason given",
+      hint: "The assignee has not explained the delay",
+      value: Number(a.overdue_no_reason) || 0,
+      href: "#manager-overdue",
+    },
+    {
+      key: "review",
+      tone: "warning",
+      label: "Waiting in review",
+      hint:
+        Number(a.in_review) > 0 && oldest != null
+          ? oldest > 0
+            ? `Oldest has waited ${oldest} ${oldest === 1 ? "day" : "days"}`
+            : "Oldest moved to review today"
+          : null,
+      value: Number(a.in_review) || 0,
+      to: "/in-review",
+    },
+    {
+      key: "requests",
+      tone: "accent",
+      label: "Pending task requests",
+      value: Number(a.pending_requests) || 0,
+      to: "/requested-tasks",
+    },
+    {
+      key: "unassigned",
+      tone: "muted",
+      label: "Tasks with no assignee",
+      value: Number(a.unassigned) || 0,
+      to: "/projects",
+    },
+    {
+      key: "due",
+      tone: "success",
+      label: "Due today or tomorrow",
+      hint: dueToday + dueTomorrow > 0 ? `${dueToday} today · ${dueTomorrow} tomorrow` : null,
+      value: dueToday + dueTomorrow,
+      to: "/calendar",
+    },
+  ];
+}
+
+const Meter = memo(function Meter({ label, value, pct, hint }) {
+  return (
+    <div className="mt-3">
+      <div className="flex items-baseline justify-between gap-2 mb-1.5 text-[12px] text-[color:var(--text-2)]">
+        <span>{label}</span>
+        <b className="font-semibold tabular-nums text-[color:var(--text)]">{value}</b>
+      </div>
+      <div className="h-1.5 rounded-full overflow-hidden bg-[color:var(--border)]">
+        <div
+          className="h-full rounded-full bg-[color:var(--accent)] origin-left transition-transform duration-[700ms] ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none"
+          style={{ width: "100%", transform: `scaleX(${Math.max(0, Math.min(1, pct))})` }}
+        />
+      </div>
+      {hint && <div className="mt-1 text-[11px] text-[color:var(--text-3)]">{hint}</div>}
+    </div>
+  );
+});
+
+const PANEL =
+  "min-w-0 rounded-[18px] border border-[color:var(--border)] bg-[color:var(--bg-3)] p-[18px]";
+const LABEL =
+  "mt-4 mb-2 text-[10.5px] font-bold uppercase tracking-[0.06em] text-[color:var(--text-3)]";
+
+const BriefingPanel = memo(function BriefingPanel({ data }) {
+  const items = useMemo(() => attentionItems(data.attention), [data.attention]);
+  const sentences = useMemo(() => briefingSentences(data), [data]);
+  const open = items.filter((i) => i.value > 0).length;
+
+  return (
+    <section className={PANEL} aria-labelledby="briefing-heading">
+      <CardHead title="Today's briefing">
+        <span
+          className={cx(
+            "text-[11px] font-semibold tabular-nums",
+            open ? "text-[color:var(--text-2)]" : "text-[color:var(--success)]",
+          )}
+        >
+          {open ? `${open} of ${items.length} need a look` : "All clear"}
+        </span>
+      </CardHead>
+      <p className="m-0 text-[13px] leading-[1.6] text-[color:var(--text-2)]">
+        {sentences.map((s, i) => (
+          <span key={i}>
+            <BoldNumbers text={s} />{" "}
+          </span>
+        ))}
+      </p>
+
+      <div className={LABEL}>Needs attention</div>
+      <div className="flex flex-col gap-1.5">
+        {items.map((i) => (
+          <AttentionRow key={i.key} item={i} />
+        ))}
+      </div>
+
+    </section>
+  );
+});
+
+/* ---- Hero: overdue by project + tasks by stage ------------------------------- */
+
+const OverdueByProjectPanel = memo(function OverdueByProjectPanel({ projects, stages, onTime, team, dayOff }) {
+  const logged = team.filter((m) => Number(m.today_minutes) > 0).length;
+  const onTimeTotal = Number(onTime?.total) || 0;
+  const onTimePct = onTimeTotal > 0 ? (Number(onTime?.on_time) || 0) / onTimeTotal : null;
+  const top = useMemo(
+    () =>
+      [...projects]
+        .filter((p) => Number(p.overdue_tasks) > 0)
+        .sort((a, b) => b.overdue_tasks - a.overdue_tasks)
+        .slice(0, 5),
+    [projects],
+  );
+  const max = Math.max(1, ...top.map((p) => Number(p.overdue_tasks) || 0));
+
+  const stageRows = useMemo(
+    () => stages.map((s) => ({ stage: s.stage, count: Number(s.count) || 0 })).filter((s) => s.count > 0),
+    [stages],
+  );
+  const stageTotal = stageRows.reduce((sum, s) => sum + s.count, 0);
+
+  return (
+    <section className={PANEL}>
+      <CardHead title="Overdue by project">
+        <span className="text-[11px] text-[color:var(--text-3)]">Top 5 · tasks</span>
+      </CardHead>
+      {top.length === 0 ? (
+        <Empty title="Nothing is overdue" hint="Every project is on schedule." icon="check" />
+      ) : (
+        <div className="flex flex-col gap-3">
+          {top.map((p) => (
+            <Link
+              key={p.id}
+              to={`/projects/${p.id}`}
+              className={`flex items-center gap-3 no-underline text-[12px] text-[color:var(--text)] ${FOCUS}`}
+            >
+              <span className="w-[110px] shrink-0 truncate">{p.name}</span>
+              <span className="flex-1 h-3.5 rounded-full overflow-hidden bg-[color:var(--border)]">
+                <span
+                  className="block h-full rounded-full origin-left bg-[color:var(--accent)] opacity-85 transition-transform duration-[700ms] ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none"
+                  style={{ width: "100%", transform: `scaleX(${(Number(p.overdue_tasks) || 0) / max})` }}
+                />
+              </span>
+              <b className="w-7 shrink-0 text-right font-semibold tabular-nums">{p.overdue_tasks}</b>
+            </Link>
+          ))}
+        </div>
+      )}
+
+      <div className={LABEL}>Tasks by stage</div>
+      {stageTotal === 0 ? (
+        <div className={NOTE}>No tasks yet</div>
+      ) : (
+        <>
+          <div className="flex h-2.5 rounded-full overflow-hidden gap-px bg-[color:var(--border)]">
+            {stageRows.map((s) => (
+              <span
+                key={s.stage}
+                title={`${s.stage}: ${s.count}`}
+                style={{
+                  width: `${(s.count / stageTotal) * 100}%`,
+                  background: STAGE_COLOR[String(s.stage).toLowerCase()] || "var(--accent)",
+                }}
+              />
+            ))}
+          </div>
+          <div className="mt-2.5 flex flex-wrap gap-x-4 gap-y-1.5 text-[11.5px] text-[color:var(--text-2)]">
+            {stageRows.map((s) => (
+              <span key={s.stage} className="inline-flex items-center gap-1.5 tabular-nums">
+                <span
+                  className="size-2 rounded-full"
+                  style={{ background: STAGE_COLOR[String(s.stage).toLowerCase()] || "var(--accent)" }}
+                  aria-hidden="true"
+                />
+                {s.stage} {s.count}
+              </span>
+            ))}
+          </div>
+        </>
+      )}
+      <div className={LABEL}>Portfolio health</div>
+      <Meter
+        label="On-time delivery · last 30 days"
+        value={onTimePct == null ? "—" : `${Math.round(onTimePct * 100)}%`}
+        pct={onTimePct ?? 0}
+        hint={onTimeTotal > 0 ? `${onTimeTotal} finished with a due date` : "Nothing finished with a due date yet"}
+      />
+      {team.length > 0 && !dayOff && (
+        <Meter
+          label="Members who logged time today"
+          value={`${logged} of ${team.length}`}
+          pct={team.length ? logged / team.length : 0}
+        />
+      )}
+    </section>
+  );
+});
+
+/* ---- Hero: due today & tomorrow + the next 7 days of deadlines ---------------- */
+
+const RING_R = 46;
+const RING_C = 2 * Math.PI * RING_R;
+const DAY_CHIPS = 4;
+
+const DuePanel = memo(function DuePanel({ attention, today, deadlines }) {
+  const dueToday = Number(attention?.due_today) || 0;
+  const dueTomorrow = Number(attention?.due_tomorrow) || 0;
+  const total = dueToday + dueTomorrow;
+  const todayLen = total ? (dueToday / total) * RING_C : 0;
+  const tomorrowLen = total ? (dueTomorrow / total) * RING_C : 0;
+
+  const days = useMemo(() => {
+    const byDay = new Map();
+    for (const r of deadlines) {
+      if (!byDay.has(r.day)) byDay.set(r.day, []);
+      byDay.get(r.day).push(r);
+    }
+    return [...byDay.entries()].map(([day, rows]) => ({
+      day,
+      rows: [...rows].sort((a, b) => b.count - a.count),
+      total: rows.reduce((s, r) => s + (Number(r.count) || 0), 0),
+    }));
+  }, [deadlines]);
+
+  const label = (day) => {
+    const d = parseDay(day);
+    const diff = today ? Math.round((d - parseDay(today)) / 86400000) : null;
+    if (diff === 0) return "Today";
+    if (diff === 1) return "Tomorrow";
+    return `${WEEKDAY_SHORT.format(d)}, ${DAY_FORMAT.format(d)}`;
+  };
+
+  return (
+    <section className={PANEL}>
+      <CardHead title="Upcoming deadlines">
+        <span className="text-[11px] text-[color:var(--text-3)]">Next 7 days</span>
+      </CardHead>
+
+      <div className="flex items-center gap-4">
+        <svg width="112" height="112" viewBox="0 0 112 112" className="shrink-0" aria-hidden="true">
+          <circle cx="56" cy="56" r={RING_R} fill="none" stroke="var(--border)" strokeWidth="11" />
+          {todayLen > 0 && (
+            <circle
+              cx="56"
+              cy="56"
+              r={RING_R}
+              fill="none"
+              stroke="var(--accent)"
+              strokeWidth="11"
+              strokeDasharray={`${todayLen} ${RING_C - todayLen}`}
+              transform="rotate(-90 56 56)"
+            />
+          )}
+          {tomorrowLen > 0 && (
+            <circle
+              cx="56"
+              cy="56"
+              r={RING_R}
+              fill="none"
+              stroke="var(--accent-2)"
+              strokeOpacity="0.45"
+              strokeWidth="11"
+              strokeDasharray={`${tomorrowLen} ${RING_C - tomorrowLen}`}
+              strokeDashoffset={-todayLen}
+              transform="rotate(-90 56 56)"
+            />
+          )}
+          <text x="56" y="58" textAnchor="middle" fontSize="26" fontWeight="700" fill="var(--text)">
+            {total}
+          </text>
+          <text x="56" y="74" textAnchor="middle" fontSize="10" fill="var(--text-3)">
+            {total === 1 ? "task" : "tasks"}
+          </text>
+        </svg>
+        <div className="flex flex-col gap-2 text-[12px] text-[color:var(--text-2)] tabular-nums">
+          <span className="inline-flex items-center gap-2">
+            <span className="size-2 rounded-full bg-[color:var(--accent)]" aria-hidden="true" />
+            Due today {dueToday}
+          </span>
+          <span className="inline-flex items-center gap-2">
+            <span
+              className="size-2 rounded-full bg-[color:var(--accent-2)] opacity-45"
+              aria-hidden="true"
+            />
+            Due tomorrow {dueTomorrow}
+          </span>
+        </div>
+      </div>
+
+      {days.length === 0 ? (
+        <Empty title="Nothing due this week" hint="Open tasks with a due date show up here." icon="check" />
+      ) : (
+        <div className={cx("mt-3", DIVIDE)}>
+          {days.map((d) => (
+            <div key={d.day} className="flex items-start gap-3 py-2">
+              <span
+                className={cx(
+                  "w-[84px] shrink-0 pt-0.5 text-[12px] font-medium tabular-nums",
+                  label(d.day) === "Today" ? "text-[color:var(--accent)]" : "text-[color:var(--text-2)]",
+                )}
+              >
+                {label(d.day)}
+              </span>
+              <span className="flex flex-1 min-w-0 flex-wrap gap-1.5">
+                {d.rows.slice(0, DAY_CHIPS).map((r) => (
+                  <Link
+                    key={`${d.day}-${r.project_id}`}
+                    to={`/projects/${r.project_id}`}
+                    className={`max-w-full truncate px-2 py-0.5 rounded-md text-[11px] no-underline text-[color:var(--text-2)] bg-[color:var(--bg-2)] border border-[color:var(--border)] hover:text-[color:var(--text)] ${FOCUS}`}
+                  >
+                    {r.project_name} · {r.count}
+                  </Link>
+                ))}
+                {d.rows.length > DAY_CHIPS && (
+                  <span className="px-1 py-0.5 text-[11px] text-[color:var(--text-3)]">
+                    +{d.rows.length - DAY_CHIPS} more
+                  </span>
+                )}
+              </span>
+              <span className="shrink-0 font-[family-name:var(--font-mono)] text-[12px] tabular-nums text-[color:var(--text)]">
+                {d.total}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+});
+
+/* ---- Project health --------------------------------------------------------- */
+
 const ProjectRow = memo(function ProjectRow({ project: p }) {
   const pct = p.total_tasks > 0 ? Math.round((p.done_tasks / p.total_tasks) * 100) : 0;
+  const health = HEALTH[p.health] || HEALTH.on_track;
+  const meta = [];
+  if (p.end_date) meta.push(`Due ${DAY_FORMAT.format(parseDay(p.end_date))}`);
+  if (p.overdue_tasks > 0) meta.push(`${p.overdue_tasks} overdue`);
+  meta.push(`${p.done_tasks} of ${p.total_tasks} tasks done`);
+
   return (
     <Link
       to={`/projects/${p.id}`}
-      className={`block -mx-3 px-3 pt-3 pb-3.5 rounded-xl no-underline transition-colors duration-200 hover:bg-[color:var(--bg-3)] active:scale-[0.995] motion-reduce:transition-none ${FOCUS}`}
+      className={`flex items-center gap-3 -mx-3 px-3 py-2.5 rounded-xl no-underline transition-colors duration-200 hover:bg-[color:var(--bg-3)] active:scale-[0.995] motion-reduce:transition-none ${FOCUS}`}
     >
-      <div className="flex items-baseline justify-between gap-2 mb-2">
-        <span className="min-w-0 text-[13px] font-medium text-[color:var(--text)] truncate">
+      <span className="min-w-0 flex-1">
+        <span className="block text-[13px] font-medium text-[color:var(--text)] truncate">
           {p.name}
         </span>
-        <span
-          className={cx(
-            "shrink-0 font-[family-name:var(--font-mono)] text-[11px] tabular-nums",
-            pct === 100 ? "text-[color:var(--success)]" : "text-[color:var(--text-3)]",
-          )}
-        >
-          {pct}%
+        <span className="block mt-0.5 text-[11px] tabular-nums text-[color:var(--text-3)] truncate">
+          {meta.join(" · ")}
         </span>
-      </div>
-      <div
-        className="progress-bar !h-1.5 !rounded-full overflow-hidden"
+      </span>
+      <span
+        className="hidden sm:block w-24 h-1.5 shrink-0 rounded-full overflow-hidden bg-[color:var(--border)]"
         role="progressbar"
         aria-label={`${p.name} progress`}
         aria-valuemin={0}
         aria-valuemax={100}
         aria-valuenow={pct}
       >
-        <div
-          className="progress-fill !rounded-full w-full origin-left scale-x-[var(--pct,0)] transition-transform duration-[700ms] ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none"
-          style={{ "--pct": pct / 100 }}
+        <span
+          className="block h-full w-full origin-left rounded-full bg-[color:var(--accent)] transition-transform duration-[700ms] ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none"
+          style={{ transform: `scaleX(${pct / 100})` }}
         />
-      </div>
-      <div className="mt-2 text-[11px] tabular-nums text-[color:var(--text-3)]">
-        {p.done_tasks} of {p.total_tasks} tasks done
-      </div>
+      </span>
+      <span
+        className={cx(
+          "w-9 shrink-0 text-right font-[family-name:var(--font-mono)] text-[11px] tabular-nums",
+          pct === 100 ? "text-[color:var(--success)]" : "text-[color:var(--text-3)]",
+        )}
+      >
+        {pct}%
+      </span>
+      {p.rework_total > 0 && (
+        <span className="rework-counter shrink-0" title="Times tasks were sent back for changes">
+          <span className="rework-count">↺ {p.rework_total}</span>
+        </span>
+      )}
+      <span className={cx("badge shrink-0", health.badge)}>{health.label}</span>
     </Link>
   );
 });
 
-const WorkloadRow = memo(function WorkloadRow({
+/* ---- Team: time today + workload in one table ---------------------------------- */
+
+const TEAM_COLS =
+  "grid items-center gap-x-3 grid-cols-[minmax(0,1fr)_64px_58px_40px_52px_12px]";
+
+const TeamRow = memo(function TeamRow({
   member: w,
-  load,
+  heavy,
+  dayOff,
   isFirst,
   isOpen,
   prevOpen,
@@ -1172,6 +1654,8 @@ const WorkloadRow = memo(function WorkloadRow({
   onRetry,
 }) {
   const panelId = `workload-panel-${w.id}`;
+  const overdue = Number(w.overdue_count) || 0;
+  const logged = Number(w.today_minutes) > 0;
   return (
     <div
       className={
@@ -1182,52 +1666,55 @@ const WorkloadRow = memo(function WorkloadRow({
     >
       <button
         type="button"
-        className={`flex justify-between items-center gap-3 w-[calc(100%+24px)] -mx-3 px-3 py-2.5 text-left bg-transparent border-0 rounded-xl cursor-pointer transition-colors duration-200 hover:bg-[color:var(--bg-3)] active:scale-[0.995] motion-reduce:transition-none max-[480px]:flex-wrap ${FOCUS}`}
+        className={cx(
+          TEAM_COLS,
+          `w-[calc(100%+24px)] -mx-3 px-3 py-2.5 text-left bg-transparent border-0 rounded-xl cursor-pointer transition-colors duration-200 hover:bg-[color:var(--bg-3)] active:scale-[0.995] motion-reduce:transition-none ${FOCUS}`,
+        )}
         onClick={() => onToggle(w.id)}
         aria-expanded={isOpen}
         aria-controls={panelId}
       >
         <span className="flex items-center gap-2.5 min-w-0">
-          <span
-            className="user-avatar size-8 p-0 !rounded-[10px] overflow-hidden shrink-0 text-[11px]"
-            aria-hidden="true"
-          >
-            {w.avatar_url ? (
-              <img
-                src={w.avatar_url}
-                alt=""
-                loading="lazy"
-                decoding="async"
-                className="block size-full object-cover"
-              />
-            ) : (
-              (w.name || "?")[0]
-            )}
+          <MemberAvatar member={w} />
+          <span className="flex items-center gap-1.5 min-w-0">
+            <span className="text-[13px] font-medium truncate">{w.name}</span>
+            {heavy && <span className="badge badge-inprogress shrink-0">Heavy</span>}
           </span>
-          <span className="text-[13px] font-medium truncate">{w.name}</span>
         </span>
-        <span className="flex items-center gap-3 shrink-0 max-[480px]:text-xs">
-          <span
-            className="hidden sm:block w-16 h-1 rounded-full overflow-hidden bg-[color:var(--border)]"
-            aria-hidden="true"
-          >
-            <span
-              className="block h-full w-full origin-left rounded-full bg-[color:var(--accent)] opacity-70 transition-transform duration-[600ms] ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none"
-              style={{ transform: `scaleX(${load})` }}
-            />
-          </span>
-          <span className="min-w-[56px] text-right font-[family-name:var(--font-mono)] text-[13px] tabular-nums text-[color:var(--accent)] whitespace-nowrap">
-            {w.task_count} tasks
-          </span>
-          <span
-            className={cx(
-              "text-[10px] text-[color:var(--text-3)] transition-transform duration-200 motion-reduce:transition-none",
-              isOpen && "rotate-180",
-            )}
-            aria-hidden="true"
-          >
-            ▼
-          </span>
+        <span
+          className={cx(
+            "text-right text-[12px] tabular-nums",
+            logged
+              ? "font-medium text-[color:var(--success)]"
+              : dayOff
+                ? "text-[color:var(--text-3)]"
+                : "text-[color:var(--warning)]",
+          )}
+        >
+          {logged ? fmtMinutes(w.today_minutes) : dayOff ? "Off" : "Not yet"}
+        </span>
+        <span className="text-right text-[12px] tabular-nums text-[color:var(--text-2)]">
+          {fmtMinutes(w.week_minutes)}
+        </span>
+        <span className="text-right font-[family-name:var(--font-mono)] text-[13px] tabular-nums text-[color:var(--accent)]">
+          {w.task_count}
+        </span>
+        <span
+          className={cx(
+            "text-right font-[family-name:var(--font-mono)] text-[13px] tabular-nums",
+            overdue > 0 ? "font-semibold text-[color:var(--danger)]" : "text-[color:var(--text-3)]",
+          )}
+        >
+          {overdue > 0 ? overdue : "—"}
+        </span>
+        <span
+          className={cx(
+            "text-[10px] text-[color:var(--text-3)] transition-transform duration-200 motion-reduce:transition-none",
+            isOpen && "rotate-180",
+          )}
+          aria-hidden="true"
+        >
+          ▼
         </span>
       </button>
 
@@ -1295,63 +1782,182 @@ const OverdueRow = memo(function OverdueRow({ task: t }) {
   );
 });
 
+/* ---- Latest team activity ---------------------------------------------------- */
+
+const FeedRow = memo(function FeedRow({ item }) {
+  const who = item.actor_name || "Someone";
+  let action;
+  if (item.kind === "comment") action = "commented on";
+  else if (item.kind === "created") action = "created";
+  else action = "moved";
+  return (
+    <Link
+      to={`/projects/${item.project_id}/tasks/${item.task_id}`}
+      className={`${TASK_BASE} px-3 py-2.5 hover:bg-[color:var(--bg-3)]`}
+    >
+      <div className="text-[12px] leading-[1.45] text-[color:var(--text-2)] [overflow-wrap:anywhere]">
+        <span className="font-semibold text-[color:var(--text)]">{who}</span> {action}{" "}
+        <span className="font-medium text-[color:var(--text)] group-hover:underline underline-offset-[3px]">
+          {item.task_title}
+        </span>
+        {item.kind === "stage" && item.to_stage ? <> to {item.to_stage}</> : null}
+      </div>
+      <div className={TASK_META}>
+        {item.project_name} · {timeAgo(item.at)}
+      </div>
+    </Link>
+  );
+});
+
+const FeedCard = memo(function FeedCard({ feed }) {
+  return (
+    <section className="card">
+      <CardHead title="Latest activity" />
+      {feed.length === 0 ? (
+        <Empty title="No activity yet" hint="Task moves and comments show up here." />
+      ) : (
+        <div className={cx("-mx-3", DIVIDE)}>
+          {feed.slice(0, FEED_SHOWN).map((f, i) => (
+            <FeedRow key={`${f.kind}-${f.task_id}-${f.at}-${i}`} item={f} />
+          ))}
+        </div>
+      )}
+    </section>
+  );
+});
+
+/* ---- Quick actions ------------------------------------------------------------- */
+
+const QUICK_LINKS = [
+  { to: "/projects", label: "Projects" },
+  { to: "/members", label: "Members" },
+  { to: "/time-log", label: "Time log" },
+  { to: "/messages", label: "Messages" },
+];
+
+const QuickLinksBar = memo(function QuickLinksBar() {
+  return (
+    <nav className="flex flex-wrap items-center gap-2" aria-label="Quick actions">
+      <span className="mr-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-[color:var(--text-3)]">
+        Quick actions
+      </span>
+      {QUICK_LINKS.map((q) => (
+        <Link key={q.to} to={q.to} className="btn btn-ghost btn-sm">
+          {q.label}
+        </Link>
+      ))}
+    </nav>
+  );
+});
+
 const EMPTY_LIST = [];
+const FEED_SHOWN = 6;
+
+/*
+ * Manager "Command center": a hero (briefing + needs attention + portfolio
+ * health | overdue by project + tasks by stage | deadlines), the four key
+ * numbers, the full activity chart, then project health beside the team
+ * table, then overdue tasks beside the latest activity. Long lists (projects,
+ * team) scroll inside their card, so the page stays short however many there
+ * are. Cards are spaced by the page gap, so none carries a bottom margin.
+ */
+const HERO_GRID = `grid grid-cols-1 min-[1101px]:grid-cols-[1.05fr_1.1fr_1.2fr] gap-2.5 [&>*]:min-w-0`;
+const PAIR_GRID = `grid grid-cols-1 min-[901px]:grid-cols-2 gap-5 items-stretch [&>*]:min-w-0`;
+const SCROLL_BODY = "-mx-3 px-3 max-h-[560px] overflow-y-auto";
 
 function ManagerDash({ data }) {
-  const modal = useTaskModal();
   const members = useMemberTasks();
+  const navigate = useNavigate();
 
-  const { totalProjects, totalTasks, doneTasks, overdueCount } = useMemo(
-    () => ({
-      totalProjects: data?.total_projects ?? data?.projects?.length ?? 0,
-      totalTasks:
-        data?.total_main_tasks ??
-        data?.tasks_by_stage?.reduce((s, r) => s + parseInt(r.count, 10), 0) ??
-        0,
-      doneTasks: parseInt(
-        data?.tasks_by_stage?.find((r) => r.stage === "Done")?.count || 0,
-        10,
-      ),
-      overdueCount: data?.overdue_count ?? data?.overdue_tasks?.length ?? 0,
-    }),
-    [data],
-  );
-
-  // Sorted copy (never mutates the payload): most tasks first.
-  const { sortedWorkload, maxLoad } = useMemo(() => {
-    const sorted = data?.workload
-      ? [...data.workload].sort((a, b) => b.task_count - a.task_count)
-      : [];
+  const { overdueCount, inReview, requests, onTimePct, onTimeTotal } = useMemo(() => {
+    const onTime = data?.on_time;
+    const total = Number(onTime?.total) || 0;
     return {
-      sortedWorkload: sorted,
-      maxLoad: Math.max(1, ...sorted.map((w) => Number(w.task_count) || 0)),
+      overdueCount: data?.overdue_count ?? data?.overdue_tasks?.length ?? 0,
+      inReview: Number(data?.attention?.in_review) || 0,
+      requests: Number(data?.attention?.pending_requests) || 0,
+      onTimePct: total > 0 ? Math.round(((Number(onTime.on_time) || 0) / total) * 100) : null,
+      onTimeTotal: total,
+    };
+  }, [data]);
+
+  // Sorted copies (never mutate the payload): busiest first. "Heavy" = at
+  // least 5 open tasks and 1.5x the team average.
+  const { team, heavyIds, loggedCount } = useMemo(() => {
+    const rows = data?.workload ?? EMPTY_LIST;
+    const sorted = [...rows].sort((a, b) => b.task_count - a.task_count);
+    const avg = rows.length ? rows.reduce((s, w) => s + (Number(w.task_count) || 0), 0) / rows.length : 0;
+    return {
+      team: sorted,
+      heavyIds: new Set(
+        rows
+          .filter((w) => rows.length > 1 && Number(w.task_count) >= 5 && Number(w.task_count) >= avg * 1.5)
+          .map((w) => w.id),
+      ),
+      loggedCount: rows.filter((w) => Number(w.today_minutes) > 0).length,
     };
   }, [data?.workload]);
 
+  const goInReview = useCallback(() => navigate("/in-review"), [navigate]);
+  const goRequests = useCallback(() => navigate("/requested-tasks"), [navigate]);
+  const goOverdue = useCallback(() => {
+    document.getElementById("manager-overdue")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, []);
+
   if (!data) return null;
 
-  const modalTitle = modal.kind === "completed" ? "Completed tasks" : "Total tasks";
+  // The office's only weekly day off is Sunday: nobody is "late" logging time.
+  const dayOff = data.today ? parseDay(data.today).getDay() === 0 : false;
 
   return (
-    <>
-      <div className={STATS_GRID}>
-        <Stat value={totalProjects} label="Active projects" />
-        <Stat value={totalTasks} label="Total tasks" kind="total" onSelect={modal.open} />
-        <Stat
-          value={doneTasks}
-          label="Completed tasks"
-          tone="success"
-          kind="completed"
-          onSelect={modal.open}
-        />
-        <Stat value={overdueCount} label="Overdue tasks" tone="danger" />
+    <div className={`flex flex-col gap-5 [&>*]:min-w-0 ${RISE} ${STAGGER_4}`}>
+      <QuickLinksBar />
+
+      <div className="card !p-2.5">
+        <div className={HERO_GRID}>
+          <BriefingPanel data={data} />
+          <OverdueByProjectPanel
+            projects={data.projects ?? EMPTY_LIST}
+            stages={data.tasks_by_stage ?? EMPTY_LIST}
+            onTime={data.on_time}
+            team={team}
+            dayOff={dayOff}
+          />
+          <DuePanel
+            attention={data.attention}
+            today={data.today}
+            deadlines={data.deadlines ?? EMPTY_LIST}
+          />
+        </div>
       </div>
 
-      <ActivityChart activity={data.activity ?? EMPTY_LIST} />
+      <div className="grid grid-cols-2 min-[900px]:grid-cols-4 gap-3.5 [&>*]:min-w-0">
+        <Stat value={overdueCount} label="Overdue tasks" tone="danger" kind="overdue" onSelect={goOverdue} />
+        <Stat value={inReview} label="In review" tone="info" kind="review" onSelect={goInReview} />
+        <Stat value={requests} label="Task requests" tone="warning" kind="requests" onSelect={goRequests} />
+        <div className="stat-card">
+          <div className="stat-value !text-[34px] !font-semibold !leading-none tabular-nums !tracking-[-0.04em]">
+            {onTimePct == null ? "—" : `${onTimePct}%`}
+          </div>
+          <div className="stat-label mt-2.5">
+            On-time delivery
+            <span className="block mt-0.5 text-[10px] font-normal text-[color:var(--text-3)]">
+              {onTimeTotal > 0
+                ? `last 30 days · ${onTimeTotal} finished`
+                : "last 30 days · nothing finished with a due date"}
+            </span>
+          </div>
+        </div>
+      </div>
 
-      <div className={`${GRID_ASYM} mb-5`}>
+      {/* The chart card carries its own bottom margin; the page gap does the spacing here. */}
+      <div className="[&>section]:!mb-0">
+        <ActivityChart activity={data.activity ?? EMPTY_LIST} />
+      </div>
+
+      <div className={PAIR_GRID}>
         <section className="card">
-          <CardHead title="Projects">
+          <CardHead title="Project health">
             <Link to="/projects" className="btn btn-ghost btn-sm">
               View all
             </Link>
@@ -1362,7 +1968,7 @@ function ManagerDash({ data }) {
               hint="Projects you create will show their progress here."
             />
           ) : (
-            <div className="flex flex-col gap-0.5">
+            <div className={cx(SCROLL_BODY, "flex flex-col gap-0.5")}>
               {data.projects.map((p) => (
                 <ProjectRow key={p.id} project={p} />
               ))}
@@ -1371,34 +1977,59 @@ function ManagerDash({ data }) {
         </section>
 
         <section className="card">
-          <CardHead title="Team workload" />
-          {sortedWorkload.length === 0 ? (
+          <CardHead title="Team · today & workload">
+            {team.length > 0 && !dayOff && (
+              <span className="text-[11px] font-semibold tabular-nums text-[color:var(--text-2)]">
+                {loggedCount} of {team.length} logged time
+              </span>
+            )}
+          </CardHead>
+          {team.length === 0 ? (
             <Empty
               title="No members yet"
-              hint="Assigned work will be balanced across the team here."
+              hint="Assigned work and logged time will be shown here."
             />
           ) : (
-            sortedWorkload.map((w, i) => (
-              <WorkloadRow
-                key={w.id}
-                member={w}
-                load={(Number(w.task_count) || 0) / maxLoad}
-                isFirst={i === 0}
-                isOpen={members.expanded === w.id}
-                prevOpen={i > 0 && members.expanded === sortedWorkload[i - 1].id}
-                tasks={members.tasksById[w.id]}
-                hasError={!!members.errors[w.id]}
-                isLoading={members.loadingId === w.id}
-                onToggle={members.toggle}
-                onRetry={members.retry}
-              />
-            ))
+            <>
+              <div
+                className={cx(
+                  TEAM_COLS,
+                  "pb-2 text-[10.5px] font-bold uppercase tracking-[0.05em] text-[color:var(--text-3)]",
+                )}
+                aria-hidden="true"
+              >
+                <span>Member</span>
+                <span className="text-right">Today</span>
+                <span className="text-right">Week</span>
+                <span className="text-right">Open</span>
+                <span className="text-right">Late</span>
+                <span />
+              </div>
+              <div className={SCROLL_BODY}>
+                {team.map((w, i) => (
+                  <TeamRow
+                    key={w.id}
+                    member={w}
+                    heavy={heavyIds.has(w.id)}
+                    dayOff={dayOff}
+                    isFirst={i === 0}
+                    isOpen={members.expanded === w.id}
+                    prevOpen={i > 0 && members.expanded === team[i - 1].id}
+                    tasks={members.tasksById[w.id]}
+                    hasError={!!members.errors[w.id]}
+                    isLoading={members.loadingId === w.id}
+                    onToggle={members.toggle}
+                    onRetry={members.retry}
+                  />
+                ))}
+              </div>
+            </>
           )}
         </section>
       </div>
 
-      <div className={GRID_ASYM}>
-        <section className="card">
+      <div className={PAIR_GRID}>
+        <section className="card scroll-mt-5" id="manager-overdue">
           <CardHead title="Overdue tasks" danger>
             {!!data.overdue_tasks?.length && (
               <span className="px-2 py-0.5 rounded-md text-[11px] font-semibold tabular-nums text-[color:var(--danger)] bg-[color:var(--bg-3)]">
@@ -1410,79 +2041,16 @@ function ManagerDash({ data }) {
             <Empty title="Nothing is overdue" hint="Every task is on schedule." icon="check" />
           ) : (
             // -mx-3 here + px-3 on rows keeps the hover background unclipped
-            <div className={cx("-mx-3 max-h-[340px] overflow-y-auto", DIVIDE)}>
+            <div className={cx("-mx-3 max-h-[420px] overflow-y-auto", DIVIDE)}>
               {data.overdue_tasks.map((t) => (
                 <OverdueRow key={t.id} task={t} />
               ))}
             </div>
           )}
         </section>
-
-        <section className="card">
-          <CardHead title="Rework tracker" />
-          {!data.cluster_rework?.length ? (
-            <Empty
-              title="No rework cycles yet"
-              hint="Tasks sent back for changes will be counted here."
-              icon="cycle"
-            />
-          ) : (
-            <div className={DIVIDE}>
-              {data.cluster_rework.map((c) => (
-                <div key={c.id} className="flex justify-between items-center gap-2 py-[10px]">
-                  <span className="min-w-0 text-[13px] font-medium truncate">{c.name}</span>
-                  <span className="rework-counter shrink-0 tabular-nums">
-                    <span className="rework-count">↺ {c.rework_count}</span>
-                  </span>
-                </div>
-              ))}
-            </div>
-          )}
-        </section>
+        <FeedCard feed={data.feed ?? EMPTY_LIST} />
       </div>
-
-      {modal.kind && (
-        <Modal
-          title={
-            modal.loading || modal.error ? modalTitle : `${modalTitle} (${modal.tasks.length})`
-          }
-          onClose={modal.close}
-        >
-          <div className="max-h-[60vh] overflow-y-auto">
-            {modal.loading ? (
-              <div aria-hidden="true">
-                {[0, 1, 2, 3].map((i) => (
-                  <div key={i} className={SKEL_LINE} />
-                ))}
-              </div>
-            ) : modal.error ? (
-              <Empty
-                role="alert"
-                icon="alert"
-                title="We couldn't load these tasks"
-                action={
-                  <button
-                    type="button"
-                    className="btn btn-ghost btn-sm"
-                    onClick={() => modal.open(modal.kind)}
-                  >
-                    Try again
-                  </button>
-                }
-              />
-            ) : modal.tasks.length === 0 ? (
-              <Empty title="No tasks found" />
-            ) : (
-              <div className={DIVIDE}>
-                {modal.tasks.map((t) => (
-                  <TaskLink key={t.id} task={t} onClick={modal.close} />
-                ))}
-              </div>
-            )}
-          </div>
-        </Modal>
-      )}
-    </>
+    </div>
   );
 }
 
@@ -1549,7 +2117,76 @@ const TaskProgressCard = memo(function TaskProgressCard({ progress }) {
   );
 });
 
+const IST_DAY = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" });
+const istDay = (v) => {
+  const d = new Date(v);
+  return isNaN(d) ? null : IST_DAY.format(d);
+};
+
+// Hero panel: what needs the member today. Overdue first, then due today.
+const TodayPanel = memo(function TodayPanel({ overdue, tasks }) {
+  const today = IST_DAY.format(new Date());
+  const dueToday = tasks.filter((t) => t.due_date && istDay(t.due_date) === today);
+  const rows = [
+    ...overdue.map((t) => ({ t, late: true })),
+    ...dueToday.map((t) => ({ t, late: false })),
+  ];
+  const shown = rows.slice(0, 5);
+  const more = rows.length - shown.length;
+
+  return (
+    <section className="card !mb-0" aria-labelledby="today-title">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2.5">
+        <h2 id="today-title" className={CARD_H}>
+          Today
+          {rows.length > 0 && (
+            <span className="rounded-full bg-[color:var(--bg-3)] px-2 py-0.5 text-[11px] font-semibold tabular-nums text-[color:var(--text-2)]">
+              {rows.length}
+            </span>
+          )}
+        </h2>
+        <Link
+          to="/tasks-view"
+          className={cx("whitespace-nowrap rounded text-[13px] font-semibold text-[color:var(--accent)] no-underline hover:underline", FOCUS)}
+        >
+          All my tasks →
+        </Link>
+      </div>
+
+      {rows.length === 0 ? (
+        <Empty
+          icon="star"
+          title="Nothing due today"
+          hint="You're clear. Tasks due today or overdue will show up here."
+        />
+      ) : (
+        <div className={DIVIDE}>
+          {shown.map(({ t, late }) => {
+            const n = late ? daysOverdue(t.due_date) : null;
+            return (
+              <TaskLink
+                key={t.id}
+                task={t}
+                suffix={late ? (n ? `${n}d overdue` : "overdue") : "due today"}
+              />
+            );
+          })}
+        </div>
+      )}
+      {more > 0 && (
+        <Link
+          to="/tasks-view"
+          className="mt-2 inline-block text-xs font-semibold text-[color:var(--text-2)] no-underline hover:underline"
+        >
+          +{more} more
+        </Link>
+      )}
+    </section>
+  );
+});
+
 function DevDash({ data }) {
+  const { user } = useAuth();
   const myTasks = data?.my_tasks ?? EMPTY_LIST;
 
   // Stat cards count every task assigned to this member (main tasks AND
@@ -1564,6 +2201,13 @@ function DevDash({ data }) {
 
   return (
     <>
+      <div className={`grid grid-cols-1 min-[901px]:grid-cols-[1.6fr_1fr] gap-5 mb-5 items-stretch [&>*]:min-w-0 ${RISE}`}>
+        <TodayPanel overdue={data.overdue_tasks ?? EMPTY_LIST} tasks={myTasks} />
+        <div className="grid grid-cols-2 min-[901px]:grid-cols-1 gap-3 content-start">
+          <TodayGlance memberId={user?.id} />
+        </div>
+      </div>
+
       <div className={STATS_GRID}>
         <Stat value={myTasks.length} label="My active tasks" />
         <Stat value={byStage["In Progress"] || 0} label="In progress" tone="warning" />
@@ -1571,9 +2215,14 @@ function DevDash({ data }) {
         <Stat value={data.overdue_tasks?.length || 0} label="Overdue" tone="danger" />
       </div>
 
-      <div className={GRID_DEV}>
+      <div className={`grid grid-cols-1 min-[1101px]:grid-cols-[1.5fr_1fr] gap-5 mb-5 items-start [&>*]:min-w-0 ${RISE}`}>
+        <TimeLogCard memberId={user?.id} />
         <TaskProgressCard progress={data.task_progress} />
+      </div>
 
+      <ActivityHeatmap memberId={user?.id} />
+
+      <div className={RISE}>
         <section className="card">
           <CardHead title="Recent comments" />
           {!data.recent_comments?.length ? (
