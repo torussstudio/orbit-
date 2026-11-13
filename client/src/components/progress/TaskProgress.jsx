@@ -158,6 +158,7 @@ export function ProgressDonut({ p, active, onActive, size = 170 }) {
         {arcs.map((a) => (
           <circle
             key={a.key}
+            data-bar="arc"
             cx="85"
             cy="85"
             r={R}

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import Motion from '../ui/Motion';
 
 export const attachmentDownloadUrl = (url) => String(url || '').replace('/upload/', '/upload/fl_attachment/');
 
@@ -89,8 +90,8 @@ export function ChatMediaPreview({ file, onClose }) {
   const pdf = file.mime_type === 'application/pdf' || (!file.mime_type && file.format === 'pdf');
   const name = file.original_filename || (image ? 'Chat image' : pdf ? 'PDF file' : 'Attachment');
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 p-3 backdrop-blur-sm sm:p-6" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-      <section role="dialog" aria-modal="true" aria-label={`Preview ${name}`} className="flex max-h-[92dvh] w-full max-w-5xl flex-col overflow-hidden rounded-3xl border border-[color:var(--border)] bg-[var(--bg-2)] shadow-[0_40px_90px_-30px_rgba(0,0,0,0.7)]">
+    <Motion preset="overlay" className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 p-3 backdrop-blur-sm sm:p-6" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+      <Motion as="section" preset="dialog" role="dialog" aria-modal="true" aria-label={`Preview ${name}`} className="flex max-h-[92dvh] w-full max-w-5xl flex-col overflow-hidden rounded-3xl border border-[color:var(--border)] bg-[var(--bg-2)] shadow-[0_40px_90px_-30px_rgba(0,0,0,0.7)]">
         <header className="flex min-w-0 items-center gap-3 border-b border-[color:var(--border)] px-3 py-3 sm:px-5">
           <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-[var(--accent-light)] text-[color:var(--accent)]"><Icon name="file" className="h-[18px] w-[18px]" /></span>
           <span className="min-w-0 flex-1 truncate text-sm font-semibold tracking-tight text-[color:var(--text)]">{name}</span>
@@ -118,7 +119,7 @@ export function ChatMediaPreview({ file, onClose }) {
               ? <iframe title={name} src={file.secure_url} className="h-[78dvh] w-full max-w-4xl rounded-xl bg-white" />
               : <div className="flex max-w-sm flex-col items-center gap-3 rounded-2xl bg-[var(--bg-2)] p-8 text-center text-[color:var(--text)]"><Icon name="file" className="h-12 w-12 text-[color:var(--accent)]" /><h2 className="break-all font-semibold">{name}</h2><p className="text-sm text-[color:var(--text-3)]">This file needs a compatible app to open. Download it to view or edit.</p></div>}
         </div>
-      </section>
-    </div>
+      </Motion>
+    </Motion>
   );
 }

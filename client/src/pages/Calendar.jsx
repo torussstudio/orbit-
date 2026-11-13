@@ -7,6 +7,7 @@ import Modal from '../components/ui/Modal';
 import ConfirmModal from '../components/ui/ConfirmModal';
 import MemberFilterBar from '../components/ui/MemberFilterBar';
 import Loader from '../components/ui/Loader';
+import Motion from '../components/ui/Motion';
 
 /* ------------------------------------------------------------------ */
 /* Constants                                                           */
@@ -1380,7 +1381,9 @@ const StageDropdown = memo(function StageDropdown({ task, onChange }) {
         {task.stage} &#9662;
       </button>
       {open && (
-        <div
+        <Motion
+          preset="popover"
+          options={{ origin: dropUp ? 'bottom right' : 'top right' }}
           role="menu"
           className={`absolute right-0 z-50 min-w-[170px] rounded-[10px] border border-[var(--border)] bg-[var(--bg-2)] p-1 shadow-lg ${dropUp ? 'bottom-full mb-1.5' : 'top-full mt-1.5'}`}
         >
@@ -1399,7 +1402,7 @@ const StageDropdown = memo(function StageDropdown({ task, onChange }) {
               <span className={`badge badge-${stageKey(stage)}`}>{stage}</span>
             </button>
           ))}
-        </div>
+        </Motion>
       )}
     </div>
   );

@@ -8,6 +8,7 @@ import {
   ChatSearchBar, Highlight, OnlineDot, ReactionChips, ReactionPicker, ReadTicks, TypingBubble, TypingDots,
   canEditMessage, presenceLabel, tickState, usePresence, toggleReaction, useTypingIndicator, useTypingSender,
 } from '../components/messages/ChatExtras';
+import Motion from '../components/ui/Motion';
 
 /*
  * Messages: members <-> admin team (shared inbox).
@@ -1033,8 +1034,8 @@ function Thread({ conversationId, memberId, header, onBack, onActivity, forwardT
       <ChatMediaPreview file={previewAttachment} onClose={() => setPreviewAttachment(null)} />
 
       {profileOpen && !header.team && (
-        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setProfileOpen(false); }}>
-          <section role="dialog" aria-modal="true" aria-label={`${header.title} profile`} className="w-full max-w-sm overflow-hidden rounded-3xl border border-[color:var(--border)] bg-[var(--bg-2)] shadow-[0_40px_90px_-30px_rgba(0,0,0,0.6)]">
+        <Motion preset="overlay" className="fixed inset-0 z-[90] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setProfileOpen(false); }}>
+          <Motion as="section" preset="dialog" role="dialog" aria-modal="true" aria-label={`${header.title} profile`} className="w-full max-w-sm overflow-hidden rounded-3xl border border-[color:var(--border)] bg-[var(--bg-2)] shadow-[0_40px_90px_-30px_rgba(0,0,0,0.6)]">
             <div className="relative grid min-h-56 place-items-center bg-[var(--bg-3)] bg-[radial-gradient(70%_80%_at_50%_0%,var(--accent-light),transparent)] p-6">
               <button type="button" aria-label="Close profile" onClick={() => setProfileOpen(false)} className={`absolute right-3 top-3 grid h-9 w-9 place-items-center rounded-xl bg-black/35 text-white transition duration-200 hover:bg-black/50 active:scale-95 ${FOCUS_RING}`}><Icon name="close" className="h-4 w-4" /></button>
               {header.avatarUrl
@@ -1052,21 +1053,21 @@ function Thread({ conversationId, memberId, header, onBack, onActivity, forwardT
               <p className="mt-1 whitespace-pre-wrap break-words rounded-xl bg-[var(--bg-3)] px-3.5 py-3 text-sm leading-relaxed text-[color:var(--text-2)]">{header.bio?.trim() || 'No description added yet.'}</p>
               <button type="button" onClick={() => setProfileOpen(false)} className={`mt-5 w-full rounded-xl bg-[var(--accent)] px-4 py-2.5 text-sm font-semibold text-white shadow-[0_10px_22px_-10px_var(--accent)] transition duration-200 hover:brightness-110 active:scale-[0.98] ${FOCUS_RING}`}>Back to chat</button>
             </div>
-          </section>
-        </div>
+          </Motion>
+        </Motion>
       )}
 
       {deleteConfirmation && (
-        <div className="fixed inset-0 z-[110] grid place-items-center bg-black/55 p-4 backdrop-blur-sm" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setDeleteConfirmation(null); }}>
-          <section role="alertdialog" aria-modal="true" aria-labelledby="thread-delete-title" aria-describedby="thread-delete-description" className="w-full max-w-sm rounded-2xl border border-[color:var(--border)] bg-[var(--bg-2)] p-5 shadow-[0_30px_80px_-24px_rgba(0,0,0,0.55)]">
+        <Motion preset="overlay" className="fixed inset-0 z-[110] grid place-items-center bg-black/55 p-4 backdrop-blur-sm" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setDeleteConfirmation(null); }}>
+          <Motion as="section" preset="dialog" role="alertdialog" aria-modal="true" aria-labelledby="thread-delete-title" aria-describedby="thread-delete-description" className="w-full max-w-sm rounded-2xl border border-[color:var(--border)] bg-[var(--bg-2)] p-5 shadow-[0_30px_80px_-24px_rgba(0,0,0,0.55)]">
             <h2 id="thread-delete-title" className="text-base font-semibold text-[color:var(--text)]">Delete for everyone?</h2>
             <p id="thread-delete-description" className="mt-2 text-sm leading-relaxed text-[color:var(--text-2)]">This message will be removed for everyone in this chat.</p>
             <div className="mt-5 flex justify-end gap-2">
               <button type="button" onClick={() => setDeleteConfirmation(null)} className={`rounded-xl border border-[color:var(--border)] px-4 py-2 text-sm font-medium text-[color:var(--text-2)] hover:bg-[var(--bg-3)] ${FOCUS_RING}`}>Cancel</button>
               <button type="button" onClick={() => { const message = deleteConfirmation; setDeleteConfirmation(null); deleteMessage(message, 'for-everyone', true); }} className={`rounded-xl bg-[var(--danger)] px-4 py-2 text-sm font-semibold text-white transition hover:brightness-110 active:scale-[0.98] ${FOCUS_RING}`}>Delete for everyone</button>
             </div>
-          </section>
-        </div>
+          </Motion>
+        </Motion>
       )}
     </section>
   );

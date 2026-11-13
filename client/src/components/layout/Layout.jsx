@@ -5,7 +5,8 @@ import NotificationBell from '../ui/NotificationBell';
 import OrbitAssistant from '../assistant/OrbitAssistant';
 import ConfirmModal from '../ui/ConfirmModal';
 import api from '../../api/client';
-import { animateEntrance, preloadMotion } from '../../utils/motion';
+import { attachInteractions, observeBars, observeReveal, preloadMotion } from '../../utils/motion';
+import Motion from '../ui/Motion';
 import Loader from '../ui/Loader';
 import ErrorBoundary from '../ui/ErrorBoundary';
 import { useTheme, useThemeForUser } from '../../utils/theme';
@@ -637,9 +638,14 @@ export default function Layout() {
     setMobileSearchOpen(false);
   }, [location.pathname]);
 
-  // GSAP loads in its own chunk once the browser is idle; until then pages simply appear.
+  // GSAP loads in its own chunk as soon as the app opens; charts and lists then
+  // animate the first time they scroll into view.
   useEffect(() => { preloadMotion(); }, []);
-  useEffect(() => animateEntrance(mainRef.current), [location.pathname]);
+  // Every page (members and admin alike) reveals its header, cards, tables and
+  // list rows the same way, and buttons/cards share the same press/hover motion.
+  useEffect(() => observeReveal(mainRef.current), []);
+  useEffect(() => observeBars(mainRef.current), []);
+  useEffect(() => attachInteractions(mainRef.current), []);
 
   // New task-request badge (manager only).
   // Counts requests created after the last time the manager had Requested Tasks open.
@@ -1005,7 +1011,8 @@ export default function Layout() {
 
       {/* Mobile overlay */}
       {mobileOpen && (
-        <div
+        <Motion
+          preset="overlay"
           className="fixed inset-0 z-[1400] bg-black/40 backdrop-blur-sm md:hidden"
           onClick={() => setMobileOpen(false)}
           aria-hidden="true"
@@ -1182,7 +1189,9 @@ export default function Layout() {
               </button>
 
               {profileDropdownOpen && (
-                <div
+                <Motion
+                  preset="popover"
+                  options={{ origin: 'top right' }}
                   role="menu"
                   aria-label="Account"
                   className="absolute right-0 top-[calc(100%+8px)] z-[2000] w-[240px] max-w-[calc(100vw-24px)] overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--bg-2)] shadow-[var(--shadow-pop)]"
@@ -1206,7 +1215,7 @@ export default function Layout() {
                       Log out
                     </MenuButton>
                   </div>
-                </div>
+                </Motion>
               )}
             </div>
           </div>
@@ -1262,8 +1271,8 @@ export default function Layout() {
       />
 
       {user?.onboarding_pending && (
-        <div className="fixed inset-0 z-[2500] flex items-center justify-center bg-black/45 px-4 py-6" role="presentation">
-          <section role="dialog" aria-modal="true" aria-labelledby="orbit-welcome-title" className="w-full max-w-lg rounded-2xl border border-[var(--border)] bg-[var(--bg-2)] p-6 shadow-2xl sm:p-8">
+        <Motion preset="overlay" className="fixed inset-0 z-[2500] flex items-center justify-center bg-black/45 px-4 py-6" role="presentation">
+          <Motion as="section" preset="dialog" role="dialog" aria-modal="true" aria-labelledby="orbit-welcome-title" className="w-full max-w-lg rounded-2xl border border-[var(--border)] bg-[var(--bg-2)] p-6 shadow-2xl sm:p-8">
             <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-[var(--accent-light)] text-[var(--accent)]"><Icon d={ICONS.home} className="h-6 w-6" /></div>
             <h2 id="orbit-welcome-title" className="m-0 text-xl font-semibold text-[var(--text)]">Welcome to Orbit, {user.name}</h2>
             <p className="mt-2 text-sm text-[var(--text-2)]">Here are a few tips to help you get started:</p>
@@ -1275,8 +1284,8 @@ export default function Layout() {
             </ul>
             {welcomeError && <p role="alert" className="mt-4 text-sm text-[var(--danger)]">{welcomeError}</p>}
             <button type="button" className="btn btn-primary mt-6 w-full" onClick={finishWelcome} disabled={welcomeBusy}>{welcomeBusy ? "Saving…" : "Get started"}</button>
-          </section>
-        </div>
+          </Motion>
+        </Motion>
       )}
     </div>
   );

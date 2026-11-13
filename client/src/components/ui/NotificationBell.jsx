@@ -21,6 +21,7 @@ import { useNavigate } from 'react-router-dom';
 import api from '../../api/client';
 import { useAuth } from '../../context/AuthContext';
 import { LoadingSkeleton } from './Loader';
+import Motion from './Motion';
 import { useLiveRefetch, NOTIFICATION_EVENTS } from '../../hooks/useLiveEvents';
 
 // ── "Permission denied" warning: once per browser session ─────────
@@ -627,7 +628,9 @@ useEffect(() => {
 
       {/* Dropdown */}
       {showDropdown && (
-        <div
+        <Motion
+          preset="popover"
+          options={{ origin: 'top right' }}
           className="max-sm:!fixed max-sm:!left-3 max-sm:!right-3 max-sm:!top-[var(--panel-top)] max-sm:!w-auto max-sm:!max-h-[calc(100dvh-var(--panel-top)-12px)]"
           style={{
           '--panel-top': `${panelTop}px`,
@@ -768,7 +771,7 @@ useEffect(() => {
               Showing last {notifications.length} notification{notifications.length !== 1 ? 's' : ''}
             </div>
           )}
-        </div>
+        </Motion>
       )}
     </div>
   );

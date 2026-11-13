@@ -376,10 +376,8 @@ function useTimeLogData(url, from, to) {
 // Row entrance. Only transform + opacity, and off for reduced motion.
 const KEYFRAMES = `
 @keyframes tl-rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
-@keyframes tl-grow { from { transform: scaleX(0); } to { transform: scaleX(1); } }
 .tl-rise { animation: tl-rise .36s cubic-bezier(.22,1,.36,1) both; }
-.tl-grow { transform-origin: left; animation: tl-grow .6s cubic-bezier(.22,1,.36,1) both; }
-@media (prefers-reduced-motion: reduce) { .tl-rise, .tl-grow { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .tl-rise { animation: none; } }
 `;
 
 const FOCUS =
@@ -588,7 +586,8 @@ function ShareBar({ value, max, color = 'var(--accent)', className = '' }) {
   return (
     <div className={cx('h-1.5 overflow-hidden rounded-full bg-[color:var(--bg-3)]', className)} aria-hidden="true">
       <div
-        className="tl-grow h-full rounded-full"
+        data-bar="x"
+        className="h-full origin-left rounded-full"
         style={{ width: `${pct}%`, background: `linear-gradient(90deg, ${color}, color-mix(in srgb, ${color} 70%, white))` }}
       />
     </div>
@@ -619,15 +618,15 @@ function DistributionBar({ segments, total, title }) {
         role="img"
         aria-label={`${title}: ${segments.map((s) => `${s.name} ${percentOf(s.minutes, total)}%`).join(', ')}`}
       >
-        {segments.map((s, i) => (
+        {segments.map((s) => (
           <div
             key={s.id}
-            className="tl-grow h-full first:rounded-l-full last:rounded-r-full"
+            data-bar="x"
+            className="h-full origin-left first:rounded-l-full last:rounded-r-full"
             style={{
               width: `${(s.minutes / total) * 100}%`,
               minWidth: 6,
               background: segColor(s),
-              animationDelay: `${i * 70}ms`,
             }}
           />
         ))}

@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useParams, Link } from "react-router-dom";
+import { useParams, Link, useNavigate } from "react-router-dom";
 import api from "../api/client";
 import { cachedMembers, rememberMembers } from "../api/membersCache";
 import { useAuth } from "../context/AuthContext";
@@ -11,6 +11,7 @@ import TaskForm from "../components/tasks/TaskForm";
 import Loader from "../components/ui/Loader";
 import ProjectLinks from "../components/projects/ProjectLinks";
 import { useLiveRefetch, TASK_AND_PROJECT_EVENTS } from "../hooks/useLiveEvents";
+import Motion from "../components/ui/Motion";
 
 /* ===========================================================================
  * Constants & helpers
@@ -60,7 +61,6 @@ const stageVars = (stage) => {
 
 const KEYFRAMES = `
 @keyframes td-rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
-@keyframes td-pop { from { opacity: 0; transform: scale(.96) translateY(-4px); } to { opacity: 1; transform: none; } }
 `;
 
 // Layout
@@ -91,7 +91,7 @@ const META = "flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs text-[color:
 const STAGE_BTN =
   "![font:inherit] !border-0 !cursor-pointer transition-[opacity,transform] duration-150 disabled:opacity-70 motion-reduce:transition-none";
 const MENU =
-  "absolute top-[calc(100%+6px)] left-0 z-40 min-w-[160px] p-1 bg-[color:var(--bg-2)] border border-[color:var(--border)] rounded-[10px] shadow-[0_12px_32px_-12px_rgba(15,23,42,0.35)] origin-top-left [animation:td-pop_.16s_ease-out_both] motion-reduce:[animation:none]";
+  "absolute top-[calc(100%+6px)] left-0 z-40 min-w-[160px] p-1 bg-[color:var(--bg-2)] border border-[color:var(--border)] rounded-[10px] shadow-[0_12px_32px_-12px_rgba(15,23,42,0.35)]";
 const MENU_ITEM =
   "flex items-center gap-2 w-full px-2.5 py-[7px] border-0 rounded-md bg-transparent text-[color:var(--text)] text-xs text-left cursor-pointer transition-colors duration-150 motion-reduce:transition-none";
 
@@ -403,9 +403,28 @@ const TaskHeader = memo(function TaskHeader({ task, project, projectId, isManage
       project?.docs_url,
     ],
   );
+  const navigate = useNavigate();
+  const goBack = () => {
+    // Real history entry → go back; opened directly (new tab / refresh) → fallback route.
+    if (window.history.state && window.history.state.idx > 0) navigate(-1);
+    else if (task.parent_task_id) navigate(`/projects/${projectId}/tasks/${task.parent_task_id}`);
+    else navigate(isManager ? `/projects/${projectId}` : "/tasks-view");
+  };
   return (
     <div className={cx("page-header", PAGE_PAD)}>
       <div className="min-w-0">
+        <button
+          type="button"
+          onClick={goBack}
+          className="btn btn-ghost btn-sm mb-2 -ml-2 inline-flex items-center gap-1.5"
+          aria-label="Go back"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M19 12H5" />
+            <path d="m12 19-7-7 7-7" />
+          </svg>
+          Back
+        </button>
         <nav className="breadcrumb !flex-wrap" aria-label="Breadcrumb">
           {/* Managers get clickable links to the projects list / project.
               Members see the same trail as plain text (no navigation). */}
@@ -611,7 +630,7 @@ const SubTaskItem = memo(function SubTaskItem({
             </button>
 
             {menuOpen && (
-              <div className={MENU} role="menu">
+              <Motion preset="popover" className={MENU} role="menu">
                 {menuStages.map((s) => {
                   const current = s === st.stage;
                   // Done is only reachable from In Review.
@@ -639,7 +658,7 @@ const SubTaskItem = memo(function SubTaskItem({
                     </button>
                   );
                 })}
-              </div>
+              </Motion>
             )}
           </span>
 

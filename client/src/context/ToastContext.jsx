@@ -1,6 +1,32 @@
-import { createContext, useContext, useEffect, useState } from 'react';
+import { createContext, useContext, useEffect, useRef, useState } from 'react';
+import { useEnterMotion } from '../utils/motion';
 
 const ToastContext = createContext(null);
+
+// Enters with the shared 'toast' motion preset (see utils/motion.js).
+function ToastItem({ toast }) {
+  const ref = useRef(null);
+  useEnterMotion(ref, 'toast');
+  return (
+    <div ref={ref} className={`toast toast-${toast.type}`} role={toast.type === 'error' ? 'alert' : 'status'}>
+      <span className="toast-mark" aria-hidden="true">{toast.type === 'error' ? '!' : '✓'}</span>
+      <span>{toast.message}</span>
+    </div>
+  );
+}
+
+// Network status banner, same motion language as toasts.
+function NetworkBanner({ message, tone }) {
+  const ref = useRef(null);
+  useEnterMotion(ref, 'fadeUp');
+  return (
+    <div className="pointer-events-none fixed inset-x-0 top-2 z-[4000] flex justify-center px-3" aria-live="assertive">
+      <div ref={ref} role="alert" className={`w-full max-w-2xl rounded-xl border px-4 py-2.5 text-center text-sm font-medium shadow-lg backdrop-blur ${tone}`}>
+        {message}
+      </div>
+    </div>
+  );
+}
 
 export function ToastProvider({ children }) {
   const [toasts, setToasts] = useState([]);
@@ -63,20 +89,9 @@ export function ToastProvider({ children }) {
   return (
     <ToastContext.Provider value={null}>
       {children}
-      {networkMessage && (
-        <div className="pointer-events-none fixed inset-x-0 top-2 z-[4000] flex justify-center px-3" aria-live="assertive">
-          <div role="alert" className={`w-full max-w-2xl rounded-xl border px-4 py-2.5 text-center text-sm font-medium shadow-lg backdrop-blur ${networkTone}`}>
-            {networkMessage}
-          </div>
-        </div>
-      )}
+      {networkMessage && <NetworkBanner message={networkMessage} tone={networkTone} />}
       <div className="toast-stack" aria-live="polite" aria-atomic="true">
-        {toasts.map((toast) => (
-          <div key={toast.id} className={`toast toast-${toast.type}`} role={toast.type === 'error' ? 'alert' : 'status'}>
-            <span className="toast-mark" aria-hidden="true">{toast.type === 'error' ? '!' : '✓'}</span>
-            <span>{toast.message}</span>
-          </div>
-        ))}
+        {toasts.map((toast) => <ToastItem key={toast.id} toast={toast} />)}
       </div>
     </ToastContext.Provider>
   );

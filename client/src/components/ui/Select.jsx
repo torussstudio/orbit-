@@ -8,6 +8,7 @@ import {
   isValidElement,
 } from 'react';
 import { createPortal } from 'react-dom';
+import { useEnterMotion } from '../../utils/motion';
 
 const PANEL_WIDTH_MIN = 160;
 const MARGIN = 8;
@@ -123,7 +124,6 @@ export default function Select({
 }) {
   const [open, setOpen] = useState(false);
   const [coords, setCoords] = useState(null);
-  const [shown, setShown] = useState(false);
   const triggerRef = useRef(null);
   const panelRef = useRef(null);
   const [panelNode, setPanelNode] = useState(null);
@@ -192,16 +192,11 @@ export default function Select({
     return () => ro.disconnect();
   }, [open, panelNode, updatePos]);
 
-  // Fade/scale in once the panel is mounted. Transforms don't affect
+  // Fade/scale in once the panel is mounted (GSAP). Transforms don't affect
   // offsetHeight, so the position maths above is unaffected.
-  useEffect(() => {
-    if (!panelNode) {
-      setShown(false);
-      return;
-    }
-    const frame = requestAnimationFrame(() => setShown(true));
-    return () => cancelAnimationFrame(frame);
-  }, [panelNode]);
+  useEnterMotion({ current: panelNode }, 'popover', [panelNode], {
+    origin: coords?.placement === 'above' ? 'bottom left' : 'top left',
+  });
 
   // Move focus into the list when it opens: the selected option,
   // else the first enabled one.
@@ -341,9 +336,7 @@ export default function Select({
               maxWidth: `calc(100vw - ${MARGIN * 2}px)`,
               zIndex: PANEL_Z_INDEX,
             }}
-            className={`fixed rounded-xl border border-[var(--border)] bg-[var(--bg-2)] p-2 shadow-[0_16px_40px_-12px_rgba(49,46,129,0.28)] transition-[opacity,transform] duration-200 ease-out motion-reduce:transition-none ${
-              coords.placement === 'above' ? 'origin-bottom-left' : 'origin-top-left'
-            } ${shown ? 'scale-100 opacity-100' : 'scale-[0.97] opacity-0'}`}
+            className="fixed rounded-xl border border-[var(--border)] bg-[var(--bg-2)] p-2 shadow-[0_16px_40px_-12px_rgba(49,46,129,0.28)]"
           >
             <div
               role="listbox"

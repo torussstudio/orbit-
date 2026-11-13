@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { useEnterMotion } from '../../utils/motion';
 
 // Sits below the Select and DatePicker panels (1100), which are portalled to
 // <body> and must open above any modal. Keep the two in step.
@@ -79,8 +80,8 @@ const focusRing =
 
 export default function Modal({ title, onClose, children, size = 'lg' }) {
   const [titleId] = useState(() => `modal-title-${Math.random().toString(36).slice(2, 9)}`);
-  const [shown, setShown] = useState(false);
 
+  const overlayRef = useRef(null);
   const dialogRef = useRef(null);
   const bodyRef = useRef(null);
   const pointerDownOnOverlay = useRef(false);
@@ -107,11 +108,10 @@ export default function Modal({ title, onClose, children, size = 'lg' }) {
     };
   }, [titleId]);
 
-  // Fade/slide in once mounted.
-  useEffect(() => {
-    const frame = requestAnimationFrame(() => setShown(true));
-    return () => cancelAnimationFrame(frame);
-  }, []);
+  // Fade/slide in once mounted (GSAP; shows instantly if GSAP isn't ready or
+  // the user prefers reduced motion).
+  useEnterMotion(overlayRef, 'overlay');
+  useEnterMotion(dialogRef, 'dialog');
 
   // Initial focus: keep a child's autoFocus if it worked, otherwise the first
   // field in the body, otherwise the dialog itself. Restore focus on close.
@@ -193,12 +193,11 @@ export default function Modal({ title, onClose, children, size = 'lg' }) {
 
   return createPortal(
     <div
+      ref={overlayRef}
       onMouseDown={handleOverlayMouseDown}
       onClick={handleOverlayClick}
       style={{ zIndex: MODAL_Z_INDEX }}
-      className={`fixed inset-0 flex items-center justify-center overflow-y-auto bg-[rgba(30,27,75,0.45)] p-4 backdrop-blur-[2px] transition-opacity duration-200 motion-reduce:transition-none ${
-        shown ? 'opacity-100' : 'opacity-0'
-      }`}
+      className="fixed inset-0 flex items-center justify-center overflow-y-auto bg-[rgba(30,27,75,0.45)] p-4 backdrop-blur-[2px]"
     >
       <div
         ref={dialogRef}
@@ -208,9 +207,7 @@ export default function Modal({ title, onClose, children, size = 'lg' }) {
         tabIndex={-1}
         className={`relative flex max-h-[calc(100dvh-2rem)] w-full ${
           SIZE_CLASSES[size] || SIZE_CLASSES.lg
-        } flex-col rounded-2xl border border-[var(--border)] bg-[var(--bg-2)] shadow-[0_24px_60px_-16px_rgba(49,46,129,0.35)] outline-none transition-[opacity,transform] duration-200 ease-out motion-reduce:transition-none ${
-          shown ? 'translate-y-0 scale-100 opacity-100' : 'translate-y-2 scale-[0.98] opacity-0'
-        }`}
+        } flex-col rounded-2xl border border-[var(--border)] bg-[var(--bg-2)] shadow-[0_24px_60px_-16px_rgba(49,46,129,0.35)] outline-none`}
       >
         <div className="flex items-start justify-between gap-4 px-6 pb-3 pt-5">
           <h2

@@ -341,6 +341,7 @@ const TimeLogCard = memo(function TimeLogCard({ memberId }) {
                               >
                                 {!c.future && (
                                   <span
+                                    data-bar="y"
                                     className="block w-full rounded-t-[4px]"
                                     style={{
                                       height: c.minutes ? `max(${pct}%, 3px)` : "2px",

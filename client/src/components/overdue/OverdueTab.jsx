@@ -215,7 +215,8 @@ function Breakdown({ data }) {
               <span className="truncate text-[12.5px] text-[color:var(--text-2)]">{r.label}</span>
               <span className="h-1.5 overflow-hidden rounded-full bg-[color:var(--bg-4)] max-[560px]:hidden">
                 <span
-                  className={cx('block h-full rounded-full', (KIND[r.kind] || KIND.other).bar)}
+                  data-bar="x"
+                  className={cx('block h-full origin-left rounded-full', (KIND[r.kind] || KIND.other).bar)}
                   style={{ width: `${Math.max(6, Math.round((r.count / max) * 100))}%` }}
                 />
               </span>
@@ -227,7 +228,8 @@ function Breakdown({ data }) {
               <span className="truncate text-[12.5px] text-[color:var(--text-3)]">No reason yet</span>
               <span className="h-1.5 overflow-hidden rounded-full bg-[color:var(--bg-4)] max-[560px]:hidden">
                 <span
-                  className="block h-full rounded-full bg-[color:var(--border-bright)]"
+                  data-bar="x"
+                  className="block h-full origin-left rounded-full bg-[color:var(--border-bright)]"
                   style={{ width: `${Math.max(6, Math.round((summary.no_reason / max) * 100))}%` }}
                 />
               </span>

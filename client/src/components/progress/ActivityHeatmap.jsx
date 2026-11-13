@@ -367,6 +367,7 @@ const ActivityHeatmap = memo(function ActivityHeatmap({ memberId }) {
               {grid.cells.map((c) => (
                 <span
                   key={c.key}
+                  data-bar="cell"
                   className="aspect-square w-full rounded-[3px] outline-offset-0"
                   style={{
                     gridColumn: c.w + 2,

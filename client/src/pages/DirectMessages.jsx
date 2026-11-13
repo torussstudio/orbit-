@@ -8,6 +8,7 @@ import {
   ChatSearchBar, Highlight, OnlineDot, ReactionChips, ReactionPicker, ReadTicks, TypingBubble, TypingDots,
   canEditMessage, presenceLabel, tickState, usePresence, toggleReaction, useTypingIndicator, useTypingSender,
 } from '../components/messages/ChatExtras';
+import Motion from '../components/ui/Motion';
 
 const IMAGE_LIMIT = 10 * 1024 * 1024;
 const PDF_LIMIT = 100 * 1024 * 1024;
@@ -132,7 +133,10 @@ const DeleteMenu = ({ open, mine, onToggle, onSelect }) => (
       <Icon name="trash" className="h-3.5 w-3.5" />
     </button>
     {open && (
-      <span
+      <Motion
+        as="span"
+        preset="popover"
+        options={{ origin: 'bottom left' }}
         role="menu"
         onClick={(e) => e.stopPropagation()}
         className={`absolute bottom-full z-20 mb-1 w-52 overflow-hidden whitespace-normal rounded-xl border border-[color:var(--border)] bg-[var(--bg-2)] p-1 text-left text-[color:var(--text)] shadow-[0_18px_40px_-18px_rgba(15,23,42,0.55)] md:bottom-auto md:top-full md:mb-0 md:mt-1 ${mine ? 'right-0' : 'left-0'}`}
@@ -163,7 +167,7 @@ const DeleteMenu = ({ open, mine, onToggle, onSelect }) => (
             </span>
           </button>
         )}
-      </span>
+      </Motion>
     )}
   </span>
 );
@@ -974,8 +978,8 @@ export default function DirectMessages() {
       <ChatMediaPreview file={previewAttachment} onClose={() => setPreviewAttachment(null)} />
 
       {profileOpen && peer && (
-        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setProfileOpen(false); }}>
-          <section role="dialog" aria-modal="true" aria-label={`${peer.name || 'Member'} profile`} className="max-h-[92dvh] w-full max-w-sm overflow-y-auto rounded-3xl border border-[color:var(--border)] bg-[var(--bg-2)] shadow-[0_40px_90px_-30px_rgba(0,0,0,0.6)]">
+        <Motion preset="overlay" className="fixed inset-0 z-[90] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setProfileOpen(false); }}>
+          <Motion as="section" preset="dialog" role="dialog" aria-modal="true" aria-label={`${peer.name || 'Member'} profile`} className="max-h-[92dvh] w-full max-w-sm overflow-y-auto rounded-3xl border border-[color:var(--border)] bg-[var(--bg-2)] shadow-[0_40px_90px_-30px_rgba(0,0,0,0.6)]">
             <div className="relative grid min-h-56 place-items-center bg-[var(--bg-3)] bg-[radial-gradient(70%_80%_at_50%_0%,var(--accent-light),transparent)] p-6">
               <button type="button" aria-label="Close profile" onClick={() => setProfileOpen(false)} className={`absolute right-3 top-3 grid h-9 w-9 place-items-center rounded-xl bg-black/35 text-white transition duration-200 hover:bg-black/50 active:scale-95 ${focusRing}`}><Icon name="close" className="h-4 w-4" /></button>
               {peer.avatar_url
@@ -990,21 +994,21 @@ export default function DirectMessages() {
               <p className="mt-3 flex items-start gap-2 text-xs leading-relaxed text-[color:var(--text-3)]"><Icon name="lock" className="mt-0.5 h-3.5 w-3.5 shrink-0" />Private chat between you and {peer.name || 'this member'}.</p>
               <button type="button" onClick={() => setProfileOpen(false)} className={`mt-5 w-full rounded-xl bg-[var(--accent)] px-4 py-2.5 text-sm font-semibold text-white shadow-[0_10px_22px_-10px_var(--accent)] transition duration-200 hover:brightness-110 active:scale-[0.98] ${focusRing}`}>Back to chat</button>
             </div>
-          </section>
-        </div>
+          </Motion>
+        </Motion>
       )}
 
       {deleteConfirmation && (
-        <div className="fixed inset-0 z-[110] grid place-items-center bg-black/55 p-4 backdrop-blur-sm" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setDeleteConfirmation(null); }}>
-          <section role="alertdialog" aria-modal="true" aria-labelledby="delete-message-title" aria-describedby="delete-message-description" className="w-full max-w-sm rounded-2xl border border-[color:var(--border)] bg-[var(--bg-2)] p-5 shadow-[0_30px_80px_-24px_rgba(0,0,0,0.55)]">
+        <Motion preset="overlay" className="fixed inset-0 z-[110] grid place-items-center bg-black/55 p-4 backdrop-blur-sm" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setDeleteConfirmation(null); }}>
+          <Motion as="section" preset="dialog" role="alertdialog" aria-modal="true" aria-labelledby="delete-message-title" aria-describedby="delete-message-description" className="w-full max-w-sm rounded-2xl border border-[color:var(--border)] bg-[var(--bg-2)] p-5 shadow-[0_30px_80px_-24px_rgba(0,0,0,0.55)]">
             <h2 id="delete-message-title" className="text-base font-semibold text-[color:var(--text)]">Delete for everyone?</h2>
             <p id="delete-message-description" className="mt-2 text-sm leading-relaxed text-[color:var(--text-2)]">This message will be removed for everyone in this chat.</p>
             <div className="mt-5 flex justify-end gap-2">
               <button type="button" onClick={() => setDeleteConfirmation(null)} className={`rounded-xl border border-[color:var(--border)] px-4 py-2 text-sm font-medium text-[color:var(--text-2)] hover:bg-[var(--bg-3)] ${focusRing}`}>Cancel</button>
               <button type="button" onClick={() => { const message = deleteConfirmation; setDeleteConfirmation(null); deleteMessage(message, 'for-everyone', true); }} className={`rounded-xl bg-[var(--danger)] px-4 py-2 text-sm font-semibold text-white transition hover:brightness-110 active:scale-[0.98] ${focusRing}`}>Delete for everyone</button>
             </div>
-          </section>
-        </div>
+          </Motion>
+        </Motion>
       )}
     </div>
   );

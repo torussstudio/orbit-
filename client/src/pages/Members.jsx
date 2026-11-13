@@ -12,6 +12,7 @@ import { formatDate } from "../utils/helpers";
 import ConfirmModal from "../components/ui/ConfirmModal";
 import Select from "../components/ui/Select";
 import { useLiveRefetch, MEMBER_EVENTS } from "../hooks/useLiveEvents";
+import Motion from "../components/ui/Motion";
 import {
   MiniRing,
   PeriodToggle,
@@ -241,13 +242,15 @@ const RowMenu = memo(function RowMenu({ label, items }) {
       </button>
       {pos &&
         createPortal(
-          <div
+          <Motion
+            preset="popover"
+            options={{ origin: 'top right' }}
             ref={menuRef}
             role="menu"
             aria-label={label}
             style={pos}
             onKeyDown={onMenuKeyDown}
-            className={`fixed z-50 min-w-[168px] origin-top-right rounded-[10px] border border-[color:var(--border)] bg-[color:var(--bg-2)] p-1 motion-safe:animate-mb-menu-in ${SHADOW_POP}`}
+            className={`fixed z-50 min-w-[168px] origin-top-right rounded-[10px] border border-[color:var(--border)] bg-[color:var(--bg-2)] p-1 ${SHADOW_POP}`}
           >
             {items.map((item) => (
               <Fragment key={item.label}>
@@ -271,7 +274,7 @@ const RowMenu = memo(function RowMenu({ label, items }) {
                 </button>
               </Fragment>
             ))}
-          </div>,
+          </Motion>,
           document.body,
         )}
     </>
@@ -318,18 +321,20 @@ function SlideOver({ title, onClose, children }) {
 
   return createPortal(
     <div className="fixed inset-0 z-50">
-      <div
+      <Motion preset="overlay"
         aria-hidden="true"
         onClick={onClose}
-        className="absolute inset-0 bg-[color:color-mix(in_srgb,var(--text)_45%,transparent)] motion-safe:animate-mb-fade-in"
+        className="absolute inset-0 bg-[color:color-mix(in_srgb,var(--text)_45%,transparent)]"
       />
-      <aside
+      <Motion
+        as="aside"
+        preset="drawerRight"
         ref={panelRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby="mb-panel-title"
         onKeyDown={trapTab}
-        className="absolute right-0 top-0 flex h-full w-full max-w-md flex-col bg-[color:var(--bg-2)] shadow-[-16px_0_48px_-12px_color-mix(in_srgb,var(--text)_30%,transparent)] motion-safe:animate-mb-slide-in"
+        className="absolute right-0 top-0 flex h-full w-full max-w-md flex-col bg-[color:var(--bg-2)] shadow-[-16px_0_48px_-12px_color-mix(in_srgb,var(--text)_30%,transparent)]"
       >
         <div className="flex items-center justify-between border-b border-[color:var(--border)] px-6 py-4">
           <h2
@@ -348,7 +353,7 @@ function SlideOver({ title, onClose, children }) {
           </button>
         </div>
         <div className="flex min-h-0 flex-1 flex-col">{children}</div>
-      </aside>
+      </Motion>
     </div>,
     document.body,
   );
@@ -444,9 +449,9 @@ const MemberTasksPanel = memo(function MemberTasksPanel({ id, member, tasks, loa
   }, [tasks]);
 
   return (
-    <div
+    <Motion preset="fadeUp"
       id={id}
-      className="origin-top overflow-hidden rounded-[10px] border border-[color:var(--border)] bg-[color:color-mix(in_srgb,var(--bg-3)_55%,var(--bg-2))] motion-safe:animate-mb-panel-in md:ml-[42px] md:max-w-[860px]"
+      className="origin-top overflow-hidden rounded-[10px] border border-[color:var(--border)] bg-[color:color-mix(in_srgb,var(--bg-3)_55%,var(--bg-2))] md:ml-[42px] md:max-w-[860px]"
     >
       <div className="flex items-center justify-between gap-3 border-b border-[color:var(--border)] bg-[color:var(--bg-3)] px-3.5 py-2 text-[11px] font-medium text-[color:var(--text-3)]">
         <span>
@@ -490,14 +495,13 @@ const MemberTasksPanel = memo(function MemberTasksPanel({ id, member, tasks, loa
         </div>
       ) : (
         <div className="max-h-[320px] divide-y divide-[color:var(--border)] overflow-y-auto [scrollbar-width:thin]">
-          {rows.map(({ task: t, due }, i) => {
+          {rows.map(({ task: t, due }) => {
             const overdue = due?.tone === "overdue";
             return (
               <Link
                 key={t.id}
                 to={`/projects/${t.project_id}/tasks/${t.id}`}
-                style={{ animationDelay: `${Math.min(i, 5) * 30}ms` }}
-                className={`group grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-1.5 border-l-2 border-solid px-3.5 py-2.5 no-underline transition-colors hover:bg-[color:color-mix(in_srgb,var(--accent)_5%,transparent)] focus-visible:bg-[color:color-mix(in_srgb,var(--accent)_5%,transparent)] motion-safe:animate-mb-task-in md:grid-cols-[minmax(0,1fr)_8rem_7rem_1rem] ${FOCUS_INSET} ${
+                className={`group grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-1.5 border-l-2 border-solid px-3.5 py-2.5 no-underline transition-colors hover:bg-[color:color-mix(in_srgb,var(--accent)_5%,transparent)] focus-visible:bg-[color:color-mix(in_srgb,var(--accent)_5%,transparent)] md:grid-cols-[minmax(0,1fr)_8rem_7rem_1rem] ${FOCUS_INSET} ${
                   overdue ? "border-l-[color:var(--danger)]" : "border-l-transparent"
                 }`}
               >
@@ -561,7 +565,7 @@ const MemberTasksPanel = memo(function MemberTasksPanel({ id, member, tasks, loa
           })}
         </div>
       )}
-    </div>
+    </Motion>
   );
 });
 
@@ -1889,15 +1893,16 @@ export default function Members() {
 
       {toast &&
         createPortal(
-          <div
+          <Motion
+            preset="toast"
             key={toast.id}
             role="status"
             aria-live="polite"
-            className={`fixed bottom-5 right-5 z-[60] flex items-center gap-2.5 rounded-[10px] border border-[color:var(--border)] bg-[color:var(--bg-2)] px-4 py-3 text-[13px] font-medium text-[color:var(--text)] motion-safe:animate-mb-toast-in ${SHADOW_POP}`}
+            className={`fixed bottom-5 right-5 z-[60] flex items-center gap-2.5 rounded-[10px] border border-[color:var(--border)] bg-[color:var(--bg-2)] px-4 py-3 text-[13px] font-medium text-[color:var(--text)] ${SHADOW_POP}`}
           >
             <span aria-hidden="true" className="h-2 w-2 rounded-full bg-[color:var(--success)]" />
             {toast.text}
-          </div>,
+          </Motion>,
           document.body,
         )}
     </>

@@ -7,6 +7,7 @@ import api from '../api/client';
 import { updateCachedMember } from '../api/membersCache';
 import DatePicker from '../components/ui/DatePicker';
 import Loader, { LoadingSkeleton } from '../components/ui/Loader';
+import Motion from '../components/ui/Motion';
 
 // ── Tailwind class tokens ────────────────────────────────────
 // All colours come from the app's existing CSS variables, so light/dark
@@ -121,7 +122,8 @@ function AvatarLightbox({ src, name, onClose }) {
   }, [onClose]);
 
   return createPortal(
-    <div
+    <Motion
+      preset="overlay"
       onClick={onClose}
       role="dialog"
       aria-modal="true"
@@ -142,7 +144,7 @@ function AvatarLightbox({ src, name, onClose }) {
         onClick={(e) => e.stopPropagation()}
         className="h-[min(80vw,80vh,480px)] w-[min(80vw,80vh,480px)] cursor-default rounded-full object-cover shadow-[0_20px_60px_rgba(0,0,0,0.5)]"
       />
-    </div>,
+    </Motion>,
     document.body
   );
 }

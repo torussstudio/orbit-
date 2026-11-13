@@ -63,30 +63,22 @@ const parseDay = (s) => new Date(`${s}T00:00:00`);
  * ========================================================================= */
 
 const KEYFRAMES = `
-@keyframes dash-rise {
-  from { opacity: 0; transform: translateY(10px); }
-  to { opacity: 1; transform: none; }
-}
 @keyframes dash-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
 @keyframes dash-fade { from { opacity: 0; } to { opacity: 1; } }
-@keyframes dash-draw { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
 `;
 
 const FOCUS =
   "focus-visible:[outline:2px_solid_var(--accent)] focus-visible:outline-offset-2";
 
 // Staggered entry (transform + opacity only)
-const RISE =
-  "[&>*]:animate-[dash-rise_0.5s_cubic-bezier(0.22,1,0.36,1)_both] motion-reduce:[&>*]:animate-none";
-const STAGGER_4 =
-  "[&>:nth-child(2)]:[animation-delay:50ms] [&>:nth-child(3)]:[animation-delay:100ms] [&>:nth-child(4)]:[animation-delay:150ms]";
-const STAGGER_2 = "[&>:nth-child(2)]:[animation-delay:80ms]";
+// Sections fade up as they scroll into view (data-motion="stagger", see
+// utils/motion.js), so no CSS animation plays while they are off-screen.
 
-const GRID_ASYM = `grid grid-cols-1 min-[901px]:grid-cols-[1.4fr_1fr] gap-5 [&>*]:min-w-0 ${RISE} ${STAGGER_2}`;
+const GRID_ASYM = `grid grid-cols-1 min-[901px]:grid-cols-[1.4fr_1fr] gap-5 [&>*]:min-w-0`;
 // Member view: My Task Progress + Recent comments (the "My tasks" list was
 // removed; members see their tasks on Task View).
-const GRID_DEV = `grid grid-cols-1 min-[1101px]:grid-cols-[1.25fr_1fr] gap-5 items-start [&>*]:min-w-0 ${RISE} ${STAGGER_2}`;
-const STATS_GRID = `stats-grid ${RISE} ${STAGGER_4}`;
+const GRID_DEV = `grid grid-cols-1 min-[1101px]:grid-cols-[1.25fr_1fr] gap-5 items-start [&>*]:min-w-0`;
+const STATS_GRID = `stats-grid`;
 
 const DIVIDE = "divide-y divide-[color:var(--border)]";
 const CARD_HEAD = "flex justify-between items-center gap-2.5 mb-4";
@@ -406,7 +398,7 @@ const TaskLink = memo(function TaskLink({
 const DashSkeleton = memo(function DashSkeleton() {
   return (
     <div aria-hidden="true">
-      <div className={STATS_GRID}>
+      <div data-motion="stagger" className={STATS_GRID}>
         {[0, 1, 2, 3].map((i) => (
           <div key={i} className="stat-card">
             <div className={`${SKEL} h-[72px]`} />
@@ -416,7 +408,7 @@ const DashSkeleton = memo(function DashSkeleton() {
       <div className="card mb-5">
         <div className={`${SKEL} h-[360px]`} />
       </div>
-      <div className={GRID_ASYM}>
+      <div data-motion="stagger" className={GRID_ASYM}>
         <div className="card"><div className={`${SKEL} h-[260px]`} /></div>
         <div className="card"><div className={`${SKEL} h-[260px]`} /></div>
       </div>
@@ -513,9 +505,9 @@ const SERIES = [
 
 const DEFAULT_ON = () => new Set(SERIES.filter((s) => s.on).map((s) => s.key));
 
-const DRAW =
-  "[stroke-dasharray:1] animate-[dash-draw_1.1s_cubic-bezier(0.22,1,0.36,1)_both] motion-reduce:animate-none";
-const AREA_IN = "animate-[dash-fade_0.9s_ease-out_both] motion-reduce:animate-none";
+// Lines draw in and areas fade in when the chart scrolls into view
+// (data-bar="draw" / "fade", see utils/motion.js).
+const DRAW = "[stroke-dasharray:1]";
 
 // Glass surface for the tooltip: translucent, blurred, with a slate-tinted
 // shadow that matches the rest of the dashboard's light source.
@@ -874,7 +866,7 @@ const ActivityChart = memo(function ActivityChart({ activity }) {
                       key={s.key}
                       d={chart.shapes[s.key].area}
                       fill={`url(#${gid}-${s.key})`}
-                      className={AREA_IN}
+                      data-bar="fade"
                     />
                   ))}
 
@@ -884,6 +876,7 @@ const ActivityChart = memo(function ActivityChart({ activity }) {
                       key={s.key}
                       d={chart.shapes[s.key].line}
                       pathLength="1"
+                      data-bar="draw"
                       fill="none"
                       strokeWidth="2"
                       strokeLinecap="round"
@@ -1300,6 +1293,7 @@ const Meter = memo(function Meter({ label, value, pct, hint }) {
       </div>
       <div className="h-1.5 rounded-full overflow-hidden bg-[color:var(--border)]">
         <div
+          data-bar="x"
           className="h-full rounded-full bg-[color:var(--accent)] origin-left transition-transform duration-[700ms] ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none"
           style={{ width: "100%", transform: `scaleX(${Math.max(0, Math.min(1, pct))})` }}
         />
@@ -1371,7 +1365,6 @@ const OverdueByProjectPanel = memo(function OverdueByProjectPanel({ projects, st
     [stages],
   );
   const stageTotal = stageRows.reduce((sum, s) => sum + s.count, 0);
-
   return (
     <section className={PANEL}>
       <CardHead title="Overdue by project">
@@ -1390,6 +1383,7 @@ const OverdueByProjectPanel = memo(function OverdueByProjectPanel({ projects, st
               <span className="w-[110px] shrink-0 truncate">{p.name}</span>
               <span className="flex-1 h-3.5 rounded-full overflow-hidden bg-[color:var(--border)]">
                 <span
+                  data-bar="x"
                   className="block h-full rounded-full origin-left bg-[color:var(--accent)] opacity-85 transition-transform duration-[700ms] ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none"
                   style={{ width: "100%", transform: `scaleX(${(Number(p.overdue_tasks) || 0) / max})` }}
                 />
@@ -1405,7 +1399,7 @@ const OverdueByProjectPanel = memo(function OverdueByProjectPanel({ projects, st
         <div className={NOTE}>No tasks yet</div>
       ) : (
         <>
-          <div className="flex h-2.5 rounded-full overflow-hidden gap-px bg-[color:var(--border)]">
+          <div data-bar="wipe" className="flex h-2.5 rounded-full overflow-hidden gap-px bg-[color:var(--border)]">
             {stageRows.map((s) => (
               <span
                 key={s.stage}
@@ -1613,6 +1607,7 @@ const ProjectRow = memo(function ProjectRow({ project: p }) {
         aria-valuenow={pct}
       >
         <span
+          data-bar="x"
           className="block h-full w-full origin-left rounded-full bg-[color:var(--accent)] transition-transform duration-[700ms] ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none"
           style={{ transform: `scaleX(${pct / 100})` }}
         />
@@ -1910,7 +1905,7 @@ function ManagerDash({ data }) {
   const dayOff = data.today ? parseDay(data.today).getDay() === 0 : false;
 
   return (
-    <div className={`flex flex-col gap-5 [&>*]:min-w-0 ${RISE} ${STAGGER_4}`}>
+    <div data-motion="stagger" className="flex flex-col gap-5 [&>*]:min-w-0">
       <QuickLinksBar />
 
       <div className="card !p-2.5">
@@ -2201,28 +2196,28 @@ function DevDash({ data }) {
 
   return (
     <>
-      <div className={`grid grid-cols-1 min-[901px]:grid-cols-[1.6fr_1fr] gap-5 mb-5 items-stretch [&>*]:min-w-0 ${RISE}`}>
+      <div data-motion="stagger" className="grid grid-cols-1 min-[901px]:grid-cols-[1.6fr_1fr] gap-5 mb-5 items-stretch [&>*]:min-w-0">
         <TodayPanel overdue={data.overdue_tasks ?? EMPTY_LIST} tasks={myTasks} />
         <div className="grid grid-cols-2 min-[901px]:grid-cols-1 gap-3 content-start">
           <TodayGlance memberId={user?.id} />
         </div>
       </div>
 
-      <div className={STATS_GRID}>
+      <div data-motion="stagger" className={STATS_GRID}>
         <Stat value={myTasks.length} label="My active tasks" />
         <Stat value={byStage["In Progress"] || 0} label="In progress" tone="warning" />
         <Stat value={byStage["In Review"] || 0} label="In review" tone="info" />
         <Stat value={data.overdue_tasks?.length || 0} label="Overdue" tone="danger" />
       </div>
 
-      <div className={`grid grid-cols-1 min-[1101px]:grid-cols-[1.5fr_1fr] gap-5 mb-5 items-start [&>*]:min-w-0 ${RISE}`}>
+      <div data-motion="stagger" className="grid grid-cols-1 min-[1101px]:grid-cols-[1.5fr_1fr] gap-5 mb-5 items-start [&>*]:min-w-0">
         <TimeLogCard memberId={user?.id} />
         <TaskProgressCard progress={data.task_progress} />
       </div>
 
       <ActivityHeatmap memberId={user?.id} />
 
-      <div className={RISE}>
+      <div data-motion="stagger">
         <section className="card">
           <CardHead title="Recent comments" />
           {!data.recent_comments?.length ? (

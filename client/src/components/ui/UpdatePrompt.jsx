@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import Motion from './Motion';
 
 /*
  * "New version available" prompt.
@@ -198,8 +199,9 @@ export default function UpdatePrompt() {
       : update;
 
   return (
-    <div className="fixed inset-0 z-[10000] flex items-center justify-center p-4 bg-black/50 backdrop-blur-[2px]">
-      <div
+    <Motion preset="overlay" className="fixed inset-0 z-[10000] flex items-center justify-center p-4 bg-black/50 backdrop-blur-[2px]">
+      <Motion
+        preset="dialog"
         role="dialog"
         aria-modal="true"
         aria-labelledby="update-title"
@@ -251,7 +253,7 @@ export default function UpdatePrompt() {
             {copy.action}
           </button>
         )}
-      </div>
-    </div>
+      </Motion>
+    </Motion>
   );
 }

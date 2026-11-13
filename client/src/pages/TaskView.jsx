@@ -7,6 +7,7 @@ import Select from "../components/ui/Select";
 import ConfirmModal from "../components/ui/ConfirmModal";
 import ProjectLinks from "../components/projects/ProjectLinks";
 import { useLiveRefetch, TASK_AND_PROJECT_EVENTS } from "../hooks/useLiveEvents";
+import Motion from "../components/ui/Motion";
 
 /* -------------------------------------------------------------------------- */
 /* Constants                                                                  */
@@ -45,7 +46,6 @@ const DOT_COLOR = {
 // transform / opacity, so they stay on the GPU. (Or move them to
 // tailwind.config.js -> theme.extend.keyframes and drop this <style> tag.)
 const KEYFRAMES = `
-@keyframes tv-pop { from { opacity: 0; transform: scale(.96) translateY(-4px); } to { opacity: 1; transform: none; } }
 @keyframes tv-fade { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
 @keyframes tv-shimmer { to { transform: translateX(100%); } }
 `;
@@ -184,9 +184,10 @@ const StageDropdown = memo(function StageDropdown({ task, onChange, locked = fal
         </svg>
       </button>
       {open && (
-        <div
+        <Motion
+          preset="popover"
           role="menu"
-          className="absolute left-0 top-[calc(100%+6px)] z-10 min-w-[168px] origin-top-left rounded-lg border border-[color:var(--border)] bg-[color:var(--bg-2)] p-1 shadow-[0_12px_28px_-8px_rgba(15,23,42,0.22)] [animation:tv-pop_.14s_ease-out_both] motion-reduce:[animation:none] sm:left-auto sm:right-0 sm:origin-top-right"
+          className="absolute left-0 top-[calc(100%+6px)] z-10 min-w-[168px] rounded-lg border border-[color:var(--border)] bg-[color:var(--bg-2)] p-1 shadow-[0_12px_28px_-8px_rgba(15,23,42,0.22)] sm:left-auto sm:right-0"
         >
           {QUICK_STAGES.filter((s) => s !== task.stage).map((s) => (
             <button
@@ -204,7 +205,7 @@ const StageDropdown = memo(function StageDropdown({ task, onChange, locked = fal
               <span className="text-[13px] font-medium text-[color:var(--text)]">{s}</span>
             </button>
           ))}
-        </div>
+        </Motion>
       )}
     </div>
   );
