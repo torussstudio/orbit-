@@ -499,6 +499,50 @@ async function getTaskById(taskId) {
   };
 }
 
+// Stages every project has, plus "Rework" (the manager's review decision).
+const BASE_STAGES = ["Todo", "In Progress", "In Review", "Done", "Rework"];
+
+/*
+ * Turns a stage sent by a client into the exact stage name we store.
+ *
+ * Matching ignores case and surrounding spaces, and only stages the project
+ * really has (its custom_stages, or the default ones) are accepted. So
+ * "done", "DONE" or "Done " can never slip past the exact-name checks on
+ * MANAGER_STAGES / "In Review", and a made-up stage can't be saved.
+ *
+ * undefined / null (stage not sent) is returned as undefined.
+ */
+async function resolveStage(rawStage, projectId) {
+  if (rawStage === undefined || rawStage === null) return undefined;
+
+  const wanted = typeof rawStage === "string" ? rawStage.trim().toLowerCase() : "";
+
+  if (wanted) {
+    let custom = [];
+
+    if (projectId) {
+      const { rows } = await db.query(
+        "SELECT custom_stages FROM projects WHERE id = $1",
+        [projectId],
+      );
+      const value = rows[0]?.custom_stages;
+      if (Array.isArray(value)) custom = value;
+    }
+
+    const allowed = [...custom, ...BASE_STAGES].filter(
+      (name) => typeof name === "string",
+    );
+    const match = allowed.find((name) => name.trim().toLowerCase() === wanted);
+
+    if (match) return match.trim();
+  }
+
+  const err = new Error("Unknown task stage");
+  err.status = 400;
+  err.expose = true;
+  throw err;
+}
+
 async function createTask(data, user) {
   await assertProjectAccess(user, data.project_id);
 
@@ -515,9 +559,16 @@ async function createTask(data, user) {
     title,
     description,
     priority,
-    stage,
     due_date,
   } = data;
+
+  const stage = await resolveStage(data.stage, project_id);
+
+  if (user.role === "member" && MANAGER_STAGES.includes(stage)) {
+    const err = new Error("Manager approval required for this stage");
+    err.status = 403;
+    throw err;
+  }
 
   const assigneeIds = extractAssigneeIds(data);
 
@@ -621,7 +672,7 @@ async function createTask(data, user) {
 }
 
 async function updateTask(taskId, data, user) {
-  const { title, description, priority, stage, due_date, cluster_id } = data;
+  const { title, description, priority, due_date, cluster_id } = data;
 
   const assigneeIdsProvided = hasAssigneePayload(data);
   const assigneeIds = extractAssigneeIds(data);
@@ -636,6 +687,10 @@ async function updateTask(taskId, data, user) {
 
   const existing = task.rows[0];
   const isSubTask = Boolean(existing.parent_task_id);
+
+  // Exact stage name (case / spaces fixed, unknown stages refused) before any
+  // permission check below compares it.
+  const stage = await resolveStage(data.stage, existing.project_id);
 
   const { rows: previousAssignees } = assigneeIdsProvided
     ? await db.query(

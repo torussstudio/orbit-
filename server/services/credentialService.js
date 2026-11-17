@@ -1,4 +1,9 @@
 const db = require("../db");
+const { encryptValue, decryptValue } = require("../utils/credentialCrypto");
+
+function withDecryptedValue(row) {
+  return row ? { ...row, value: decryptValue(row.value) } : row;
+}
 
 async function getCredentialsByProject(projectId, role) {
   let q;
@@ -12,6 +17,15 @@ async function getCredentialsByProject(projectId, role) {
          WHERE cc.project_id=$1 AND cc.visibility='public' GROUP BY cc.id ORDER BY cc.created_at`;
   }
   const { rows } = await db.query(q, [projectId]);
+
+  if (role === "manager") {
+    for (const row of rows) {
+      if (Array.isArray(row.entries)) {
+        row.entries = row.entries.map(withDecryptedValue);
+      }
+    }
+  }
+
   return rows;
 }
 
@@ -38,17 +52,17 @@ async function deleteCredentialCluster(id) {
 async function createCredentialEntry({ cluster_id, label, value }) {
   const { rows } = await db.query(
     "INSERT INTO credential_entries(cluster_id,label,value) VALUES($1,$2,$3) RETURNING *",
-    [cluster_id, label, value],
+    [cluster_id, label, encryptValue(value)],
   );
-  return rows[0];
+  return withDecryptedValue(rows[0]);
 }
 
 async function updateCredentialEntry(id, { label, value }) {
   const { rows } = await db.query(
     "UPDATE credential_entries SET label=$1,value=$2 WHERE id=$3 RETURNING *",
-    [label, value, id],
+    [label, encryptValue(value), id],
   );
-  return rows[0];
+  return withDecryptedValue(rows[0]);
 }
 
 async function deleteCredentialEntry(id) {

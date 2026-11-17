@@ -14,7 +14,7 @@
  * of the app a member gets: index.html is served "no-cache" and brings
  * the new build on the next page load.
  */
-const SW_VERSION = "2026-10-26-antispam";
+const SW_VERSION = "2026-11-17-badge";
 
 self.addEventListener("install", (event) => {
   console.log(`[SW] Installing ${SW_VERSION}...`);
@@ -78,7 +78,7 @@ self.addEventListener("push", (event) => {
 
       const badge =
         data?.badge ||
-        "/orbit-icon-192.png";
+        "/icons/orbit-badge-96.png";
 
       const notificationData =
         data?.data &&

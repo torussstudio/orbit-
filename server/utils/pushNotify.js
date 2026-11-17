@@ -71,7 +71,7 @@ async function deliverPush(userId, title, body, data = {}, options = {}) {
     title,
     body,
     icon: '/orbit-icon-192.png',
-    badge: '/orbit-icon-192.png',
+    badge: '/icons/orbit-badge-96.png',
     data,
   });
 

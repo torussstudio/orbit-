@@ -94,6 +94,55 @@ const PROJECT_ID_PATTERN =
  * ============================================================
  */
 
+function ftpSecureMode() {
+  const mode = String(process.env.FTP_SECURE || "").trim().toLowerCase();
+
+  if (mode === "true" || mode === "explicit") return true;
+  if (mode === "implicit") return "implicit";
+
+  return false;
+}
+
+async function withFtp(action) {
+  const client = new ftp.Client();
+
+  try {
+    await client.access({
+      host: process.env.FTP_HOST,
+      user: process.env.FTP_USER,
+      password: process.env.FTP_PASS,
+      secure: ftpSecureMode(),
+    });
+
+    return await action(client);
+  } finally {
+    client.close();
+  }
+}
+
+/*
+ * Turns a stored file_url back into the remote FTP path, only when it
+ * is exactly one of our uploads (/orbit-files/<project>/<uuid>.<ext>).
+ * Anything else returns null so a tampered row can never delete
+ * something outside the upload folder.
+ */
+function remotePathFromUrl(fileUrl) {
+  const base = String(process.env.FTP_BASE_URL || "").replace(/\/+$/, "");
+
+  if (!base || typeof fileUrl !== "string" || !fileUrl.startsWith(`${base}/`)) {
+    return null;
+  }
+
+  const rel = fileUrl.slice(base.length);
+
+  const pattern =
+    /^\/orbit-files\/(\d{1,18}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.[a-z0-9]{2,4}$/i;
+
+  if (!pattern.test(rel)) return null;
+
+  return `/public_html${rel}`;
+}
+
 async function uploadToFTP(buffer, remotePath) {
   const client = new ftp.Client();
 
@@ -104,11 +153,12 @@ async function uploadToFTP(buffer, remotePath) {
       password: process.env.FTP_PASS,
 
       /*
-       * Keep this unchanged for now.
-       * Change only after confirming the FTP server
-       * supports FTPS.
+       * Plain FTP stays the default so nothing changes until the
+       * host is confirmed to support FTPS. Set FTP_SECURE=true
+       * (explicit FTPS) or FTP_SECURE=implicit in the server env
+       * to encrypt the login and the upload.
        */
-      secure: false,
+      secure: ftpSecureMode(),
     });
 
     await client.ensureDir(
@@ -523,13 +573,32 @@ router.delete(
         });
       }
 
-      await db.query(
+      const { rows } = await db.query(
         `
           DELETE FROM knowledge_files
           WHERE id = $1
+          RETURNING file_url
         `,
         [id],
       );
+
+      /*
+       * Best effort: remove the file from the FTP host too, so a
+       * deleted file's public link stops working. A failure here
+       * never fails the delete (the record is already gone).
+       */
+      const remotePath = rows[0] ? remotePathFromUrl(rows[0].file_url) : null;
+
+      if (remotePath) {
+        try {
+          await withFtp((client) => client.remove(remotePath, true));
+        } catch (ftpErr) {
+          console.error(
+            "[knowledge] Could not remove remote file:",
+            ftpErr.message,
+          );
+        }
+      }
 
       res.json({
         success: true,
