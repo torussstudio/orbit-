@@ -194,6 +194,36 @@ async function deleteNotification(id, userId) {
 // sessionId: the session (browser tab) that saved the subscription, so the
 // subscription can be removed when that session is revoked. Optional; rows
 // saved before this existed have none.
+// Push endpoints the server will POST to. Browsers only ever hand out
+// endpoints on their vendor's push service, so anything else is refused
+// (stops a user from registering an internal URL the server would call).
+// Extra hosts can be added with PUSH_ENDPOINT_EXTRA_HOSTS (comma separated;
+// "*.example.com" matches subdomains).
+const PUSH_HOST_ALLOWLIST = [
+  'fcm.googleapis.com',
+  'android.googleapis.com',
+  'updates.push.services.mozilla.com',
+  '*.push.services.mozilla.com',
+  '*.notify.windows.com',
+  'web.push.apple.com',
+  '*.push.apple.com',
+];
+
+function isAllowedPushHost(hostname) {
+  const extra = String(process.env.PUSH_ENDPOINT_EXTRA_HOSTS || '')
+    .split(',')
+    .map((h) => h.trim().toLowerCase())
+    .filter(Boolean);
+
+  const host = String(hostname).toLowerCase();
+
+  return [...PUSH_HOST_ALLOWLIST, ...extra].some((rule) =>
+    rule.startsWith('*.')
+      ? host.endsWith(rule.slice(1))
+      : host === rule,
+  );
+}
+
 async function savePushSubscription(
   userId,
   endpoint,
@@ -231,6 +261,16 @@ async function savePushSubscription(
     const error = new Error(
       'Push endpoint must use HTTPS',
     );
+    error.status = 400;
+    throw error;
+  }
+
+  if (
+    parsedEndpoint.port ||
+    parsedEndpoint.username ||
+    !isAllowedPushHost(parsedEndpoint.hostname)
+  ) {
+    const error = new Error('Unsupported push service');
     error.status = 400;
     throw error;
   }

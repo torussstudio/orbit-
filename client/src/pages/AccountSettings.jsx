@@ -1302,6 +1302,8 @@ export default function AccountSettings() {
   const [deleteConfirm, setDeleteConfirm] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState('');
+  const [deletePassword, setDeletePassword] = useState('');
+  const [showDeletePassword, setShowDeletePassword] = useState(false);
   const [removePhotoConfirm, setRemovePhotoConfirm] = useState(false);
   const [removingPhoto, setRemovingPhoto] = useState(false);
   const [photoMsg, setPhotoMsg] = useState(null);
@@ -1527,15 +1529,19 @@ export default function AccountSettings() {
   };
 
   const handleDeleteAccount = async () => {
+    if (!deletePassword) {
+      setDeleteError('Enter your password to delete your account.');
+      return;
+    }
     setDeleting(true);
     setDeleteError('');
     try {
-      await api.delete('/auth/account');
+      await api.delete('/auth/account', { data: { current_password: deletePassword } });
       await logout();
     } catch (err) {
       setDeleteError(err.response?.data?.error || "We couldn't delete your account. Please try again.");
       setDeleting(false);
-      setDeleteConfirm(false);
+      setDeletePassword('');
     }
   };
 
@@ -1923,18 +1929,32 @@ export default function AccountSettings() {
                   <p className="mb-3 text-[13px] font-medium text-[color:var(--text)]">
                     Delete your account? This cannot be undone.
                   </p>
+                  <div className="mb-3 sm:max-w-[calc(50%_-_0.5rem)]">
+                    <Field label="Your password" htmlFor="account-delete-password">
+                      <PasswordInput
+                        id="account-delete-password"
+                        value={deletePassword}
+                        onChange={e => { setDeletePassword(e.target.value); setDeleteError(''); }}
+                        placeholder="Enter your password to confirm"
+                        autoComplete="current-password"
+                        visible={showDeletePassword}
+                        onToggle={() => setShowDeletePassword(v => !v)}
+                        invalid={Boolean(deleteError)}
+                      />
+                    </Field>
+                  </div>
                   <div className="flex gap-2">
                     <button
                       type="button"
                       onClick={handleDeleteAccount}
-                      disabled={deleting}
+                      disabled={deleting || !deletePassword}
                       className={`${BTN_DANGER} ${FOCUS_RING}`}
                     >
                       {deleting ? <Loader label="Deleting..." size="sm" variant="button" /> : 'Yes, delete my account'}
                     </button>
                     <button
                       type="button"
-                      onClick={() => setDeleteConfirm(false)}
+                      onClick={() => { setDeleteConfirm(false); setDeletePassword(''); setDeleteError(''); }}
                       disabled={deleting}
                       className={`${BTN_NEUTRAL} ${FOCUS_RING}`}
                     >

@@ -1055,6 +1055,33 @@ async function updateProfile(memberId, body, { currentSessionId = null } = {}) {
   return publicUser(rows[0]);
 }
 
+/*
+ * Re-checks the member's password before a destructive action
+ * (deleting the account), so a stolen access token alone cannot do it.
+ *
+ * 400, not 401: the client treats 401 as an expired session.
+ */
+async function verifyCurrentPassword(memberId, password) {
+  if (typeof password !== "string" || !password) {
+    throw authError("Please enter your password to delete your account.", 400);
+  }
+
+  const { rows } = await db.query(
+    "SELECT password_hash FROM members WHERE id = $1 LIMIT 1",
+    [memberId],
+  );
+
+  if (!rows[0]) {
+    throw authError("User not found", 404);
+  }
+
+  const valid = await bcrypt.compare(password, rows[0].password_hash);
+
+  if (!valid) {
+    throw authError("Password is incorrect", 400);
+  }
+}
+
 const LAST_MANAGER_MESSAGE =
   "You are the only active manager. Make another member a manager before deleting this account.";
 
@@ -1109,5 +1136,6 @@ module.exports = {
   getProfile,
   updateProfile,
   deleteAccount,
+  verifyCurrentPassword,
   isLastActiveManager,
 };

@@ -17,9 +17,42 @@ function readIdleTimeout() {
   return Number.isInteger(value) && value >= 0 ? value : DEFAULT_IDLE_TIMEOUT_MS;
 }
 
+/*
+ * TLS to Postgres.
+ *
+ * DB_SSL=true turns TLS on. By default the server certificate is NOT
+ * verified (as before, so nothing breaks), which means a man-in-the-middle
+ * on the network path could read or alter queries. To verify it:
+ *   - DB_SSL_CA: the provider's CA certificate (PEM text, or a path to a
+ *     .pem file), or
+ *   - DB_SSL_REJECT_UNAUTHORIZED=true: verify against the system CAs
+ *     (works for providers with a publicly trusted certificate).
+ */
+function buildSslConfig() {
+  if (process.env.DB_SSL !== "true") return false;
+
+  const ca = (process.env.DB_SSL_CA || "").trim();
+
+  if (ca) {
+    const fs = require("fs");
+    const pem =
+      ca.includes("BEGIN CERTIFICATE") ? ca.replace(/\\n/g, "\n") : fs.readFileSync(ca, "utf8");
+    return { ca: pem, rejectUnauthorized: true };
+  }
+
+  if (process.env.DB_SSL_REJECT_UNAUTHORIZED === "true") {
+    return { rejectUnauthorized: true };
+  }
+
+  console.warn(
+    "[db] TLS certificate is not verified. Set DB_SSL_CA or DB_SSL_REJECT_UNAUTHORIZED=true.",
+  );
+  return { rejectUnauthorized: false };
+}
+
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: process.env.DB_SSL === "true" ? { rejectUnauthorized: false } : false,
+  ssl: buildSslConfig(),
   max: 5,
   idleTimeoutMillis: readIdleTimeout(),
   connectionTimeoutMillis: 5000,

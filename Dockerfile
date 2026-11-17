@@ -30,6 +30,10 @@ COPY docker/security-headers.conf /etc/nginx/snippets/security-headers.conf
 COPY docker/supervisord.conf /etc/supervisord.conf
 COPY docker/start-backend.js /app/docker/start-backend.js
 
+# The API runs as the unprivileged "node" user (see supervisord.conf); nginx and
+# supervisord stay root as usual and nginx drops its workers to "nginx".
+RUN chown -R node:node /app
+
 EXPOSE 3000 4000
 
 # Same check the deploy workflow runs; marks the container unhealthy if the

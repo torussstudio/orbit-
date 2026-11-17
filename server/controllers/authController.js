@@ -428,6 +428,11 @@ async function deleteAccount(
   next,
 ) {
   try {
+    await authService.verifyCurrentPassword(
+      req.user.id,
+      req.body?.current_password,
+    );
+
     await authService.deleteAccount(
       req.user.id,
     );
