@@ -46,6 +46,7 @@ router.post('/', authenticate, async (req, res) => {
 
     if (!title) return res.status(400).json({ error: 'Task name is required.' });
     if (!project_name) return res.status(400).json({ error: 'Project name is required.' });
+    if (!due_date) return res.status(400).json({ error: 'Due date is required.' });
     if (title.length > 200 || project_name.length > 200 || description.length > 5000) {
       return res.status(400).json({ error: 'One of the fields is too long.' });
     }

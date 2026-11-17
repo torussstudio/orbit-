@@ -147,6 +147,56 @@ async function getMemberOptions(memberId) {
 /* Member: add an entry                                                */
 /* ------------------------------------------------------------------ */
 
+// Logging time on a task that is still in Todo means work has started, so
+// it moves to In Progress (and its parent task too, if it has one). Any
+// other stage is left alone. Runs after the entry is saved; a failure here
+// must never lose the time entry.
+async function startTaskIfTodo(taskId, memberId) {
+  try {
+    const { rows } = await db.query(
+      `UPDATE tasks
+          SET stage = 'In Progress', updated_at = NOW()
+        WHERE id = $1 AND lower(trim(coalesce(stage, ''))) = 'todo'
+        RETURNING id, project_id, parent_task_id, stage`,
+      [taskId],
+    );
+    const task = rows[0];
+    if (!task) return;
+
+    const logStage = (id) =>
+      db.query(
+        `INSERT INTO task_activity(task_id, actor_id, action, meta) VALUES($1,$2,$3,$4)`,
+        [id, memberId, "Stage changed", JSON.stringify({ from: "Todo", to: "In Progress" })],
+      );
+    await logStage(task.id);
+    liveEvents.taskChanged("task.updated", {
+      id: task.id,
+      project_id: task.project_id,
+      parent_task_id: task.parent_task_id,
+    });
+
+    if (task.parent_task_id) {
+      const { rows: parents } = await db.query(
+        `UPDATE tasks
+            SET stage = 'In Progress', updated_at = NOW()
+          WHERE id = $1 AND lower(trim(coalesce(stage, ''))) = 'todo'
+          RETURNING id, project_id, parent_task_id`,
+        [task.parent_task_id],
+      );
+      if (parents[0]) {
+        await logStage(parents[0].id);
+        liveEvents.taskChanged("task.updated", {
+          id: parents[0].id,
+          project_id: parents[0].project_id,
+          parent_task_id: parents[0].parent_task_id,
+        });
+      }
+    }
+  } catch (err) {
+    console.error("Could not move task to In Progress after time log:", err);
+  }
+}
+
 async function createEntry(memberId, body = {}) {
   const isMisc = body.is_misc === true || body.is_misc === "true";
   const workDate = readWorkDate(body.work_date);
@@ -191,6 +241,7 @@ async function createEntry(memberId, body = {}) {
     [memberId, project.id, clusterId, taskId, title, isMisc, minutes, workDate],
   );
 
+  if (taskId) await startTaskIfTodo(taskId, memberId);
   liveEvents.timeLogChanged(project.id, memberId);
   return rows[0];
 }

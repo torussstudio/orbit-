@@ -10,13 +10,13 @@ import Loader from '../components/ui/Loader';
 const RESEND_SECONDS = 60;
 
 const INPUT_CLASS =
-  'w-full bg-white/60 border border-white/80 rounded-2xl pl-12 py-[15px] text-[#14163b] font-[var(--font-body)] text-[15px] placeholder:text-[#8b8fa8] outline-none shadow-[0_2px_10px_rgba(124,92,255,0.06)] transition-all focus:bg-white/80 focus:border-[#6366f1] focus:ring-4 focus:ring-[#6366f1]/15';
+  'w-full bg-white/60 border border-white/80 rounded-2xl pl-10 py-[9px] text-[#14163b] font-[var(--font-body)] text-[16px] placeholder:text-[#8b8fa8] outline-none shadow-[0_2px_10px_rgba(124,92,255,0.06)] transition-all focus:bg-white/80 focus:border-[#6366f1] focus:ring-4 focus:ring-[#6366f1]/15';
 
 const LABEL_CLASS =
-  'block text-[15px] text-[#14163b] mb-2 pl-1 font-semibold';
+  'block text-[12px] text-[#14163b] mb-1 pl-1 font-semibold';
 
 const PRIMARY_BUTTON_CLASS =
-  'group w-full flex items-center justify-center gap-2 px-6 py-[18px] rounded-full text-[17px] font-semibold cursor-pointer transition-all border-0 bg-gradient-to-r from-[#4338ff] to-[#7c3aed] text-white shadow-[0_14px_32px_rgba(91,61,245,0.35)] hover:shadow-[0_18px_40px_rgba(91,61,245,0.45)] hover:-translate-y-px disabled:opacity-70 disabled:cursor-not-allowed disabled:hover:translate-y-0';
+  'group w-full flex items-center justify-center gap-2 px-6 py-[11px] rounded-full text-[14px] font-semibold cursor-pointer transition-all border-0 bg-gradient-to-r from-[#4338ff] to-[#7c3aed] text-white shadow-[0_10px_24px_rgba(91,61,245,0.32)] hover:shadow-[0_14px_30px_rgba(91,61,245,0.45)] hover:-translate-y-px disabled:opacity-70 disabled:cursor-not-allowed disabled:hover:translate-y-0';
 
 const LINK_BUTTON_CLASS =
   'bg-transparent border-none p-0 text-[14px] font-semibold text-[#5b3df5] cursor-pointer hover:underline disabled:text-[#8b8fa8] disabled:no-underline disabled:cursor-default';
@@ -326,26 +326,26 @@ export default function Login() {
     <div className="relative min-h-screen min-h-[100dvh] overflow-hidden bg-[linear-gradient(135deg,#faf9ff_0%,#ece8ff_45%,#ddd6fe_100%)]">
       <BackgroundArt />
 
-      <div className="relative flex min-h-screen min-h-[100dvh] items-center justify-center p-4 sm:p-6">
-        <div className="relative w-full max-w-[540px] my-auto">
-          <div className="rounded-[36px] sm:rounded-[44px] border border-white/70 bg-white/45 px-6 pb-9 pt-9 shadow-[0_30px_80px_rgba(124,92,255,0.22)] backdrop-blur-2xl sm:px-12 sm:pb-12 sm:pt-11">
+      <div className="relative flex min-h-screen min-h-[100dvh] items-center justify-center p-3">
+        <div className="relative w-full max-w-[380px] my-auto">
+          <div className="rounded-[24px] border border-white/70 bg-white/45 px-5 pb-6 pt-6 shadow-[0_24px_60px_rgba(124,92,255,0.22)] backdrop-blur-2xl">
 
             {/* Brand */}
             <div className="flex flex-col items-center text-center">
-              <div className="flex h-[88px] w-[88px] items-center justify-center rounded-[28px] border border-white/80 bg-white/60 shadow-[0_12px_30px_rgba(124,92,255,0.25)] backdrop-blur sm:h-[104px] sm:w-[104px] sm:rounded-[32px]">
-                <img src="/assets/images/orbit-logo-transparent.png" alt="Orbit" className="h-[48px] w-[48px] object-contain sm:h-[58px] sm:w-[58px]" />
+              <div className="flex h-[48px] w-[48px] items-center justify-center rounded-[14px] border border-white/80 bg-white/60 shadow-[0_8px_20px_rgba(124,92,255,0.25)] backdrop-blur">
+                <img src="/assets/images/orbit-logo-transparent.png" alt="Orbit" className="h-[26px] w-[26px] object-contain" />
               </div>
-              <div className="mt-5 flex items-center gap-3 text-[22px] sm:text-[26px] leading-none">
+              <div className="mt-3 flex items-center gap-2 text-[15px] leading-none">
                 <span className="font-bold tracking-[-0.02em] text-[#14163b]">Orbit</span>
-                <span className="h-6 w-px bg-[#6b6f8a]/60" />
+                <span className="h-4 w-px bg-[#6b6f8a]/60" />
                 <span className="font-normal text-[#6b6f8a]">Agency OS</span>
               </div>
             </div>
 
             {/* Heading */}
-            <div className="mb-7 mt-6 text-center sm:mb-8 sm:mt-7">
-              <h1 className={`mb-2 font-extrabold leading-[1.1] tracking-[-0.03em] text-[#14163b] ${mode === 'login' ? 'text-[34px] sm:text-[44px]' : 'text-[28px] sm:text-[34px]'}`}>{heading.title}</h1>
-              <p className="text-[15px] sm:text-[17px] font-medium text-[#6b6f8a]">{heading.subtitle}</p>
+            <div className="mb-4 mt-4 text-center">
+              <h1 className={`mb-2 font-extrabold leading-[1.1] tracking-[-0.03em] text-[#14163b] ${mode === 'login' ? 'text-[22px]' : 'text-[19px]'}`}>{heading.title}</h1>
+              <p className="text-[13px] font-medium text-[#6b6f8a]">{heading.subtitle}</p>
             </div>
 
             {mode === 'login' && (

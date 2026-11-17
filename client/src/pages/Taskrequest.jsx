@@ -248,6 +248,7 @@ function NewRequestForm({ onSent }) {
     project: `${uid}-project`,
     projectError: `${uid}-project-error`,
     description: `${uid}-description`,
+    dueError: `${uid}-due-error`,
   };
 
   const titleRef = useRef(null);
@@ -280,10 +281,12 @@ function NewRequestForm({ onSent }) {
     const next = {};
     if (!form.title.trim()) next.title = 'Enter a task name.';
     if (!form.project_name.trim()) next.project_name = 'Enter a project name.';
+    if (!form.due_date) next.due_date = 'Select a due date.';
     if (Object.keys(next).length) {
       setErrors(next);
       // Send keyboard and screen-reader users straight to the first problem.
-      (next.title ? titleRef : projectRef).current?.focus();
+      if (next.title) titleRef.current?.focus();
+      else if (next.project_name) projectRef.current?.focus();
       return;
     }
 
@@ -294,8 +297,8 @@ function NewRequestForm({ onSent }) {
         title: form.title.trim(),
         project_name: form.project_name.trim(),
         description: form.description.trim(),
+        due_date: form.due_date,
       };
-      if (form.due_date) payload.due_date = form.due_date;
 
       await api.post('/task-requests', payload);
       setForm(EMPTY);
@@ -376,13 +379,14 @@ function NewRequestForm({ onSent }) {
         <div>
           <span className={labelCls}>
             Due date
-            <span className="ml-1 font-normal text-[color:var(--text-3)]">(optional)</span>
+            <span className="ml-0.5 text-[color:var(--danger)]" aria-hidden="true">*</span>
           </span>
           <DatePicker
             value={form.due_date}
             onChange={val => setField('due_date', val)}
             placeholder="dd-mm-yyyy"
           />
+          <FieldError id={ids.dueError}>{errors.due_date}</FieldError>
         </div>
       </fieldset>
 
